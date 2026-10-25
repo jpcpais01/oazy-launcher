@@ -594,6 +594,10 @@ static func scan_epic(manifest_dir: String) -> Array:
 		if not data is Dictionary:
 			continue
 		var item := epic_entry(data)
+		# Manifests can outlive an uninstall; only keep games still on disk.
+		var install := str(data.get("InstallLocation", ""))
+		if install != "" and not DirAccess.dir_exists_absolute(install):
+			continue
 		if not item.is_empty():
 			found.append(item)
 	return found
@@ -612,8 +616,6 @@ static func epic_entry(data: Dictionary) -> Dictionary:
 	var ns := str(data.get("CatalogNamespace", ""))
 	var item_id := str(data.get("CatalogItemId", ""))
 	var install := str(data.get("InstallLocation", "")).replace("\\", "/")
-	if install != "" and OS.get_name() == "Windows" and not DirAccess.dir_exists_absolute(install):
-		return {}
 	var exe := str(data.get("LaunchExecutable", "")).replace("\\", "/")
 	return {
 		"name": str(data.get("DisplayName", app)),
