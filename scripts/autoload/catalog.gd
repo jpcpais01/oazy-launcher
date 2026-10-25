@@ -211,9 +211,19 @@ func search(text: String, limit: int = 24) -> Array[Dictionary]:
 	for e in Library.entries:
 		if e["kind"] == "game":
 			candidates.append(item("lib:" + str(e["id"])))
+	# What you open often floats up among equally good matches.
+	var recent: Array = Settings.get_value("recent_apps")
 	for it in candidates:
 		var s := match_score(str(it["name"]), needle)
 		if s > 0:
+			var ref := str(it["ref"])
+			var at := recent.find(ref)
+			if at >= 0:
+				s += MAX_RECENT - at
+			elif ref.begins_with("lib:"):
+				var played := int(Library.get_entry(ref.substr(4)).get("last_played", 0))
+				if played > 0 and Time.get_unix_time_from_system() - played < 14 * 86400:
+					s += 6
 			scored.append([s, it])
 	scored.sort_custom(func(a: Array, b: Array) -> bool:
 		if a[0] != b[0]:

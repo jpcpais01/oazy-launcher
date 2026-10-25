@@ -136,6 +136,27 @@ func _logic_tests() -> void:
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
 	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")
 
+	# Start's quick answers: sums, addresses, paths and commands.
+	check(QuickAnswers.calc("12*4") == "48", "quick: multiply")
+	check(QuickAnswers.calc("7/2") == "3.5", "quick: real division")
+	check(QuickAnswers.calc("2^10") == "1024", "quick: powers")
+	check(QuickAnswers.calc("(1+2) × 3") == "9", "quick: brackets and ×")
+	check(QuickAnswers.calc("2,5 * 4") == "10", "quick: decimal comma")
+	check(QuickAnswers.calc("sqrt(16)") == "4", "quick: functions")
+	check(QuickAnswers.calc("pow(2, 3)") == "8", "quick: function arguments")
+	check(QuickAnswers.calc("1/0") == "", "quick: no infinity")
+	check(QuickAnswers.calc("chrome") == "" and QuickAnswers.calc("42") == "" and QuickAnswers.calc("OS.kill(1)") == "", "quick: not sums")
+	check(QuickAnswers.as_url("github.com") == "https://github.com", "quick: bare domains")
+	check(QuickAnswers.as_url("localhost:3000/app") == "http://localhost:3000/app", "quick: localhost")
+	check(QuickAnswers.as_url("game.exe") == "" and QuickAnswers.as_url("1.5") == "" and QuickAnswers.as_url("visual studio") == "", "quick: not urls")
+	check(QuickAnswers.as_path(OS.get_user_data_dir()) != "" and QuickAnswers.as_path("C:/Nope/Nothing") == "", "quick: paths that exist")
+	check(QuickAnswers.commands("lock")[0]["ref"] == "cmd:lock" and int(QuickAnswers.commands("lock")[0]["score"]) >= 90, "quick: exact commands")
+	check(QuickAnswers.commands("wifi")[0]["ref"] == "cmd:wifi", "quick: commands by keyword")
+	check(QuickAnswers.commands("zzzz").is_empty(), "quick: no command")
+	Settings.set_value("recent_apps", ["app:" + str(Catalog.find_app_by_name("Steam")["id"])])
+	check(Catalog.search("s")[0]["name"] == "Steam", "catalog: recently opened ranks first")
+	Settings.set_value("recent_apps", [])
+
 
 func _mock_apps() -> Array:
 	return [

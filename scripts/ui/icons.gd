@@ -64,6 +64,16 @@ const SVGS := {
 	"document": "<path d=\"M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z\"/><path d=\"M14 3v5h5M9 13h6M9 17h6\"/>",
 	"music": "<path d=\"M9 18V5l12-2v13\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><circle cx=\"18\" cy=\"16\" r=\"3\"/>",
 	"leaf": "<path d=\"M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.5-4.8 10-10 10Z\"/><path d=\"M2 21c0-3 1.9-5.4 5.2-6.1C9.5 14.5 12 13 13 12\"/>",
+	"wifi": "<path d=\"M12 20h.01\"/><path d=\"M2 8.8a15 15 0 0 1 20 0\"/><path d=\"M5 12.9a10 10 0 0 1 14 0\"/><path d=\"M8.5 16.4a5 5 0 0 1 7 0\"/>",
+	"bluetooth": "<path d=\"m7 7 10 10-5 5V2l5 5L7 17\"/>",
+	"calculator": "<rect x=\"4\" y=\"2\" width=\"16\" height=\"20\" rx=\"2.5\"/><path d=\"M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 18.5h.01M12 18.5h.01M16 18.5h.01\"/>",
+	"volume_low": "<path d=\"M11 5 6 9H2v6h4l5 4z\"/><path d=\"M15.5 8.5a5 5 0 0 1 0 7\"/>",
+	"volume_x": "<path d=\"M11 5 6 9H2v6h4l5 4z\"/><path d=\"m22 9-6 6M16 9l6 6\"/>",
+	"pause": "<rect x=\"6\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\" fill=\"currentColor\"/><rect x=\"14\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\" fill=\"currentColor\"/>",
+	"skip_back": "<path d=\"M19 20 9 12l10-8z\" fill=\"currentColor\"/><path d=\"M5 19V5\"/>",
+	"skip_forward": "<path d=\"m5 4 10 8-10 8z\" fill=\"currentColor\"/><path d=\"M19 5v14\"/>",
+	"calendar": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2.5\"/><path d=\"M16 2v4M8 2v4M3 10h18\"/>",
+	"keyboard": "<rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2.5\"/><path d=\"M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4M7 16h10\"/>",
 	"dot": "<circle cx=\"12\" cy=\"12\" r=\"4\" fill=\"currentColor\"/>",
 }
 

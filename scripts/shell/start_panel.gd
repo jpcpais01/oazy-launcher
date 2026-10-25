@@ -476,8 +476,15 @@ func _on_text(text: String) -> void:
 	for c in _result_list.get_children():
 		c.queue_free()
 	_rows.clear()
-	for it in Catalog.search(q, 12):
-		var r := _row(it)
+	var found: Array[Dictionary] = QuickAnswers.top(q)
+	var cmds := QuickAnswers.commands(q)
+	# An exact command ("lock", "wifi") beats apps; the rest follow them.
+	while not cmds.is_empty() and int(cmds[0]["score"]) >= 90:
+		found.append(cmds.pop_front())
+	found.append_array(Catalog.search(q, 12 - found.size()))
+	found.append_array(cmds)
+	for it in found:
+		var r := _row(it, str(it.get("sub", "")) if QuickAnswers.owns(str(it["ref"])) else "")
 		_result_list.add_child(r)
 		_rows.append(r)
 	var web := _row({"ref": "web:" + q, "name": "Search the web for “%s”" % q, "kind": "oazy", "glyph": "globe"}, "Web")
@@ -522,6 +529,11 @@ func _on_search_key(event: InputEvent) -> void:
 func _launch(ref: String) -> void:
 	if ref.begins_with("web:"):
 		OS.shell_open(WEB_SEARCH + ref.substr(4).uri_encode())
+	elif QuickAnswers.owns(ref):
+		close()
+		QuickAnswers.run(ref, main)
+		Sfx.play(&"select")
+		return
 	else:
 		Catalog.launch(ref)
 		if main and main.taskbar:
@@ -549,6 +561,8 @@ func _open_folder(path: String) -> void:
 
 
 func _show_menu(ref: String, at: Vector2) -> void:
+	if QuickAnswers.owns(ref) or ref.begins_with("web:"):
+		return
 	_menu_ref = ref
 	_menu.clear()
 	_menu.add_icon_item(Icons.tex("play", 18), "Open", 0)
