@@ -43,9 +43,17 @@ func _ready() -> void:
 
 	var you := _section("Your Oazy", "user")
 	_name_row(you)
-	_toggle_row(you, "Open in fullscreen", "Oazy covers the whole screen like a real desktop. F11 switches any time.", "shell_fullscreen", func(on: bool) -> void: main.apply_window_mode(on))
+	if App.is_windows() or Shell.native:
+		_toggle_row(you, "Use Oazy as your desktop", "Apps open on Oazy's desktop, under Oazy's taskbar, so you never leave Oazy. Applies the next time Oazy starts.", "shell_mode", func(_on: bool) -> void:
+			App.toast("Restart Oazy to switch")
+		)
+	if Shell.native:
+		_toggle_row(you, "Hide the Windows taskbar", "Oazy's taskbar takes its place while Oazy is running.", "hide_windows_taskbar")
+		_toggle_row(you, "Match app title bars to Oazy", "Gives other apps' title bars and borders Oazy's colours (Windows 11).", "theme_app_windows")
+	else:
+		_toggle_row(you, "Open in fullscreen", "Oazy covers the whole screen like a real desktop. F11 switches any time.", "shell_fullscreen", func(on: bool) -> void: main.apply_window_mode(on))
 	_toggle_row(you, "Start with Windows", "Sign in and land straight on your Oazy desktop.", "launch_at_startup", func(on: bool) -> void: main.set_autostart(on))
-	var hk := _row(you, "Come back home from anywhere", "Press Ctrl + Alt + O in any app to bring Oazy to the front.")
+	var hk := _row(you, "Open Start from anywhere" if Shell.native else "Come back home from anywhere", "Press Ctrl + Alt + O in any app to open Start." if Shell.native else "Press Ctrl + Alt + O in any app to bring Oazy to the front.")
 	_hotkey_status = Kit.label("", 14, 600, App.TEXT_DIM)
 	_hotkey_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hk.add_child(_hotkey_status)
@@ -210,7 +218,7 @@ func _button_row(list: VBoxContainer, title: String, desc: String, label_text: S
 
 
 func _swatch_row(list: VBoxContainer) -> void:
-	var row := _row(list, "Accent colour", "Tints the Start orb, highlights and the light ribbons in the wallpaper.")
+	var row := _row(list, "Accent colour", "Tints the Start orb, highlights and a soft glow in the wallpaper.")
 	var box := Kit.hbox(10)
 	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(box)

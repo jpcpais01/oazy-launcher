@@ -46,6 +46,12 @@ func _ready() -> void:
 		{"name": "Photos", "id": "Microsoft.Windows.Photos_8wekyb3d8bbwe!App"},
 		{"name": "Microsoft Edge", "id": "MSEdge"},
 	])
+	Catalog.set_favorite("app:Chrome", true)
+	Catalog.set_favorite("lib:" + str(Library.entries[0]["id"]), true)
+	for e in Library.entries:
+		if str(e["name"]) == "Claude Code":
+			Catalog.set_favorite("lib:" + str(e["id"]), true)
+	Catalog.set_favorite("app:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)
 	await _wait(0.7)
 	await shot("00-loading")
 	var main := get_tree().current_scene
@@ -146,8 +152,14 @@ func _close_modals() -> void:
 
 func shot(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	var img := get_viewport().get_texture().get_image()
 	var path := dir.path_join(name + ".png")
+	if Shell.native:
+		# Dev runs with --shell-native: the layers are separate windows, so
+		# grab the whole (composited) X screen instead.
+		OS.execute("import", ["-window", "root", path])
+		print("  saved ", path)
+		return
+	var img := get_viewport().get_texture().get_image()
 	img.save_png(path)
 	print("  saved ", path, " ", img.get_size())
 

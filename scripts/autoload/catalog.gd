@@ -8,6 +8,7 @@ extends Node
 
 signal apps_changed
 signal pins_changed
+signal favorites_changed
 signal icon_ready(key: String)
 
 const CACHE := "user://apps.json"
@@ -361,6 +362,61 @@ func _ensure_default_pins() -> void:
 	Settings.set_value("pins", list)
 	Settings.set_value("pins_initialized", true)
 	pins_changed.emit()
+
+
+# --- Favourites ---------------------------------------------------------------------------
+# Anything you can open can be a favourite. Library entries keep it on the
+# entry itself (the Library's Favourites filter); everything else lives in a
+# Settings list, which also remembers the order they were added in.
+
+func can_favorite(ref: String) -> bool:
+	return ref.begins_with("lib:") or ref.begins_with("app:") or OAZY_APPS.has(ref) or (ref.begins_with("win:") and ref.length() > 4)
+
+
+func is_favorite(ref: String) -> bool:
+	if ref.begins_with("lib:"):
+		return bool(Library.get_entry(ref.substr(4)).get("favorite", false))
+	return Settings.get_value("favorites").has(ref)
+
+
+func set_favorite(ref: String, on: bool) -> void:
+	if not can_favorite(ref):
+		return
+	var list: Array = Settings.get_value("favorites").duplicate()
+	list.erase(ref)
+	if on:
+		list.append(ref)
+	Settings.set_value("favorites", list)
+	if ref.begins_with("lib:"):
+		var id := ref.substr(4)
+		if Library.has_entry(id) and bool(Library.get_entry(id)["favorite"]) != on:
+			Library.toggle_favorite(id)
+	favorites_changed.emit()
+
+
+func toggle_favorite(ref: String) -> bool:
+	var on := not is_favorite(ref)
+	set_favorite(ref, on)
+	return on
+
+
+## Favourites in the order they were added (library favourites from before
+## the list existed come last).
+func favorites() -> Array[String]:
+	var out: Array[String] = []
+	for r in Settings.get_value("favorites"):
+		var ref := str(r)
+		if ref.begins_with("lib:"):
+			if not is_favorite(ref):
+				continue
+		elif ref.begins_with("app:") and apps_loaded and find_app(ref.substr(4)).is_empty():
+			continue
+		out.append(ref)
+	for e in Library.entries:
+		var ref := "lib:" + str(e["id"])
+		if bool(e["favorite"]) and not out.has(ref):
+			out.append(ref)
+	return out
 
 
 # --- Icons ----------------------------------------------------------------------------------

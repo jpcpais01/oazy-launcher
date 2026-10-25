@@ -136,8 +136,8 @@ static func cover_colors(name: String, accent_hex: String = "") -> Array[Color]:
 	var base_h := float(h % 360) / 360.0
 	if accent_hex != "":
 		base_h = Color(accent_hex).h
-	var a := Color.from_hsv(base_h, 0.62, 0.78)
-	var b := Color.from_hsv(fposmod(base_h + 0.12 + float((h / 360) % 10) / 100.0, 1.0), 0.75, 0.42)
+	var a := Color.from_hsv(base_h, 0.42, 0.62)
+	var b := Color.from_hsv(fposmod(base_h + 0.1 + float((h / 360) % 10) / 100.0, 1.0), 0.55, 0.3)
 	return [a, b]
 
 

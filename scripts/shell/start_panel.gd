@@ -6,7 +6,7 @@ extends Control
 signal visibility_changed_to(open: bool)
 
 const W := 800.0
-const H := 640.0
+const H := 700.0
 const COLS := 6
 const WEB_SEARCH := "https://www.google.com/search?q="
 
@@ -18,6 +18,8 @@ var _home: Control
 var _all: Control
 var _results: Control
 var _pinned: GridContainer
+var _favs: GridContainer
+var _fav_title: Label
 var _recent: HBoxContainer
 var _recent_title: Label
 var _all_list: VBoxContainer
@@ -82,10 +84,28 @@ func _ready() -> void:
 		if is_open:
 			_fill_pinned()
 	)
+	Catalog.favorites_changed.connect(func() -> void:
+		if is_open:
+			_fill_pinned()
+	)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		if key == "user_name":
 			_sync_user()
 	)
+	var surface := Shell.surface_of(self)
+	if surface:
+		# Its own layer in shell mode: clicking any other window closes it.
+		surface.focus_exited.connect(func() -> void:
+			# Opening one of Start's own menus can blink focus too; only close
+			# if focus is still elsewhere a moment later.
+			await get_tree().create_timer(0.15).timeout
+			if is_open and not surface.has_focus() and not surface.just_shown(400) and not _menu.visible and not _power.visible:
+				close()
+		)
+
+
+func shell_shape() -> Array[Rect2]:
+	return [get_global_rect().grow(30.0)]
 
 
 # --- Views ------------------------------------------------------------------------------
@@ -96,6 +116,12 @@ func _build_home() -> Control:
 	var left := Kit.vbox(12)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	view.add_child(left)
+	_fav_title = _section_title("Favourites")
+	left.add_child(_fav_title)
+	_favs = GridContainer.new()
+	_favs.columns = COLS
+	_favs.add_theme_constant_override("h_separation", 4)
+	left.add_child(_favs)
 	var head := Kit.hbox(8)
 	left.add_child(head)
 	head.add_child(_section_title("Pinned"))
@@ -305,6 +331,15 @@ func _kind_label(it: Dictionary) -> String:
 # --- Fill -----------------------------------------------------------------------------------
 
 func _fill_pinned() -> void:
+	for c in _favs.get_children():
+		c.queue_free()
+	var favs := Catalog.favorites().slice(0, COLS)
+	_fav_title.visible = not favs.is_empty()
+	_favs.visible = not favs.is_empty()
+	for ref in favs:
+		_favs.add_child(_tile(ref))
+	# Favourites take a row, so Pinned gives one up.
+	var rows := 2 if not favs.is_empty() else 3
 	for c in _pinned.get_children():
 		c.queue_free()
 	var refs: Array[String] = []
@@ -312,14 +347,14 @@ func _fill_pinned() -> void:
 		refs.append(ref)
 	# Pad with recently used apps so Start never looks empty.
 	for ref in Catalog.recent_apps():
-		if refs.size() >= COLS * 3:
+		if refs.size() >= COLS * rows:
 			break
 		if not refs.has(ref):
 			refs.append(ref)
 	for ref in ["oazy:library", "oazy:settings"]:
 		if not refs.has(ref):
 			refs.append(ref)
-	for ref in refs.slice(0, COLS * 3):
+	for ref in refs.slice(0, COLS * rows):
 		_pinned.add_child(_tile(ref))
 
 
@@ -431,6 +466,7 @@ func open(text: String = "") -> void:
 	_tween.tween_property(self, "scale", Vector2.ONE, 0.4)
 	_tween.tween_property(self, "position:y", target_y, 0.4)
 	Sfx.play(&"open")
+	Shell.focus(self)
 	_search.grab_focus()
 	_search.caret_column = _search.text.length()
 	visibility_changed_to.emit(true)
@@ -451,7 +487,7 @@ func close() -> void:
 
 
 func _place_panel() -> void:
-	var vp := get_viewport_rect().size
+	var vp := Shell.view_size()
 	size = Vector2(minf(W, vp.x - 20.0), minf(H, vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 3.0))
 	position = Vector2(Taskbar.MARGIN, vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 2.0 - size.y)
 
@@ -524,6 +560,22 @@ func _on_search_key(event: InputEvent) -> void:
 		_search.accept_event()
 
 
+## Typing that reached another of Oazy's windows while Start is open (shell
+## mode, when Windows kept focus elsewhere) still goes into the search.
+func forward_key(k: InputEventKey) -> void:
+	if k.keycode == KEY_BACKSPACE:
+		if _search.text != "":
+			_search.text = _search.text.substr(0, _search.text.length() - 1)
+			_search.caret_column = _search.text.length()
+			_on_text(_search.text)
+	elif k.unicode >= 32 and not k.ctrl_pressed and not k.alt_pressed:
+		_search.text += char(k.unicode)
+		_search.caret_column = _search.text.length()
+		_on_text(_search.text)
+	else:
+		_on_search_key(k)
+
+
 # --- Actions -----------------------------------------------------------------------------------
 
 func _launch(ref: String) -> void:
@@ -566,13 +618,14 @@ func _show_menu(ref: String, at: Vector2) -> void:
 	_menu_ref = ref
 	_menu.clear()
 	_menu.add_icon_item(Icons.tex("play", 18), "Open", 0)
+	main.add_favorite_item(_menu, ref, 3)
 	var pinned := Catalog.is_pinned(ref)
 	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 1)
 	if ref.begins_with("lib:"):
 		_menu.add_icon_item(Icons.tex("info", 18), "Details", 2)
 	_menu.reset_size()
 	_menu.position = Vector2i(at)
-	_menu.popup()
+	Shell.popup(_menu)
 
 
 func _on_menu(id: int) -> void:
@@ -584,6 +637,8 @@ func _on_menu(id: int) -> void:
 		2:
 			close()
 			main.focus_entry(_menu_ref.substr(4))
+		3:
+			main.toggle_favorite(_menu_ref)
 
 
 func _open_power(btn: Control) -> void:
@@ -597,7 +652,7 @@ func _open_power(btn: Control) -> void:
 	_power.reset_size()
 	var r := btn.get_global_rect()
 	_power.position = Vector2i(int(r.position.x), int(r.position.y - _power.size.y - 8))
-	_power.popup()
+	Shell.popup(_power)
 
 
 func _on_power(id: int) -> void:

@@ -11,6 +11,8 @@ extends Node
 signal windows_changed
 signal hotkey(was_foreground: bool)
 signal status_changed(available: bool)
+## Another app went fullscreen (a game, a video) or came back out of it.
+signal fullscreen_changed(on: bool)
 
 const SOURCE := "res://native/oazy_host.cs"
 const CSC := [
@@ -28,6 +30,8 @@ var foreground := 0
 ## True while Oazy itself is the foreground window.
 var self_foreground := true
 var self_hwnd := 0
+## A fullscreen app is in front: Oazy's taskbar steps aside.
+var fullscreen_app := false
 
 var _pipe: FileAccess
 var _pid := 0
@@ -209,7 +213,19 @@ func _exit_tree() -> void:
 
 
 func shutdown() -> void:
+	if _quitting:
+		return
 	_quitting = true
+	if available and _pipe != null:
+		# Let the companion put the Windows taskbar and work area back, then go.
+		_pipe.store_line("0\tunshell")
+		_pipe.flush()
+		var waited := 0
+		while waited < 600 and _pid > 0 and OS.is_process_running(_pid):
+			OS.delay_msec(50)
+			waited += 50
+			if waited == 150:
+				_pipe.close()
 	if _pid > 0 and OS.is_process_running(_pid):
 		OS.kill(_pid)
 	_pid = 0
@@ -238,6 +254,10 @@ func _apply_windows(d: Dictionary) -> void:
 	windows = list
 	foreground = int(d.get("fg", 0))
 	self_foreground = bool(d.get("self_fg", false)) or not available
+	var fs := bool(d.get("fs", false))
+	if fs != fullscreen_app:
+		fullscreen_app = fs
+		fullscreen_changed.emit(fs)
 	windows_changed.emit()
 
 
@@ -296,10 +316,10 @@ func stats(done: Callable) -> void:
 	request(["stats"], done)
 
 
-## Shows a live DWM preview of `hwnd` inside `rect` (window pixels). `done`
-## gets the fitted rect.
-func thumb(hwnd: int, rect: Rect2i, done: Callable = Callable()) -> void:
-	request(["thumb", hwnd, rect.position.x, rect.position.y, rect.size.x, rect.size.y, 255], done)
+## Shows a live DWM preview of `hwnd` inside `rect` (pixels of the window
+## `dest`, Oazy's main window when 0). `done` gets the fitted rect.
+func thumb(hwnd: int, rect: Rect2i, done: Callable = Callable(), dest: int = 0) -> void:
+	request(["thumb", hwnd, rect.position.x, rect.position.y, rect.size.x, rect.size.y, 255, dest], done)
 
 
 func thumb_clear() -> void:
@@ -312,3 +332,34 @@ func lock_pc() -> void:
 
 func sleep_pc() -> void:
 	request(["sleep"])
+
+
+# --- Shell mode ----------------------------------------------------------------------
+
+## Makes Oazy the desktop: `desktop` stays at the bottom, the work area stops
+## `reserve_px` above the bottom of the screen and the Windows taskbar hides.
+func enter_shell(desktop: int, reserve_px: int, hide_taskbar: bool, done: Callable = Callable()) -> void:
+	request(["shell", desktop, reserve_px, 1 if hide_taskbar else 0], done)
+
+
+func exit_shell() -> void:
+	request(["unshell"])
+
+
+## Window looks for one of Oazy's native windows: "surface", "overlay" or
+## "window". `done` gets {backdrop: bool}.
+func style_window(hwnd: int, kind: String, done: Callable = Callable()) -> void:
+	request(["style", hwnd, kind], done)
+
+
+## Gives other apps' title bars and borders Oazy's colours.
+func theme_apps(on: bool, border: Color, caption: Color, text: Color) -> void:
+	request(["theme", 1 if on else 0, _colorref(border), _colorref(caption), _colorref(text)])
+
+
+func show_desktop() -> void:
+	request(["show_desktop"])
+
+
+static func _colorref(c: Color) -> int:
+	return (int(c.b8) << 16) | (int(c.g8) << 8) | int(c.r8)

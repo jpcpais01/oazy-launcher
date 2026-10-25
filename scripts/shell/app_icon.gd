@@ -1,7 +1,7 @@
 class_name AppIcon
 extends Control
 ## The icon for anything in the Catalog: the app's real icon, a game's cover,
-## or a glossy plate with a glyph or initial when there is no artwork yet.
+## or a soft plate with a glyph or initial when there is no artwork yet.
 
 const PLATE := preload("res://shaders/plate.gdshader")
 
@@ -87,7 +87,7 @@ func refresh() -> void:
 		_cover.setup(str(item.get("entry_id", "")), _radius())
 		return
 	if kind == "oazy":
-		_show_plate(App.accent.lightened(0.15), App.accent.darkened(0.45))
+		_show_plate(App.accent.lightened(0.05), App.accent.darkened(0.4))
 		_show_glyph(str(item.get("glyph", "grid")))
 		return
 	var tex := Catalog.icon(_key) if _key != "" else null
@@ -102,7 +102,7 @@ func refresh() -> void:
 		return
 	var h := absi(name.hash())
 	var base := float(h % 360) / 360.0
-	_show_plate(Color.from_hsv(base, 0.5, 0.9), Color.from_hsv(fposmod(base + 0.08, 1.0), 0.7, 0.5))
+	_show_plate(Color.from_hsv(base, 0.34, 0.74), Color.from_hsv(fposmod(base + 0.06, 1.0), 0.46, 0.44))
 	_letter.text = Fmt.initials(name).substr(0, 1) if name != "" else "?"
 	_letter.visible = true
 

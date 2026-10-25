@@ -4,14 +4,16 @@ extends Control
 ## on top of the glass. `isolate` grabs a fresh copy of the screen first, so the
 ## panel also blurs other glass and windows underneath it (used by windows, the
 ## taskbar and popups; desktop widgets share the first copy and skip it).
+## In shell mode, panels on Oazy's layers draw the wallpaper behind them
+## instead, since each layer is its own window.
 
 const SHADER := preload("res://shaders/glass.gdshader")
 
-## Tints for the common surfaces.
-const TINT_WINDOW := Color(0.035, 0.085, 0.11, 0.7)
-const TINT_BAR := Color(0.03, 0.08, 0.1, 0.42)
-const TINT_POPUP := Color(0.035, 0.085, 0.11, 0.62)
-const TINT_WIDGET := Color(0.03, 0.08, 0.1, 0.38)
+## Tints for the common surfaces: a cool, nearly neutral smoke.
+const TINT_WINDOW := Color(0.055, 0.065, 0.085, 0.66)
+const TINT_BAR := Color(0.05, 0.06, 0.08, 0.4)
+const TINT_POPUP := Color(0.055, 0.065, 0.085, 0.58)
+const TINT_WIDGET := Color(0.05, 0.06, 0.08, 0.3)
 
 var radius := 22.0: set = set_radius
 var tint := TINT_WIDGET: set = set_tint
@@ -20,6 +22,7 @@ var mat: ShaderMaterial
 var _copy: BackBufferCopy
 var _rect: ColorRect
 var _shadow: Panel
+var _mirror := false
 
 
 func _init(isolate: bool = false, r: float = 22.0, t: Color = TINT_WIDGET, shadow: bool = true) -> void:
@@ -50,6 +53,10 @@ func _init(isolate: bool = false, r: float = 22.0, t: Color = TINT_WIDGET, shado
 
 
 func _ready() -> void:
+	_mirror = Shell.surface_of(self) != null
+	if _mirror and _copy:
+		_copy.copy_mode = BackBufferCopy.COPY_MODE_DISABLED
+	apply_effects()
 	_sync()
 
 
@@ -84,7 +91,12 @@ func set_shadow_strength(a: float, spread: int = 34, offset_y: float = 14.0) -> 
 ## Eco mode skips the screen blur and uses a more solid tint.
 func apply_effects() -> void:
 	var eco: bool = Settings.get_value("effects") == "eco"
-	mat.set_shader_parameter("use_screen", 0.0 if eco else 1.0)
+	if _mirror:
+		mat.set_shader_parameter("source", 2)
+		sync_wall()
+		mat.set_shader_parameter("tint", tint)
+		return
+	mat.set_shader_parameter("source", 0 if eco else 1)
 	if eco:
 		var solid := tint
 		solid.a = 1.0
@@ -104,6 +116,15 @@ func _sync_shadow() -> void:
 	elif _shadow:
 		var s: StyleBoxFlat = _shadow.get_theme_stylebox("panel")
 		s.set_corner_radius_all(int(radius))
+
+
+## Copies the wallpaper's look, for panels that draw it themselves.
+func sync_wall() -> void:
+	if not _mirror:
+		return
+	for k in Wallpaper.shared:
+		mat.set_shader_parameter(k, Wallpaper.shared[k])
+	mat.set_shader_parameter("screen_px", Vector2(Shell.screen_px))
 
 
 static func refresh_all(tree: SceneTree) -> void:

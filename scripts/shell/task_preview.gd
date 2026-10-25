@@ -35,6 +35,10 @@ func _ready() -> void:
 	)
 
 
+func shell_shape() -> Array[Rect2]:
+	return [get_global_rect().grow(16.0)]
+
+
 func is_showing() -> bool:
 	return visible and modulate.a > 0.01
 
@@ -70,7 +74,7 @@ func show_for(btn: TaskbarButton) -> void:
 	_content.reset_size()
 	size = _content.size + Vector2(20, 20)
 	var center := btn.get_global_rect().get_center()
-	var vp := get_viewport_rect().size
+	var vp := Shell.view_size()
 	var top := btn.get_global_rect().position.y - 14.0 - size.y
 	position = Vector2(clampf(center.x - size.x / 2.0, 10.0, vp.x - size.x - 10.0), top)
 	pivot_offset = Vector2(center.x - position.x, size.y)
@@ -205,5 +209,5 @@ func _show_thumbs() -> void:
 		var origin := xf.origin
 		var span := xf.basis_xform(slot.size)
 		var r := Rect2i(Vector2i(origin.round()), Vector2i(span.round())).grow(-4)
-		Host.thumb(int(s[1]), r)
+		Host.thumb(int(s[1]), r, Callable(), Shell.hwnd_of(self))
 		_thumbs_on = true

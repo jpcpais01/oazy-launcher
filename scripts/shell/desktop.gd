@@ -1,8 +1,8 @@
 class_name Desktop
 extends Control
-## What's on the desktop behind your windows: the clock and a greeting, a
-## "Continue playing" card with the last game's artwork, recently played
-## covers, and a small system glance (CPU, memory, battery).
+## What's on the desktop behind your windows: the clock and a greeting, your
+## favourites, a "Continue playing" card with the last game's artwork,
+## recently played covers, and a small system glance (CPU, memory, battery).
 
 const LEFT := 64.0
 const TOP := 52.0
@@ -24,6 +24,8 @@ var _empty_box: VBoxContainer
 var _recent_title: Label
 var _recent: HBoxContainer
 var _system: GlassPanel
+var _favs_glass: GlassPanel
+var _favs: GridContainer
 var _cpu: Array = []
 var _mem: Array = []
 var _hero_id := ""
@@ -36,6 +38,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_clock()
 	_build_hero()
+	_build_favorites()
 	_build_system()
 
 	var tick := Timer.new()
@@ -50,6 +53,8 @@ func _ready() -> void:
 	add_child(_stats_timer)
 
 	Library.changed.connect(refresh)
+	Catalog.favorites_changed.connect(_fill_favorites)
+	Catalog.apps_changed.connect(_fill_favorites)
 	Library.entry_changed.connect(func(id: String) -> void:
 		if id == _hero_id:
 			_show_hero(id)
@@ -215,6 +220,7 @@ func _build_hero() -> void:
 
 
 func refresh() -> void:
+	_fill_favorites()
 	var games: Array[Dictionary] = []
 	for e in Library.recent():
 		if e["kind"] == "game":
@@ -311,6 +317,82 @@ func _recent_tile(id: String) -> Control:
 	return holder
 
 
+# --- Favourites -----------------------------------------------------------------------------
+
+const FAV_COLS := 4
+const FAV_MAX := 8
+
+
+func _build_favorites() -> void:
+	_favs_glass = GlassPanel.new(false, 22.0, GlassPanel.TINT_WIDGET)
+	_favs_glass.set_shadow_strength(0.3, 30, 12.0)
+	_favs_glass.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_favs_glass)
+	var col := Kit.vbox(10)
+	col.position = Vector2(18, 16)
+	_favs_glass.add_child(col)
+	var head := Kit.hbox(8)
+	head.add_child(Kit.icon_rect("heart_fill", 15, Color(1, 1, 1, 0.6)))
+	head.add_child(Kit.label("Favourites", 15, 600, App.TEXT_DIM))
+	col.add_child(head)
+	_favs = GridContainer.new()
+	_favs.columns = FAV_COLS
+	_favs.add_theme_constant_override("h_separation", 4)
+	_favs.add_theme_constant_override("v_separation", 4)
+	col.add_child(_favs)
+
+
+func _fill_favorites() -> void:
+	if _favs == null:
+		return
+	for c in _favs.get_children():
+		_favs.remove_child(c)
+		c.queue_free()
+	var refs := Catalog.favorites().slice(0, FAV_MAX)
+	_favs_glass.visible = not refs.is_empty()
+	for ref in refs:
+		_favs.add_child(_fav_tile(ref))
+	_layout()
+
+
+func _fav_tile(ref: String) -> Control:
+	var it := Catalog.item(ref)
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(86, 92)
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.tooltip_text = str(it["name"])
+	b.add_theme_stylebox_override("normal", Kit.empty())
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.09), 14, Color(1, 1, 1, 0.08), 1))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.14), 14))
+	var c := Kit.vbox(7)
+	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	c.alignment = BoxContainer.ALIGNMENT_CENTER
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(c)
+	var ic := AppIcon.new()
+	ic.custom_minimum_size = Vector2(44, 44)
+	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ic.set_item(it)
+	c.add_child(ic)
+	var l := Kit.label(str(it["name"]), 12, 500, App.TEXT)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.custom_minimum_size.x = 80
+	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	c.add_child(l)
+	b.pressed.connect(func() -> void:
+		Sfx.play(&"select")
+		Catalog.launch(ref)
+	)
+	b.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_RIGHT:
+			main.show_ref_menu(ref, b.get_global_mouse_position())
+	)
+	return b
+
+
 # --- System glance -------------------------------------------------------------------------
 
 func _build_system() -> void:
@@ -384,7 +466,7 @@ func show_mock_stats(cpu: float, mem: float) -> void:
 
 
 func _poll_stats() -> void:
-	if not Host.available or not is_visible_in_tree() or not Host.self_foreground:
+	if not Host.available or not is_visible_in_tree() or not (Host.self_foreground or (Shell.native and not Host.fullscreen_app)):
 		return
 	Host.stats(func(d: Dictionary) -> void:
 		if not d.get("ok", false):
@@ -410,12 +492,16 @@ func _layout() -> void:
 	_hero_glass.size = Vector2(hero_w, hero_h)
 	_recent_title.position = Vector2(w - LEFT - hero_w + 4.0, TOP + 8.0 + hero_h + 22.0)
 	_recent.position = Vector2(w - LEFT - hero_w, _recent_title.position.y + 30.0)
+	if _favs_glass.visible:
+		var inner := _favs.get_combined_minimum_size()
+		_favs_glass.position = Vector2(LEFT, TOP + 236.0)
+		_favs_glass.size = Vector2(inner.x + 36.0, inner.y + 16.0 + 30.0 + 18.0)
 	_system.size = Vector2(340, 118)
 	_system.position = Vector2(LEFT, size.y - Taskbar.HEIGHT - Taskbar.MARGIN * 2.0 - 30.0 - _system.size.y)
 
 
 func intro() -> void:
-	var items: Array[Control] = [_greeting, _time, _date, _hero_glass, _recent_title, _recent, _system]
+	var items: Array[Control] = [_greeting, _time, _date, _favs_glass, _hero_glass, _recent_title, _recent, _system]
 	for i in items.size():
 		var c := items[i]
 		var y := c.position.y

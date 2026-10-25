@@ -2,6 +2,9 @@ extends Control
 ## Root of Oazy, a desktop shell: wallpaper, desktop widgets, Oazy's own
 ## windows, the taskbar, Start and every overlay. Also owns the window mode,
 ## launching, context menus and keyboard shortcuts.
+##
+## The main window is the desktop itself; everything above it lives in layers
+## (see Shell), which are separate OS windows when Oazy is your desktop.
 
 const GRIP := 6.0
 const APP_TITLES := {&"library": "Library", &"settings": "Settings"}
@@ -21,9 +24,12 @@ var _chrome: Control
 var _max_btn: FxButton
 var _menu: PopupMenu
 var _menu_id := ""
+var _menu_ref := ""
 var _desk_menu: PopupMenu
 var _grips: Array[Control] = []
 var _launching := false
+var _peeked: Array[ShellWindow] = []
+var _menus: Control
 
 
 func _ready() -> void:
@@ -31,7 +37,9 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	App.set_accent(Color(str(Settings.get_value("accent"))))
+	Shell.setup(self, Shell.wanted(), Taskbar.HEIGHT + Taskbar.MARGIN * 2.0)
 	_setup_window()
+	Shell.sync_metrics()
 
 	wallpaper = Wallpaper.new()
 	add_child(wallpaper)
@@ -41,18 +49,19 @@ func _ready() -> void:
 	layer = WindowLayer.new()
 	layer.main = self
 	layer.reserved_bottom = Taskbar.HEIGHT + Taskbar.MARGIN * 2.0 + 4.0
-	add_child(layer)
+	Shell.layer("apps", {"focus": true, "work": true}).add_child(layer)
 	preview = TaskPreview.new()
 	preview.main = self
 	taskbar = Taskbar.new()
 	taskbar.main = self
 	taskbar.layer = layer
 	taskbar.preview = preview
-	add_child(taskbar)
-	add_child(preview)
+	var bar := Shell.layer("bar", {"top": true})
+	bar.add_child(taskbar)
+	bar.add_child(preview)
 	start = StartPanel.new()
 	start.main = self
-	add_child(start)
+	Shell.layer("start", {"top": true, "focus": true, "work": true}).add_child(start)
 	taskbar.start_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
@@ -61,22 +70,26 @@ func _ready() -> void:
 			preview.hide_preview()
 	)
 
-	overlay_layer = Control.new()
-	overlay_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(overlay_layer)
+	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})
+	overlay_layer = OverlayLayer.new()
+	_menus.add_child(overlay_layer)
 	toasts = Toasts.new()
-	add_child(toasts)
+	Shell.layer("toasts", {"top": true}).add_child(toasts)
 
+	# Menus share the dialog layer so they open above other apps too.
 	_menu = PopupMenu.new()
 	_menu.id_pressed.connect(_on_menu)
-	add_child(_menu)
+	_menus.add_child(_menu)
 	_desk_menu = PopupMenu.new()
 	_desk_menu.id_pressed.connect(_on_desk_menu)
-	add_child(_desk_menu)
+	_menus.add_child(_desk_menu)
 
-	_build_window_chrome()
-	_add_resize_grips()
+	if not Shell.native:
+		_build_window_chrome()
+		_add_resize_grips()
+	else:
+		# The taskbar slides in once Oazy has loaded.
+		Shell.set_layer_visible("bar", false)
 
 	App.toast_requested.connect(func(text: String, kind: StringName) -> void: toasts.show_toast(text, kind))
 	App.open_page.connect(func(page: StringName) -> void: open_app(page))
@@ -85,8 +98,21 @@ func _ready() -> void:
 	Updater.state_changed.connect(_on_update_state)
 	Host.hotkey.connect(_on_hotkey)
 	Host.status_changed.connect(_on_host_status)
+	Host.fullscreen_changed.connect(_on_fullscreen_app)
+	Settings.changed.connect(_on_setting)
 	get_window().files_dropped.connect(_on_files_dropped)
 	get_window().size_changed.connect(_sync_window_ui)
+	get_window().size_changed.connect(Shell.sync_metrics)
+	if Shell.native:
+		get_tree().auto_accept_quit = false
+		# Start closes when you go anywhere else, even if Windows never let
+		# it take focus in the first place.
+		get_window().focus_entered.connect(_close_start_elsewhere)
+		Shell.surface_of(layer).focus_entered.connect(_close_start_elsewhere)
+		Host.windows_changed.connect(func() -> void:
+			if not Host.self_foreground:
+				_close_start_elsewhere()
+		)
 	get_window().focus_entered.connect(func() -> void:
 		if not Host.available:
 			Host.self_foreground = true
@@ -109,6 +135,15 @@ func _ready() -> void:
 func _setup_window() -> void:
 	var w := get_window()
 	w.min_size = Vector2i(1100, 680)
+	if Shell.native:
+		# The desktop: the whole primary screen, under every other window.
+		var scr := DisplayServer.get_primary_screen()
+		w.mode = Window.MODE_WINDOWED
+		w.borderless = true
+		w.current_screen = scr
+		w.position = DisplayServer.screen_get_position(scr)
+		w.size = DisplayServer.screen_get_size(scr)
+		return
 	if App.smoke_test:
 		return
 	var usable := DisplayServer.screen_get_usable_rect(w.current_screen)
@@ -128,7 +163,7 @@ func _setup_window() -> void:
 
 
 func apply_window_mode(fullscreen: bool) -> void:
-	if App.smoke_test:
+	if App.smoke_test or Shell.native:
 		return
 	var w := get_window()
 	if fullscreen:
@@ -141,6 +176,8 @@ func apply_window_mode(fullscreen: bool) -> void:
 
 
 func toggle_fullscreen() -> void:
+	if Shell.native:
+		return
 	var full := get_window().mode != Window.MODE_FULLSCREEN
 	Settings.set_value("shell_fullscreen", full)
 	apply_window_mode(full)
@@ -210,7 +247,7 @@ func _add_resize_grips() -> void:
 
 
 func _sync_window_ui() -> void:
-	var windowed := get_window().mode == Window.MODE_WINDOWED and not App.smoke_test
+	var windowed := get_window().mode == Window.MODE_WINDOWED and not App.smoke_test and not Shell.native
 	for g in _grips:
 		g.visible = windowed
 	if _chrome:
@@ -219,7 +256,7 @@ func _sync_window_ui() -> void:
 
 func _exit_tree() -> void:
 	var w := get_window()
-	if w and w.mode == Window.MODE_WINDOWED and not App.smoke_test:
+	if w and w.mode == Window.MODE_WINDOWED and not App.smoke_test and not Shell.native:
 		Settings.set_value("window_rect", [w.position.x, w.position.y, w.size.x, w.size.y])
 	Settings.save()
 
@@ -254,24 +291,43 @@ func open_app(name: StringName) -> ShellWindow:
 			st.main = self
 			content = st
 	win.body.add_child(content)
-	if not Host.self_foreground:
-		Host.go_home()
+	_bring_windows_forward()
 	return win
 
 
 func focus_shell_window(win: ShellWindow) -> void:
-	if not Host.self_foreground:
-		Host.go_home()
+	_bring_windows_forward()
 	layer.activate(win)
 
 
 func toggle_shell_window(win: ShellWindow) -> void:
 	if win.minimized:
 		focus_shell_window(win)
-	elif win.active and Host.self_foreground:
+	elif win.active and windows_in_front():
 		win.minimize()
 	else:
 		focus_shell_window(win)
+
+
+func _close_start_elsewhere() -> void:
+	var s := Shell.surface_of(start)
+	if start.is_open and s and not s.just_shown(400) and not s.has_focus():
+		start.close()
+
+
+## Oazy's own windows are what you're using right now.
+func windows_in_front() -> bool:
+	var s := Shell.surface_of(layer)
+	if s:
+		return s.has_focus()
+	return Host.self_foreground
+
+
+func _bring_windows_forward() -> void:
+	if Shell.native:
+		Shell.focus(layer)
+	elif not Host.self_foreground:
+		Host.go_home()
 
 
 func focus_entry(id: String) -> void:
@@ -283,6 +339,24 @@ func focus_entry(id: String) -> void:
 
 func show_desktop() -> void:
 	start.close()
+	if Shell.native:
+		# Every window steps aside (Oazy's and other apps'), and the next
+		# click brings them back.
+		var open: Array[ShellWindow] = []
+		for w in layer.windows():
+			if not w.minimized:
+				open.append(w)
+		if not open.is_empty():
+			_peeked = open
+			for w in open:
+				w.minimize()
+		else:
+			for w in _peeked:
+				if is_instance_valid(w):
+					w.unminimize()
+			_peeked.clear()
+		Host.show_desktop()
+		return
 	var any_open := false
 	for w in layer.windows():
 		if not w.minimized:
@@ -433,10 +507,11 @@ func show_entry_menu(id: String, at: Vector2) -> void:
 	if e.is_empty():
 		return
 	_menu_id = id
+	_menu_ref = ""
 	_menu.clear()
 	var is_game: bool = e["kind"] == "game"
 	_menu.add_icon_item(Icons.tex("play", 18), "Play" if is_game else "Open", 0)
-	_menu.add_icon_item(Icons.tex("heart_fill" if e["favorite"] else "heart", 18), "Remove from favourites" if e["favorite"] else "Add to favourites", 1)
+	add_favorite_item(_menu, "lib:" + id, 1)
 	var pinned := Catalog.is_pinned("lib:" + id)
 	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 5)
 	_menu.add_separator()
@@ -446,17 +521,35 @@ func show_entry_menu(id: String, at: Vector2) -> void:
 		_menu.add_icon_item(Icons.tex("folder", 18), "Show in folder", 3)
 	_menu.add_separator()
 	_menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from library", 4)
-	_menu.reset_size()
-	var pos := Vector2i(at)
-	var vp := get_viewport_rect().size
-	pos.x = mini(pos.x, int(vp.x) - _menu.size.x - 8)
-	pos.y = mini(pos.y, int(vp.y) - _menu.size.y - 8)
-	_menu.position = pos
-	_menu.popup()
+	popup_menu(_menu, at)
 	Sfx.play(&"open")
 
 
+## Opens one of the shared menus at `at` (any layer's coordinates: they all
+## match), kept on screen and above the taskbar.
+func popup_menu(menu: PopupMenu, at: Vector2) -> void:
+	menu.reset_size()
+	var vp := Shell.view_size()
+	if Shell.native:
+		vp.y -= Shell.reserve
+	var pos := Vector2i(at)
+	pos.x = clampi(pos.x, 8, int(vp.x) - menu.size.x - 8)
+	pos.y = clampi(pos.y, 8, int(vp.y) - menu.size.y - 8)
+	menu.position = pos
+	Shell.popup(menu)
+
+
 func _on_menu(item: int) -> void:
+	if item >= 10:
+		var ref := _menu_ref
+		match item:
+			10:
+				Catalog.launch(ref)
+			11:
+				toggle_favorite(ref)
+			12:
+				Catalog.set_pinned(ref, not Catalog.is_pinned(ref))
+		return
 	var id := _menu_id
 	var e := Library.get_entry(id)
 	if e.is_empty():
@@ -465,7 +558,7 @@ func _on_menu(item: int) -> void:
 		0:
 			launch(id)
 		1:
-			Library.toggle_favorite(id)
+			toggle_favorite("lib:" + id)
 		2:
 			open_edit(id)
 		3:
@@ -476,16 +569,46 @@ func _on_menu(item: int) -> void:
 			Catalog.set_pinned("lib:" + id, not Catalog.is_pinned("lib:" + id))
 
 
+## The menu for anything else you can open (installed apps, Oazy's apps).
+func show_ref_menu(ref: String, at: Vector2) -> void:
+	if ref.begins_with("lib:"):
+		show_entry_menu(ref.substr(4), at)
+		return
+	_menu_id = ""
+	_menu_ref = ref
+	_menu.clear()
+	_menu.add_icon_item(Icons.tex("play", 18), "Open", 10)
+	add_favorite_item(_menu, ref, 11)
+	var pinned := Catalog.is_pinned(ref)
+	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 12)
+	popup_menu(_menu, at)
+	Sfx.play(&"open")
+
+
+## Adds "Add to favourites" or "Remove from favourites" for `ref`, if it can
+## be one. Shared by every right-click menu.
+static func add_favorite_item(menu: PopupMenu, ref: String, id: int) -> void:
+	if not Catalog.can_favorite(ref):
+		return
+	var fav := Catalog.is_favorite(ref)
+	menu.add_icon_item(Icons.tex("heart_fill" if fav else "heart", 18), "Remove from favourites" if fav else "Add to favourites", id)
+
+
+func toggle_favorite(ref: String) -> void:
+	var on := Catalog.toggle_favorite(ref)
+	var name := str(Catalog.item(ref).get("name", ""))
+	App.toast(("Added %s to favourites" if on else "Removed %s from favourites") % name, &"success" if on else &"info")
+
+
 func _show_desktop_menu(at: Vector2) -> void:
 	_desk_menu.clear()
 	_desk_menu.add_icon_item(Icons.tex("plus", 18), "Add a game or app", 0)
 	_desk_menu.add_icon_item(Icons.tex("grid", 18), "Open Library", 1)
 	_desk_menu.add_separator()
 	_desk_menu.add_icon_item(Icons.tex("palette", 18), "Personalise", 2)
-	_desk_menu.add_icon_item(Icons.tex("desktop", 18), "Fullscreen" if get_window().mode != Window.MODE_FULLSCREEN else "Run in a window", 3)
-	_desk_menu.reset_size()
-	_desk_menu.position = Vector2i(at)
-	_desk_menu.popup()
+	if not Shell.native:
+		_desk_menu.add_icon_item(Icons.tex("desktop", 18), "Fullscreen" if get_window().mode != Window.MODE_FULLSCREEN else "Run in a window", 3)
+	popup_menu(_desk_menu, at)
 	Sfx.play(&"open")
 
 
@@ -505,6 +628,7 @@ func _on_desk_menu(item: int) -> void:
 
 func _on_loaded() -> void:
 	loaded = true
+	Shell.set_layer_visible("bar", not Host.fullscreen_app)
 	desktop.intro()
 	taskbar.intro()
 	Sfx.play(&"open", 0.8)
@@ -526,7 +650,7 @@ func _post_update_welcome() -> void:
 		var d2 := NotesDialog.new()
 		d2.title = "Welcome home"
 		d2.subtitle = "Oazy is now your desktop. Here's the quick tour."
-		d2.markdown = "### Your PC, one calm place\n- **Start** (the orb, bottom left) opens anything: apps, games, folders and the web. Or just start typing on the desktop.\n- **The taskbar** shows everything that's open, Chrome, Claude Code, your games, with live previews when you hover.\n- **Press Ctrl + Alt + O** in any app to come straight back here.\n- Drag windows by the top, to the top edge to maximise, or to a side to snap. Right-click anything for more."
+		d2.markdown = "### Your PC, one calm place\n- **Start** (the orb, bottom left) opens anything: apps, games, folders and the web. Or just start typing on the desktop.\n- **The taskbar** shows everything that's open, Chrome, Claude Code, your games, with live previews when you hover.\n- **Press Ctrl + Alt + O** in any app to open Start.\n- **Right-click** any app or game to add it to your favourites. They live on your desktop and at the top of Start."
 		overlay_layer.add_child(d2)
 	elif last != "" and last != App.version:
 		toasts.show_toast("Updated to Oazy %s" % App.version, &"update", show_patch_notes)
@@ -549,15 +673,52 @@ func _on_update_state(state: StringName) -> void:
 
 
 func _on_hotkey(was_foreground: bool) -> void:
-	if was_foreground:
+	if was_foreground or Shell.native:
+		# In shell mode Oazy never left: the hotkey just opens Start.
 		start.toggle()
 	else:
 		Sfx.play(&"open", 1.1)
 
 
 func _on_host_status(ok: bool) -> void:
+	if ok and Shell.native:
+		_enter_shell()
 	if not ok and Host.failed and loaded and App.is_windows():
 		App.toast("Oazy couldn't connect to Windows, so open apps won't show on the taskbar", &"error")
+
+
+## Makes Oazy the desktop: Windows' own taskbar and desktop step aside and
+## maximised apps stop above Oazy's taskbar.
+func _enter_shell() -> void:
+	var reserve := int(round(Shell.reserve * Shell.scale))
+	Host.enter_shell(Host.self_hwnd, reserve, bool(Settings.get_value("hide_windows_taskbar")))
+	_theme_apps()
+
+
+func _theme_apps() -> void:
+	Host.theme_apps(bool(Settings.get_value("theme_app_windows")), App.accent.darkened(0.35), Color("0e1218"), App.TEXT)
+
+
+func _on_setting(key: String, _value: Variant) -> void:
+	if not Shell.native or not Host.available:
+		return
+	match key:
+		"hide_windows_taskbar":
+			Host.exit_shell()
+			_enter_shell()
+		"theme_app_windows", "accent":
+			_theme_apps()
+
+
+func _on_fullscreen_app(on: bool) -> void:
+	# A game or video took the whole screen: get out of its way.
+	if on:
+		start.close()
+		preview.hide_preview()
+	if loaded:
+		Shell.set_layer_visible("bar", not on)
+	Shell.set_layer_visible("toasts", not on)
+	App.refresh_fps()
 
 
 func _on_files_dropped(files: PackedStringArray) -> void:
@@ -574,6 +735,9 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 
 func _input(event: InputEvent) -> void:
 	# Clicking a window raises it; clicking the bare desktop deactivates them.
+	# (In shell mode Oazy's windows have their own layer and handle this.)
+	if Shell.native:
+		return
 	if event is InputEventMouseButton and event.pressed and loaded and not modal_open():
 		var pos: Vector2 = event.position
 		if taskbar.get_global_rect().has_point(pos) or (start.is_open and start.get_global_rect().has_point(pos)) or (preview.visible and preview.get_global_rect().has_point(pos)):
@@ -586,30 +750,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_show_desktop_menu(event.position)
 		get_viewport().set_input_as_handled()
 		return
-	if event is InputEventKey and event.pressed and not event.echo:
-		var k: InputEventKey = event
-		if k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed):
-			toggle_fullscreen()
-		elif modal_open():
-			return
-		elif k.keycode == KEY_F and k.ctrl_pressed:
-			start.open()
-		elif k.keycode == KEY_L and k.ctrl_pressed:
-			open_app(&"library")
-		elif k.keycode == KEY_N and k.ctrl_pressed:
-			open_add({})
-		elif k.keycode == KEY_COMMA and k.ctrl_pressed:
-			open_app(&"settings")
-		elif k.keycode == KEY_W and k.ctrl_pressed and layer.active_window():
-			layer.active_window().close()
-		elif k.keycode == KEY_ESCAPE and layer.active_window():
-			layer.active_window().minimize()
-		elif k.unicode > 32 and not k.ctrl_pressed and not k.alt_pressed and get_viewport().gui_get_focus_owner() == null and layer.active_window() == null:
-			# Type on the desktop to search, like Start.
-			start.open(char(k.unicode))
-		else:
-			return
-		get_viewport().set_input_as_handled()
+	if event is InputEventKey:
+		if handle_key(event):
+			get_viewport().set_input_as_handled()
 	elif event is InputEventJoypadButton and event.pressed and not modal_open():
 		var j: InputEventJoypadButton = event
 		if j.button_index == JOY_BUTTON_START or j.button_index == JOY_BUTTON_GUIDE:
@@ -619,3 +762,65 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			return
 		get_viewport().set_input_as_handled()
+
+
+## Oazy's keyboard shortcuts, from whichever layer has focus. True if used.
+func handle_key(event: InputEvent, from: Window = null) -> bool:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return false
+	var k: InputEventKey = event
+	var win := layer.active_window()
+	if Shell.native and start.is_open and not modal_open() and from != Shell.surface_of(start):
+		start.forward_key(k)
+		return true
+	if k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed):
+		toggle_fullscreen()
+	elif modal_open():
+		return false
+	elif k.keycode == KEY_F and k.ctrl_pressed:
+		start.open()
+	elif k.keycode == KEY_L and k.ctrl_pressed:
+		open_app(&"library")
+	elif k.keycode == KEY_N and k.ctrl_pressed:
+		open_add({})
+	elif k.keycode == KEY_COMMA and k.ctrl_pressed:
+		open_app(&"settings")
+	elif k.keycode == KEY_W and k.ctrl_pressed and win:
+		win.close()
+	elif k.keycode == KEY_ESCAPE and win:
+		win.minimize()
+	elif k.unicode > 32 and not k.ctrl_pressed and not k.alt_pressed and get_viewport().gui_get_focus_owner() == null and (win == null or (Shell.native and not windows_in_front())):
+		# Type on the desktop to search, like Start.
+		start.open(char(k.unicode))
+	else:
+		return false
+	return true
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and Shell.native:
+		# Alt+F4 on the desktop: ask before taking the desktop away.
+		_confirm_quit()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		if Shell.native and not Host.available and loaded:
+			# Without the companion other apps can't make room for the taskbar,
+			# so it only shows while Oazy is in use.
+			Shell.set_layer_visible("bar", what == NOTIFICATION_APPLICATION_FOCUS_IN)
+
+
+func _confirm_quit() -> void:
+	for c in overlay_layer.get_children():
+		if c is ConfirmDialog:
+			return
+	var d := ConfirmDialog.new()
+	d.title = "Close Oazy?"
+	d.message = "Your apps stay open, and the Windows taskbar and desktop come back."
+	d.confirm_text = "Close Oazy"
+	d.on_confirm = quit
+	overlay_layer.add_child(d)
+
+
+func _process(_delta: float) -> void:
+	# The desktop never minimises (Win+D, Win+M).
+	if Shell.native and get_window().mode == Window.MODE_MINIMIZED:
+		get_window().mode = Window.MODE_WINDOWED
