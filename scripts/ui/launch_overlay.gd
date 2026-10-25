@@ -25,7 +25,7 @@ func setup(id: String) -> LaunchOverlay:
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	add_to_group("modal")
 	var e := Library.get_entry(entry_id)
@@ -33,12 +33,12 @@ func _ready() -> void:
 
 	_dim = ColorRect.new()
 	_dim.color = Color(0.015, 0.015, 0.03, 0.9)
-	_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_dim)
 
 	_hero = TextureRect.new()
-	_hero.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hero.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hero.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_hero.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	_hero.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -51,7 +51,7 @@ func _ready() -> void:
 	add_child(_hero)
 
 	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(center)
 	var col := Kit.vbox(18)

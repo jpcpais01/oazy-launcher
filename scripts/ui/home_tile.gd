@@ -30,16 +30,16 @@ func _ready() -> void:
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	if is_special():
 		_special = Panel.new()
-		_special.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_special.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_special.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(_special)
 		var icon := Kit.icon_rect("plus" if entry_id == "__add" else "grid", 34, Color(1, 1, 1, 0.9))
-		icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_special.add_child(icon)
 		_style_special()
 	else:
 		cover = CoverArt.new()
-		cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+		cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		add_child(cover)
 		cover.setup(entry_id, 18.0)
 	resized.connect(func() -> void: pivot_offset = size / 2.0)

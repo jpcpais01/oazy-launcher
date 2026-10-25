@@ -57,7 +57,7 @@ func _focus_first() -> void:
 
 func _build_notes() -> Control:
 	var view := Kit.hbox(36)
-	view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var left := Kit.vbox(14)
 	left.custom_minimum_size.x = 300
 	view.add_child(left)
@@ -73,7 +73,7 @@ func _build_notes() -> Control:
 	m.set_shader_parameter("color_b", App.accent_pair(App.accent))
 	m.set_shader_parameter("thickness", 0.06)
 	halo.material = m
-	halo.set_anchors_preset(Control.PRESET_FULL_RECT)
+	halo.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	art.add_child(halo)
 	var logo := TextureRect.new()
 	logo.texture = load("res://assets/icon.png")
@@ -134,7 +134,7 @@ func _build_notes() -> Control:
 
 func _build_progress() -> Control:
 	var view := Kit.vbox(16)
-	view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.alignment = BoxContainer.ALIGNMENT_CENTER
 	view.visible = false
 
@@ -150,15 +150,15 @@ func _build_progress() -> Control:
 	_ring_mat.set_shader_parameter("color_b", App.accent_pair(App.accent))
 	_ring_mat.set_shader_parameter("thickness", 0.07)
 	ring.material = _ring_mat
-	ring.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	ring_box.add_child(ring)
 	_percent = Kit.label("0%", 54, 800, Color.WHITE, true)
-	_percent.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_percent.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_percent.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_percent.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	ring_box.add_child(_percent)
 	_check = Kit.icon_rect("check", 84, Color.WHITE)
-	_check.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_check.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_check.pivot_offset = Vector2(125, 125)
 	_check.visible = false
 	ring_box.add_child(_check)

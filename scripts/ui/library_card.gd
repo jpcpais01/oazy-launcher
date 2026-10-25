@@ -38,7 +38,7 @@ func _ready() -> void:
 	_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_holder)
 	cover = CoverArt.new()
-	cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_holder.add_child(cover)
 	cover.setup(entry_id, 16.0)
 

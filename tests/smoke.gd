@@ -105,6 +105,7 @@ func _ui_tests() -> void:
 		await _wait(0.1)
 		waited += 0.1
 	check(main.loaded, "ui: loading screen finished")
+	_layout_checks(main, "home")
 	main.go(&"library")
 	await _wait(0.60)
 	check(main.current_page == &"library", "ui: library page")
@@ -135,6 +136,25 @@ func _ui_tests() -> void:
 	main.toasts.show_toast("Smoke toast", &"success")
 	await _wait(0.90)
 	check(Icons.tex("play", 24) != null, "ui: icons render")
+
+
+## Catches the class of bug where a panel is anchored but never sized.
+func _layout_checks(main: Node, where: String) -> void:
+	var vp: Vector2 = main.get_viewport_rect().size
+	var screen := Rect2(Vector2.ZERO, vp).grow(1.0)
+	check(vp.x > 100.0 and vp.y > 100.0, "layout(%s): viewport has a size" % where)
+	check(main.size.distance_to(vp) < 1.0, "layout(%s): main fills the window" % where)
+	check(main.backdrop.size.distance_to(vp) < 1.0, "layout(%s): backdrop fills the window" % where)
+	check(absf(main.top_bar.size.x - vp.x) < 1.0 and main.top_bar.size.y >= 60.0, "layout(%s): top bar spans the width" % where)
+	check(main.home.size.y > vp.y * 0.75 and main.home.size.x > vp.x * 0.95, "layout(%s): pages fill the screen" % where)
+	check(screen.encloses(main.top_bar._settings_btn.get_global_rect()), "layout(%s): top bar buttons on screen" % where)
+	if main.home._info.visible:
+		check(screen.encloses(main.home._play.get_global_rect()), "layout(%s): play button on screen" % where)
+		check(main.home._play.get_global_rect().position.y > vp.y * 0.5, "layout(%s): play button in the lower half" % where)
+	for t in main.home._tiles:
+		if t.modulate.a > 0.5 and t.position.x < vp.x:
+			check(t.get_global_rect().position.y > main.top_bar.size.y - 1.0, "layout(%s): tiles below the top bar" % where)
+			break
 
 
 func _wait(seconds: float) -> void:

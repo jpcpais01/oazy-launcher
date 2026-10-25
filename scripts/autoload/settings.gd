@@ -19,6 +19,8 @@ const DEFAULTS := {
 	"pending_update_version": "",
 	"pending_update_notes": "",
 	"last_selected": "",
+	"steam_root": "",
+	"first_scan_done": false,
 }
 
 var _values := {}

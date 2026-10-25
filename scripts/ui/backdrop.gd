@@ -22,17 +22,17 @@ var _to_b := Color.BLACK
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_aurora_mat = ShaderMaterial.new()
 	_aurora_mat.shader = AURORA
 	_aurora = ColorRect.new()
 	_aurora.material = _aurora_mat
-	_aurora.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_aurora.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_aurora.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_aurora)
 	for i in 2:
 		var t := TextureRect.new()
-		t.set_anchors_preset(Control.PRESET_FULL_RECT)
+		t.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 		t.mouse_filter = Control.MOUSE_FILTER_IGNORE

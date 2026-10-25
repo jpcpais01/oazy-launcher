@@ -21,11 +21,11 @@ var _dirty := true
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var root := Kit.vbox(22)
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.offset_left = SIDE
 	root.offset_right = -SIDE
 	root.offset_top = 18
@@ -86,7 +86,7 @@ func _ready() -> void:
 
 	_empty = Kit.label("", 18, 500, App.TEXT_DIM)
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_empty.set_anchors_preset(Control.PRESET_CENTER)
+	_empty.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_empty.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_empty.visible = false
 	add_child(_empty)

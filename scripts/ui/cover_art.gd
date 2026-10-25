@@ -33,7 +33,7 @@ func setup(id: String, r: float = 16.0, art_kind: StringName = &"cover") -> Cove
 
 func _ready() -> void:
 	_glow = Panel.new()
-	_glow.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_glow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_glow.modulate.a = 0.0
 	add_child(_glow)
@@ -44,12 +44,12 @@ func _ready() -> void:
 	_rect = ColorRect.new()
 	_rect.color = Color.WHITE
 	_rect.material = _mat
-	_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_rect)
 
 	_initials = Kit.label("", 40, 800, Color(1, 1, 1, 0.92), true)
-	_initials.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_initials.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_initials.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_initials.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_initials)

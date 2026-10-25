@@ -24,6 +24,22 @@ const STEAM_CDN := [
 	"https://cdn.cloudflare.steamstatic.com/steam/apps/%s/",
 ]
 const HERO_CACHE_LIMIT := 10
+## Steam's store API knows the real (often hashed) URLs of every library asset.
+const STEAM_ITEMS_API := "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="
+const STEAM_ASSET_BASE := "https://shared.akamai.steamstatic.com/store_item_assets/"
+const STEAM_ASSET_KEYS := {
+	&"cover": ["library_capsule_2x", "library_capsule"],
+	&"hero": ["library_hero_2x", "library_hero"],
+	&"logo": ["library_logo_2x", "library_logo"],
+}
+## Name fragments used to recognise files in Steam's local library cache.
+const STEAM_LOCAL_TOKENS := {
+	&"cover": ["600x900", "library_capsule"],
+	&"hero": ["library_hero"],
+	&"logo": ["logo"],
+}
+
+signal _steam_assets_done(appid: String)
 
 var _cache := {}
 var _cache_src := {}
@@ -31,6 +47,8 @@ var _pending := {}
 var _queue: Array[Dictionary] = []
 var _active := 0
 var _hero_order: Array[String] = []
+var _steam_assets := {}
+var _steam_assets_pending := {}
 
 
 func _ready() -> void:
@@ -206,13 +224,36 @@ static func _steam_local(root: String, appid: String, kind: StringName) -> Array
 	var names: Array = STEAM_FILES[kind]
 	for n in names:
 		out.append(cache.path_join("%s_%s" % [appid, n]))
+	# Newer Steam clients keep one folder per app, sometimes with hashed subfolders.
 	var dir := cache.path_join(appid)
 	if DirAccess.dir_exists_absolute(dir):
-		for n in names:
-			out.append(dir.path_join(n))
+		var found := _scan_for(dir, STEAM_LOCAL_TOKENS[kind], kind, 2)
+		found.sort_custom(func(a: String, b: String) -> bool: return a.length() < b.length())
+		out.append_array(found)
+	return out
+
+
+static func _scan_for(dir: String, tokens: Array, kind: StringName, depth: int) -> Array:
+	var out := []
+	for f in DirAccess.get_files_at(dir):
+		var lower := f.to_lower()
+		if not (lower.ends_with(".jpg") or lower.ends_with(".png") or lower.ends_with(".webp")):
+			continue
+		if lower.contains("blur"):
+			continue
+		if kind == &"logo" and not lower.ends_with(".png"):
+			continue
+		for t in tokens:
+			if lower.contains(t):
+				# Prefer the 2x variants.
+				if lower.contains("_2x"):
+					out.push_front(dir.path_join(f))
+				else:
+					out.append(dir.path_join(f))
+				break
+	if depth > 0:
 		for sub in DirAccess.get_directories_at(dir):
-			for n in names:
-				out.append(dir.path_join(sub).path_join(n))
+			out.append_array(_scan_for(dir.path_join(sub), tokens, kind, depth - 1))
 	return out
 
 
@@ -232,15 +273,8 @@ func _finish(id: String, kind: StringName, img: Image, accent: Color) -> void:
 
 func _missing(id: String, kind: StringName, steam_id: String) -> void:
 	var key := _key(id, kind)
-	if steam_id != "" and not App.smoke_test:
-		var urls := PackedStringArray()
-		var names: Array = STEAM_FILES[kind]
-		for base in STEAM_CDN:
-			for n in names:
-				urls.append((base % steam_id) + n)
-		if kind != &"logo":
-			urls.append((STEAM_CDN[0] % steam_id) + "header.jpg")
-		_queue.append({"id": id, "kind": kind, "urls": urls})
+	if steam_id != "" and (not App.smoke_test or App.screenshot_dir != ""):
+		_queue.append({"id": id, "kind": kind, "steam_id": steam_id})
 		_pump()
 		return
 	_pending.erase(key)
@@ -260,9 +294,9 @@ func _download(job: Dictionary) -> void:
 	http.timeout = 20.0
 	http.use_threads = true
 	add_child(http)
-	var urls: PackedStringArray = job["urls"]
 	var id: String = job["id"]
 	var kind: StringName = job["kind"]
+	var urls := await _steam_urls(str(job["steam_id"]), kind)
 	for url in urls:
 		if http.request(url, ["User-Agent: %s/%s" % [App.USER_AGENT, App.version]]) != OK:
 			continue
@@ -288,6 +322,65 @@ func _download(job: Dictionary) -> void:
 	_pending.erase(key)
 	_cache[key] = null
 	art_ready.emit(id, kind)
+
+
+## Every URL worth trying for one Steam asset, best first.
+func _steam_urls(appid: String, kind: StringName) -> PackedStringArray:
+	var urls := PackedStringArray()
+	var assets := await _steam_assets_for(appid)
+	var fmt := str(assets.get("asset_url_format", ""))
+	if fmt != "":
+		var keys: Array = STEAM_ASSET_KEYS[kind]
+		for k in keys:
+			if assets.has(k) and str(assets[k]) != "":
+				urls.append(STEAM_ASSET_BASE + fmt.replace("%s", str(assets[k])))
+		if kind == &"logo":
+			urls.append(STEAM_ASSET_BASE + fmt.replace("%s", "logo_2x.png"))
+			urls.append(STEAM_ASSET_BASE + fmt.replace("%s", "logo.png"))
+	var names: Array = STEAM_FILES[kind]
+	for base in STEAM_CDN:
+		for n in names:
+			urls.append((base % appid) + n)
+	if kind != &"logo":
+		if fmt != "" and assets.has("header"):
+			urls.append(STEAM_ASSET_BASE + fmt.replace("%s", str(assets["header"])))
+		urls.append((STEAM_CDN[0] % appid) + "header.jpg")
+	return urls
+
+
+## Asks Steam's store for the app's asset table once, shared by all three kinds.
+func _steam_assets_for(appid: String) -> Dictionary:
+	if _steam_assets.has(appid):
+		return _steam_assets[appid]
+	if _steam_assets_pending.has(appid):
+		while _steam_assets_pending.has(appid):
+			await _steam_assets_done
+		return _steam_assets.get(appid, {})
+	_steam_assets_pending[appid] = true
+	var http := HTTPRequest.new()
+	http.timeout = 12.0
+	add_child(http)
+	var query := {
+		"ids": [{"appid": int(appid)}],
+		"context": {"language": "english", "country_code": "US", "steam_realm": 1},
+		"data_request": {"include_assets": true},
+	}
+	var assets := {}
+	if http.request(STEAM_ITEMS_API + JSON.stringify(query).uri_encode(), ["User-Agent: %s/%s" % [App.USER_AGENT, App.version]]) == OK:
+		var res: Array = await http.request_completed
+		if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200:
+			var data: Variant = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+			if data is Dictionary:
+				var items: Variant = data.get("response", {}).get("store_items", [])
+				if items is Array and not items.is_empty() and items[0] is Dictionary:
+					var a: Variant = items[0].get("assets", {})
+					if a is Dictionary:
+						assets = a
+	http.queue_free()
+	_steam_assets[appid] = assets
+	_steam_assets_pending.erase(appid)
+	_steam_assets_done.emit(appid)
+	return assets
 
 
 func _touch_hero(key: String) -> void:

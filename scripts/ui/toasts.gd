@@ -6,7 +6,7 @@ var _stack: VBoxContainer
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stack = Kit.vbox(10)
 	_stack.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
