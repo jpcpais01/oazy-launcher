@@ -44,6 +44,26 @@ namespace Oazy
 		public struct POINT { public int x, y; }
 
 		[StructLayout(LayoutKind.Sequential)]
+		public struct BITMAP
+		{
+			public int bmType, bmWidth, bmHeight, bmWidthBytes;
+			public ushort bmPlanes, bmBitsPixel;
+			public IntPtr bmBits;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		public struct BITMAPINFO
+		{
+			public uint biSize;
+			public int biWidth, biHeight;
+			public ushort biPlanes, biBitCount;
+			public uint biCompression, biSizeImage;
+			public int biXPelsPerMeter, biYPelsPerMeter;
+			public uint biClrUsed, biClrImportant;
+			[MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public uint[] colors;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
 		public struct MSG
 		{
 			public IntPtr hwnd;
@@ -163,6 +183,10 @@ namespace Oazy
 		[DllImport("dwmapi.dll")] public static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref DWM_THUMBNAIL_PROPERTIES props);
 		[DllImport("dwmapi.dll")] public static extern int DwmQueryThumbnailSourceSize(IntPtr thumb, out SIZE size);
 		[DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr h);
+		[DllImport("gdi32.dll")] public static extern int GetObject(IntPtr h, int size, ref BITMAP bm);
+		[DllImport("gdi32.dll")] public static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint lines, [Out] byte[] bits, ref BITMAPINFO info, uint usage);
+		[DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
+		[DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
 		[DllImport("shell32.dll")] public static extern int SHGetPropertyStoreForWindow(IntPtr h, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
 		[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern int SHCreateItemFromParsingName(string path, IntPtr bindCtx, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
 		[DllImport("ole32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
@@ -572,6 +596,10 @@ namespace Oazy
 			{
 				if (key.StartsWith("hwnd:")) bmp = WindowIcon(H(key.Substring(5)));
 				else bmp = ShellImage(key, size, out error);
+				if (bmp == null && File.Exists(key))
+				{
+					using (Icon ic = Icon.ExtractAssociatedIcon(key)) { if (ic != null) bmp = ic.ToBitmap(); }
+				}
 				if (bmp == null) { if (error == "") error = "no icon"; return false; }
 				using (Bitmap fitted = Fit(bmp, size))
 				{
@@ -611,38 +639,49 @@ namespace Oazy
 			finally { if (factory != null) Marshal.ReleaseComObject(factory); }
 		}
 
-		// HBITMAPs from the shell carry premultiplied alpha that Image.FromHbitmap
-		// throws away; read the raw pixels back to keep soft edges.
+		// Reads a shell HBITMAP into a managed copy. Shell bitmaps are 32-bit with
+		// premultiplied alpha (Image.FromHbitmap drops it), so un-premultiply here.
 		static Bitmap FromHBitmap(IntPtr hbm)
 		{
-			using (Bitmap src = Image.FromHbitmap(hbm))
+			Native.BITMAP bm = new Native.BITMAP();
+			if (Native.GetObject(hbm, Marshal.SizeOf(typeof(Native.BITMAP)), ref bm) == 0) return null;
+			int w = bm.bmWidth, h = Math.Abs(bm.bmHeight);
+			if (w <= 0 || h <= 0 || w > 1024 || h > 1024) return null;
+			Native.BITMAPINFO info = new Native.BITMAPINFO();
+			info.biSize = 40;
+			info.biWidth = w;
+			info.biHeight = -h;
+			info.biPlanes = 1;
+			info.biBitCount = 32;
+			info.colors = new uint[256];
+			byte[] px = new byte[w * h * 4];
+			IntPtr dc = Native.GetDC(IntPtr.Zero);
+			int lines;
+			try { lines = Native.GetDIBits(dc, hbm, 0, (uint)h, px, ref info, 0); }
+			finally { Native.ReleaseDC(IntPtr.Zero, dc); }
+			if (lines != h) return null;
+			bool hasAlpha = false;
+			for (int i = 3; i < px.Length; i += 4)
 			{
-				if (Image.GetPixelFormatSize(src.PixelFormat) < 32) return new Bitmap(src);
-				Rectangle r = new Rectangle(0, 0, src.Width, src.Height);
-				BitmapData data = src.LockBits(r, ImageLockMode.ReadOnly, src.PixelFormat);
-				try
-				{
-					byte[] bytes = new byte[Math.Abs(data.Stride) * data.Height];
-					Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
-					bool hasAlpha = false;
-					for (int i = 3; i < bytes.Length; i += 4)
-					{
-						if (bytes[i] != 0) { hasAlpha = true; break; }
-					}
-					if (!hasAlpha) return new Bitmap(src);
-					using (Bitmap pre = new Bitmap(data.Width, data.Height, data.Stride, PixelFormat.Format32bppPArgb, data.Scan0))
-					{
-						Bitmap result = new Bitmap(data.Width, data.Height, PixelFormat.Format32bppArgb);
-						using (Graphics g = Graphics.FromImage(result))
-						{
-							g.CompositingMode = CompositingMode.SourceCopy;
-							g.DrawImage(pre, new Rectangle(0, 0, data.Width, data.Height));
-						}
-						return result;
-					}
-				}
-				finally { src.UnlockBits(data); }
+				if (px[i] != 0) { hasAlpha = true; break; }
 			}
+			for (int i = 0; i < px.Length; i += 4)
+			{
+				int a = px[i + 3];
+				if (!hasAlpha) { px[i + 3] = 255; continue; }
+				if (a == 0 || a == 255) continue;
+				px[i] = (byte)Math.Min(255, px[i] * 255 / a);
+				px[i + 1] = (byte)Math.Min(255, px[i + 1] * 255 / a);
+				px[i + 2] = (byte)Math.Min(255, px[i + 2] * 255 / a);
+			}
+			Bitmap result = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+			BitmapData data = result.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+			try
+			{
+				for (int y = 0; y < h; y++) Marshal.Copy(px, y * w * 4, new IntPtr(data.Scan0.ToInt64() + (long)y * data.Stride), w * 4);
+			}
+			finally { result.UnlockBits(data); }
+			return result;
 		}
 
 		static Bitmap WindowIcon(IntPtr h)
