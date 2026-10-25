@@ -36,11 +36,13 @@ static func to_bbcode(md: String, accent: Color = Color("8f84ff")) -> String:
 
 
 static func inline(text: String) -> String:
-	# Escape BBCode brackets that are not part of markdown links first.
-	var s := text.replace("[", "[lb]").replace("]", "[rb]")
-	# Links: [label](url) -> after escaping they look like [lb]label[rb](url)
-	var link := RegEx.create_from_string("\\[lb\\](.+?)\\[rb\\]\\((https?://[^)\\s]+)\\)")
-	s = link.sub(s, "[url=$2]$1[/url]", true)
+	# Swap brackets for placeholders so markdown links can be found, then
+	# escape whatever brackets are left so they never read as BBCode.
+	var s := text.replace("[", "\u0001").replace("]", "\u0002")
+	var link := RegEx.create_from_string("\u0001([^\u0001\u0002]+)\u0002\\((https?://[^)\\s]+)\\)")
+	s = link.sub(s, "\u0003url=$2\u0004$1\u0003/url\u0004", true)
+	s = s.replace("\u0001", "[lb]").replace("\u0002", "[rb]")
+	s = s.replace("\u0003", "[").replace("\u0004", "]")
 	var bold := RegEx.create_from_string("\\*\\*(.+?)\\*\\*")
 	s = bold.sub(s, "[b]$1[/b]", true)
 	var italic := RegEx.create_from_string("(?<![\\w*])[*_](?!\\s)(.+?)(?<!\\s)[*_](?![\\w*])")

@@ -25,7 +25,7 @@ var _win_from := Vector2i.ZERO
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_TOP_WIDE)
 	custom_minimum_size.y = HEIGHT
-	size.y = HEIGHT
+	offset_bottom = HEIGHT
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var grad := Gradient.new()
