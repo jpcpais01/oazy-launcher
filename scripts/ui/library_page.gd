@@ -137,8 +137,17 @@ func refresh(animate: bool) -> void:
 
 
 func _update_columns() -> void:
-	var w := _scroll.size.x - 12.0
-	_grid.columns = maxi(1, int((w + GAP_X) / (LibraryCard.W + GAP_X)))
+	# Leave room for the side padding and the scrollbar, then widen the cards
+	# so the last column lines up with the right edge.
+	var w := _scroll.size.x - 12.0 - 14.0
+	if w <= 0.0:
+		return
+	var cols := maxi(1, int((w + GAP_X) / (LibraryCard.W + GAP_X)))
+	_grid.columns = cols
+	var card_w := floorf((w - GAP_X * (cols - 1)) / cols)
+	card_w = clampf(card_w, LibraryCard.W * 0.8, LibraryCard.W * 1.4)
+	for c in _cards:
+		c.set_card_width(card_w)
 
 
 func _set_filter(f: String, refresh_now: bool = true) -> void:

@@ -11,19 +11,19 @@ const CACHE_DIR := "user://art"
 const MAX_DOWNLOADS := 3
 const MAX_SIZE := {
 	&"cover": Vector2i(420, 630),
-	&"hero": Vector2i(1920, 820),
+	&"hero": Vector2i(2880, 1240),
 	&"logo": Vector2i(720, 320),
 }
 const STEAM_FILES := {
 	&"cover": ["library_600x900_2x.jpg", "library_600x900.jpg", "library_capsule.jpg"],
-	&"hero": ["library_hero.jpg", "library_hero_2x.jpg"],
+	&"hero": ["library_hero_2x.jpg", "library_hero.jpg"],
 	&"logo": ["logo.png", "logo_2x.png"],
 }
 const STEAM_CDN := [
 	"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/%s/",
 	"https://cdn.cloudflare.steamstatic.com/steam/apps/%s/",
 ]
-const HERO_CACHE_LIMIT := 10
+const HERO_CACHE_LIMIT := 6
 ## Steam's store API knows the real (often hashed) URLs of every library asset.
 const STEAM_ITEMS_API := "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="
 const STEAM_ASSET_BASE := "https://shared.akamai.steamstatic.com/store_item_assets/"
@@ -173,6 +173,12 @@ static func decode(bytes: PackedByteArray) -> Image:
 static func _prepare(img: Image, kind: StringName) -> void:
 	if img.is_compressed():
 		img.decompress()
+	if kind == &"logo" and img.detect_alpha() != Image.ALPHA_NONE:
+		# Store logos often carry wide transparent margins; trim them so the
+		# logo lines up with the text under it.
+		var used := img.get_used_rect()
+		if used.has_area() and used.size != img.get_size():
+			img.copy_from(img.get_region(used))
 	var max_size: Vector2i = MAX_SIZE[kind]
 	var w := img.get_width()
 	var h := img.get_height()

@@ -64,6 +64,7 @@ func _build_notes() -> Control:
 
 	var art := Control.new()
 	art.custom_minimum_size = Vector2(120, 120)
+	art.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	left.add_child(art)
 	var halo := ColorRect.new()
 	var m := ShaderMaterial.new()

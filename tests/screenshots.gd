@@ -52,7 +52,9 @@ func _ready() -> void:
 	await _wait(2.5)
 	await shot("01-home")
 	main.home.move(2)
-	await _wait(2.0)
+	await _wait(0.5)
+	await _wait_for_hero(str(Library.recent()[2]["id"]))
+	await _wait(1.5)
 	await shot("02-home-browse")
 	main.go(&"library")
 	await _wait(1.5)
@@ -85,11 +87,20 @@ func _ready() -> void:
 	Updater.state = &"available"
 	_close_modals()
 	await _wait(0.5)
+	main.home.select_id(str(Library.recent()[0]["id"]))
+	await _wait(0.6)
 	main.launch(str(Library.recent()[0]["id"]))
 	await _wait(1.4)
 	await shot("08-launch")
 	print("SCREENSHOTS: DONE")
 	get_tree().quit(0)
+
+
+func _wait_for_hero(id: String) -> void:
+	var waited := 0.0
+	while waited < 6.0 and not Art.is_resolved(id, &"hero"):
+		await _wait(0.25)
+		waited += 0.25
 
 
 func _close_modals() -> void:

@@ -86,7 +86,8 @@ static func icon_rect(name: String, px: int = 20, color: Color = Color.WHITE) ->
 	var t := TextureRect.new()
 	t.texture = Icons.tex(name, px, color)
 	t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	# Always draw at the requested size, even when anchored to a bigger box.
+	t.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	t.custom_minimum_size = Vector2(px, px)
 	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return t
