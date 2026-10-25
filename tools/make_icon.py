@@ -21,10 +21,10 @@ def squircle_mask(size, radius):
 
 
 def render(size=S):
-    # Diagonal gradient: deep indigo -> violet -> warm magenta glow.
+    # Diagonal gradient: deep lagoon -> clear aqua -> sunlit mint, an oasis pool.
     bg = Image.new("RGB", (size, size))
     px = bg.load()
-    c0, c1, c2 = (14, 16, 40), (76, 52, 214), (236, 92, 178)
+    c0, c1, c2 = (6, 30, 46), (24, 150, 170), (150, 236, 196)
     for y in range(size):
         for x in range(size):
             t = (x * 0.35 + (size - y) * 0.65) / size
@@ -51,8 +51,14 @@ def render(size=S):
     d.ellipse((dx - dr, dy - dr, dx + dr, dy + dr), fill=255)
 
     shadow = mark.filter(ImageFilter.GaussianBlur(size * 0.03)).point(lambda v: int(v * 0.45))
-    bg = Image.composite(Image.new("RGB", (size, size), (8, 6, 30)), bg, shadow)
+    bg = Image.composite(Image.new("RGB", (size, size), (2, 22, 32)), bg, shadow)
     bg = Image.composite(Image.new("RGB", (size, size), (255, 255, 255)), bg, mark)
+
+    # Aero gloss: a soft glassy highlight over the top half.
+    gloss = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(gloss).ellipse((-size * 0.35, -size * 0.62, size * 1.35, size * 0.46), fill=70)
+    gloss = gloss.filter(ImageFilter.GaussianBlur(size * 0.035))
+    bg = Image.composite(Image.new("RGB", (size, size), (255, 255, 255)), bg, gloss)
 
     out = bg.convert("RGBA")
     out.putalpha(squircle_mask(size, int(size * 0.23)))

@@ -6,25 +6,26 @@ signal accent_changed(color: Color)
 signal open_page(page: StringName)
 signal request_edit(entry_id: String)
 signal request_add(prefill: Dictionary)
+signal launch_requested(entry_id: String)
 
 const REPO := "jpcpais01/oazy-launcher"
 const EXE_NAME := "OazyLauncher.exe"
 const USER_AGENT := "OazyLauncher"
 
-const BG := Color("07080d")
+const BG := Color("061017")
 const SURFACE := Color(1, 1, 1, 0.055)
 const SURFACE_HI := Color(1, 1, 1, 0.1)
 const STROKE := Color(1, 1, 1, 0.09)
 const TEXT := Color("f4f5f8")
 const TEXT_DIM := Color("a9adbd")
 const TEXT_MUTE := Color("6d7286")
-const DEFAULT_ACCENT := Color("7c6cff")
+const DEFAULT_ACCENT := Color("38d6c4")
 const SUCCESS := Color("3ddc97")
 const WARNING := Color("ffb547")
 const DANGER := Color("ff5c7a")
 const ACCENT_SWATCHES := [
-	Color("7c6cff"), Color("3d8bff"), Color("19c3b1"), Color("3ddc97"),
-	Color("ffb547"), Color("ff7a45"), Color("ff5c7a"), Color("e45cff"),
+	Color("38d6c4"), Color("4fb4ff"), Color("6fe08a"), Color("f2c46b"),
+	Color("ff8f6b"), Color("ff6f91"), Color("a98bff"), Color("e8eef2"),
 ]
 
 var version := "0.0.0-dev"
@@ -100,13 +101,25 @@ func _update_fps(focused: bool) -> void:
 		return
 	var eco: bool = Settings.get_value("effects") == "eco"
 	if not focused:
-		Engine.max_fps = 12 if game_running else 30
+		# Behind another app: keep the desktop alive but nearly free.
+		Engine.max_fps = 8 if game_running else 24
 	else:
 		Engine.max_fps = 60 if eco else 0
 
 
 func refresh_fps() -> void:
 	_update_fps(get_window().has_focus())
+
+
+## The Windows account name, tidied up ("joao.pais" -> "Joao").
+func user_name() -> String:
+	var raw := OS.get_environment("USERNAME")
+	if raw == "":
+		raw = OS.get_environment("USER")
+	raw = raw.get_slice(".", 0).get_slice("_", 0).get_slice(" ", 0)
+	if raw == "" or raw.to_lower() in ["user", "admin", "administrator", "runneradmin", "root"]:
+		return ""
+	return raw.substr(0, 1).to_upper() + raw.substr(1)
 
 
 func data_dir() -> String:

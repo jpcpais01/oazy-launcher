@@ -82,7 +82,7 @@ func refresh() -> void:
 		_mat.set_shader_parameter("color_b", cols[1])
 		_mat.set_shader_parameter("seed", float(absi(name.hash()) % 1000) / 1000.0)
 		_initials.text = Fmt.initials(name)
-		_initials.visible = true
+		_initials.visible = kind != &"hero"
 
 
 func sweep(delay: float = 0.0) -> void:

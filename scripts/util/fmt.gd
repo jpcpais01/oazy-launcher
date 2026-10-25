@@ -70,6 +70,20 @@ static func date(iso: String) -> String:
 	return "%s %d, %s" % [months[m], dd, y]
 
 
+## {weekday, day, month} -> "Sun 25 Oct"
+static func short_date(t: Dictionary) -> String:
+	var days := ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+	var months := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+	return "%s %d %s" % [days[int(t["weekday"]) % 7], int(t["day"]), months[clampi(int(t["month"]) - 1, 0, 11)]]
+
+
+## {weekday, day, month} -> "Sunday, 25 October"
+static func long_date(t: Dictionary) -> String:
+	var days := ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+	var months := ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+	return "%s, %d %s" % [days[int(t["weekday"]) % 7], int(t["day"]), months[clampi(int(t["month"]) - 1, 0, 11)]]
+
+
 static func initials(name: String) -> String:
 	var words := PackedStringArray()
 	for w in name.replace("-", " ").replace("_", " ").replace(":", " ").split(" ", false):

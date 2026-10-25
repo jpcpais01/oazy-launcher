@@ -205,7 +205,7 @@ static func extract_accent(img: Image) -> Color:
 	for y in 16:
 		for x in 16:
 			var c := small.get_pixel(x, y)
-			var w := c.s * c.s * smoothstep(0.12, 0.55, c.v)
+			var w := c.s * c.s * smoothstep(0.12, 0.55, c.v) * c.a
 			if w <= 0.002:
 				continue
 			var b := int(c.h * 12.0) % 12

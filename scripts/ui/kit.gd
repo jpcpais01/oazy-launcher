@@ -116,7 +116,7 @@ static func vbox(sep: int = 10) -> VBoxContainer:
 	return b
 
 
-static func panel(bg: Color = Color("12131c"), radius: int = 22, pad: int = 24) -> PanelContainer:
+static func panel(bg: Color = Color("0d1a20"), radius: int = 22, pad: int = 24) -> PanelContainer:
 	var p := PanelContainer.new()
 	var s := box(bg, radius, Color(1, 1, 1, 0.08), 1, pad, pad)
 	shadowed(s, Color(0, 0, 0, 0.45), 40, Vector2(0, 18))
@@ -175,18 +175,18 @@ static func build_theme() -> Theme:
 	t.set_color("font_color", "LineEdit", App.TEXT)
 	t.set_color("font_placeholder_color", "LineEdit", App.TEXT_MUTE)
 	t.set_color("caret_color", "LineEdit", Color.WHITE)
-	t.set_color("selection_color", "LineEdit", Color(0.49, 0.42, 1.0, 0.45))
+	t.set_color("selection_color", "LineEdit", Color(App.DEFAULT_ACCENT, 0.4))
 	t.set_color("clear_button_color", "LineEdit", App.TEXT_DIM)
 
 	# Menus.
-	var menu := box(Color("161722"), 14, Color(1, 1, 1, 0.1), 1, 6, 6)
-	shadowed(menu, Color(0, 0, 0, 0.5), 28, Vector2(0, 12))
+	var menu := box(Color(0.05, 0.11, 0.14, 0.96), 16, Color(1, 1, 1, 0.12), 1, 6, 6)
+	shadowed(menu, Color(0, 0.02, 0.04, 0.5), 28, Vector2(0, 12))
 	t.set_stylebox("panel", "PopupMenu", menu)
 	t.set_stylebox("hover", "PopupMenu", box(Color(1, 1, 1, 0.09), 9))
 	t.set_stylebox("separator", "PopupMenu", _line_box())
 	t.set_color("font_color", "PopupMenu", App.TEXT)
 	t.set_color("font_hover_color", "PopupMenu", Color.WHITE)
-	t.set_color("font_disabled_color", "PopupMenu", App.TEXT_MUTE)
+	t.set_color("font_disabled_color", "PopupMenu", App.TEXT_DIM)
 	t.set_constant("v_separation", "PopupMenu", 12)
 	t.set_constant("h_separation", "PopupMenu", 12)
 	t.set_constant("item_start_padding", "PopupMenu", 12)
@@ -195,7 +195,7 @@ static func build_theme() -> Theme:
 	t.set_font_size("font_size", "PopupMenu", 15)
 
 	# Tooltips.
-	t.set_stylebox("panel", "TooltipPanel", box(Color("1b1c28"), 10, Color(1, 1, 1, 0.1), 1, 12, 8))
+	t.set_stylebox("panel", "TooltipPanel", box(Color(0.06, 0.12, 0.15, 0.97), 10, Color(1, 1, 1, 0.12), 1, 12, 8))
 	t.set_color("font_color", "TooltipLabel", App.TEXT)
 	t.set_font_size("font_size", "TooltipLabel", 14)
 

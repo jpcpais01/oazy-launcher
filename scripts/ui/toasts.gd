@@ -12,8 +12,8 @@ func _ready() -> void:
 	_stack.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	_stack.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_stack.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_stack.offset_right = -32
-	_stack.offset_bottom = -32
+	_stack.offset_right = -24
+	_stack.offset_bottom = -(Taskbar.HEIGHT + Taskbar.MARGIN * 2.0 + 14.0)
 	_stack.alignment = BoxContainer.ALIGNMENT_END
 	add_child(_stack)
 
@@ -31,9 +31,17 @@ func show_toast(text: String, kind: StringName = &"info", action: Callable = Cal
 		&"update":
 			icon = "sparkles"
 	var card := PanelContainer.new()
-	var s := Kit.box(Color("171823"), 16, Color(1, 1, 1, 0.1), 1, 16, 12)
-	Kit.shadowed(s, Color(0, 0, 0, 0.45), 24, Vector2(0, 10))
-	card.add_theme_stylebox_override("panel", s)
+	card.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	var glass := GlassPanel.new(true, 18.0, GlassPanel.TINT_POPUP)
+	glass.set_shadow_strength(0.4, 24, 10.0)
+	card.add_child(glass)
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_left", 16)
+	pad.add_theme_constant_override("margin_right", 16)
+	pad.add_theme_constant_override("margin_top", 12)
+	pad.add_theme_constant_override("margin_bottom", 12)
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(pad)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP if action.is_valid() else Control.MOUSE_FILTER_PASS
 	if action.is_valid():
 		card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -43,7 +51,7 @@ func show_toast(text: String, kind: StringName = &"info", action: Callable = Cal
 				_dismiss(card)
 		)
 	var row := Kit.hbox(12)
-	card.add_child(row)
+	pad.add_child(row)
 	var bubble := PanelContainer.new()
 	bubble.add_theme_stylebox_override("panel", Kit.box(Color(color, 0.2), 999, Color(0, 0, 0, 0), 0, 7, 7))
 	bubble.add_child(Kit.icon_rect(icon, 16, color.lightened(0.3)))

@@ -18,7 +18,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	add_to_group("modal")
 	_dim = ColorRect.new()
-	_dim.color = Color(0.01, 0.01, 0.03, 0.62)
+	_dim.color = Color(0.0, 0.025, 0.04, 0.5)
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_dim.gui_input.connect(func(e: InputEvent) -> void:
 		if dismissable and e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
@@ -29,12 +29,20 @@ func _ready() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(center)
-	card = Kit.panel(Color("13141d"), 28, 32)
+	card = PanelContainer.new()
+	card.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	card.custom_minimum_size.x = width
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	center.add_child(card)
+	var glass := GlassPanel.new(true, 28.0, GlassPanel.TINT_WINDOW)
+	glass.set_shadow_strength(0.55, 50, 22.0)
+	card.add_child(glass)
+	var pad := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		pad.add_theme_constant_override("margin_" + side, 32)
+	card.add_child(pad)
 	content = Kit.vbox(16)
-	card.add_child(content)
+	pad.add_child(content)
 	_build()
 	Sfx.play(&"open")
 	modulate.a = 0.0

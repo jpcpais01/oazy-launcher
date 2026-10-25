@@ -115,7 +115,7 @@ func success() -> void:
 	t.tween_property(_status, "modulate:a", 1.0, 0.4)
 	t.tween_interval(1.5)
 	t.tween_callback(func() -> void:
-		if Settings.get_value("minimize_on_launch") and not App.smoke_test:
+		if Settings.get_value("minimize_for_games") and not App.smoke_test:
 			get_window().mode = Window.MODE_MINIMIZED
 	)
 	t.tween_interval(0.2)

@@ -60,6 +60,7 @@ func make_entry(fields: Dictionary = {}) -> Dictionary:
 		"name": "Untitled",
 		"path": "",
 		"args": "",
+		"cwd": "",
 		"kind": "game",
 		"source": "custom",
 		"steam_appid": "",
@@ -285,21 +286,23 @@ func _launch_path(e: Dictionary) -> bool:
 		return false
 	if path.contains("://"):
 		return OS.shell_open(path) == OK
-	if not FileAccess.file_exists(path):
+	# Bare commands ("wt.exe", "code") are found on PATH by `start`.
+	var bare := not path.contains("/") and not path.contains("\\")
+	if not bare and not FileAccess.file_exists(path):
 		App.toast("Can't find %s. Was it moved or uninstalled?" % path.get_file(), &"error")
 		return false
 	var ext := path.get_extension().to_lower()
 	if not App.is_windows():
 		return OS.create_process(path, split_args(str(e["args"]))) > 0
-	if ext in ["lnk", "url", "appref-ms"]:
+	if ext in ["lnk", "url", "appref-ms"] and not bare:
 		return OS.shell_open(path) == OK
 	# Start through a tiny script so the program gets its own folder as the
 	# working directory; plenty of games refuse to start otherwise.
-	var script := _write_launch_script(str(e["id"]), path, str(e["args"]))
+	var script := _write_launch_script(str(e["id"]), path, str(e["args"]), str(e.get("cwd", "")))
 	if script.is_empty():
 		return OS.create_process(path, split_args(str(e["args"]))) > 0
 	var pid := OS.create_process("cmd.exe", ["/c", script])
-	if pid > 0 and ext == "exe":
+	if pid > 0 and ext == "exe" and not bare and e["kind"] == "game":
 		_sessions[e["id"]] = {
 			"image": path.get_file().to_lower(),
 			"started": int(Time.get_unix_time_from_system()),
@@ -309,14 +312,16 @@ func _launch_path(e: Dictionary) -> bool:
 	return pid > 0
 
 
-func _write_launch_script(id: String, path: String, args: String) -> String:
+func _write_launch_script(id: String, path: String, args: String, cwd: String = "") -> String:
 	DirAccess.make_dir_recursive_absolute("user://launch")
 	var file := "user://launch/%s.cmd" % id
 	var f := FileAccess.open(file, FileAccess.WRITE)
 	if f == null:
 		return ""
 	var win_path := path.replace("/", "\\")
-	var dir := win_path.get_base_dir()
+	var dir := cwd.replace("/", "\\") if cwd != "" else win_path.get_base_dir()
+	if dir == "":
+		dir = OS.get_environment("USERPROFILE")
 	f.store_string("@echo off\r\nchcp 65001 >nul\r\ncd /d \"%s\"\r\nstart \"\" \"%s\" %s\r\n" % [dir, win_path, args])
 	f.close()
 	return ProjectSettings.globalize_path(file).replace("/", "\\")
@@ -343,6 +348,27 @@ static func split_args(text: String) -> PackedStringArray:
 	if has:
 		out.append(cur)
 	return out
+
+
+## Finds the Claude Code command line tool, so it can sit on the taskbar like
+## any other app. Returns the fields for a library entry, or {} if missing.
+static func detect_claude_code() -> Dictionary:
+	if OS.get_name() != "Windows":
+		return {}
+	var out := []
+	if OS.execute("where", ["claude"], out) != 0 or out.is_empty() or str(out[0]).strip_edges() == "":
+		return {}
+	var system := OS.get_environment("SystemRoot")
+	if system == "":
+		system = "C:/Windows"
+	return {
+		"name": "Claude Code",
+		"kind": "app",
+		"source": "custom",
+		"path": system.replace("\\", "/").path_join("System32/cmd.exe"),
+		"args": "/k claude",
+		"cwd": OS.get_environment("USERPROFILE").replace("\\", "/"),
+	}
 
 
 # --- Playtime ------------------------------------------------------------------
