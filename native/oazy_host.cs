@@ -21,7 +21,9 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Text;
 using System.Threading;
 
@@ -231,7 +233,7 @@ namespace Oazy
 		static ulong LastIdle, LastBusy;
 		static Native.PROPERTYKEY PKEY_AppUserModel_ID;
 
-		[STAThread]
+		[STAThread, HandleProcessCorruptedStateExceptions, SecurityCritical]
 		static int Main(string[] args)
 		{
 			try { Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); }
@@ -330,7 +332,11 @@ namespace Oazy
 				case "home":
 					return "\"ok\":" + Json.Bool(Self != IntPtr.Zero && Focus(Self));
 				case "icon":
-					return "\"ok\":" + Json.Bool(SaveIcon(Arg(p, 2), Int(Arg(p, 3), 96), Arg(p, 4)));
+				{
+					string error;
+					bool saved = SaveIcon(Arg(p, 2), Int(Arg(p, 3), 96), Arg(p, 4), out error);
+					return "\"ok\":" + Json.Bool(saved) + (saved ? "" : ",\"error\":" + Json.Str(error));
+				}
 				case "apps":
 					return "\"ok\":true,\"apps\":" + AppsJson();
 				case "thumb":
@@ -551,16 +557,22 @@ namespace Oazy
 
 		// --- Icons -----------------------------------------------------------------
 
-		static bool SaveIcon(string key, int size, string outPath)
+		// Shell icon handlers are third-party code running in this process, so a
+		// bad one can fault; catch that too rather than taking the companion down.
+		[HandleProcessCorruptedStateExceptions, SecurityCritical]
+		static bool SaveIcon(string key, int size, string outPath, out string error)
 		{
-			if (key == "" || outPath == "") return false;
+			error = "";
+			if (key == "" || outPath == "") { error = "missing arguments"; return false; }
 			size = Math.Max(16, Math.Min(256, size));
+			if (!key.StartsWith("shell:", StringComparison.OrdinalIgnoreCase) && !key.StartsWith("hwnd:")) key = key.Replace('/', '\\');
+			outPath = outPath.Replace('/', '\\');
 			Bitmap bmp = null;
 			try
 			{
 				if (key.StartsWith("hwnd:")) bmp = WindowIcon(H(key.Substring(5)));
-				else bmp = ShellImage(key, size);
-				if (bmp == null) return false;
+				else bmp = ShellImage(key, size, out error);
+				if (bmp == null) { if (error == "") error = "no icon"; return false; }
 				using (Bitmap fitted = Fit(bmp, size))
 				{
 					string dir = Path.GetDirectoryName(outPath);
@@ -572,26 +584,30 @@ namespace Oazy
 				}
 				return true;
 			}
-			catch (Exception) { return false; }
+			catch (Exception ex) { error = ex.GetType().Name + ": " + ex.Message; return false; }
 			finally { if (bmp != null) bmp.Dispose(); }
 		}
 
-		static Bitmap ShellImage(string path, int size)
+		[HandleProcessCorruptedStateExceptions, SecurityCritical]
+		static Bitmap ShellImage(string path, int size, out string error)
 		{
+			error = "";
 			Native.IShellItemImageFactory factory = null;
 			try
 			{
 				Guid iid = typeof(Native.IShellItemImageFactory).GUID;
-				if (Native.SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out factory) != 0 || factory == null) return null;
+				int hr = Native.SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out factory);
+				if (hr != 0 || factory == null) { error = string.Format("shell item 0x{0:X8}", hr); return null; }
 				Native.SIZE s;
 				s.cx = size;
 				s.cy = size;
 				IntPtr hbm;
-				if (factory.GetImage(s, SIIGBF_ICONONLY, out hbm) != 0 || hbm == IntPtr.Zero) return null;
+				hr = factory.GetImage(s, SIIGBF_ICONONLY, out hbm);
+				if (hr != 0 || hbm == IntPtr.Zero) { error = string.Format("image 0x{0:X8}", hr); return null; }
 				try { return FromHBitmap(hbm); }
 				finally { Native.DeleteObject(hbm); }
 			}
-			catch (Exception) { return null; }
+			catch (Exception ex) { error = ex.GetType().Name + ": " + ex.Message; return null; }
 			finally { if (factory != null) Marshal.ReleaseComObject(factory); }
 		}
 

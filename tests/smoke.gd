@@ -272,7 +272,8 @@ func _host_tests() -> void:
 	check(got.has("windows") and got["windows"].get("ok", false), "host: lists windows")
 	check(got.has("apps") and got["apps"].get("apps", []).size() > 0, "host: lists installed apps")
 	check(got.has("stats") and got["stats"].has("cpu"), "host: system stats")
-	check(got.has("icon") and FileAccess.file_exists("user://smoke/explorer.png"), "host: renders icons")
+	check(got.has("icon") and FileAccess.file_exists("user://smoke/explorer.png"), "host: renders icons (%s)" % str(got.get("icon", {}).get("error", "no reply")))
+	check(Host.available, "host: still running after the checks")
 
 
 func _window_checks(main: Node, win: ShellWindow, where: String) -> void:

@@ -36,6 +36,7 @@ var _next_id := 1
 var _pending := {}
 var _quitting := false
 var _starting := false
+var _restarts := 0
 
 
 func _ready() -> void:
@@ -184,9 +185,23 @@ func _on_dead() -> void:
 	available = false
 	for cb in _pending.values():
 		if cb.is_valid():
-			cb.call({"ok": false})
+			cb.call({"ok": false, "error": "companion stopped"})
 	_pending.clear()
-	_fail("The companion stopped")
+	if _reader:
+		_reader.wait_to_finish()
+		_reader = null
+	_pipe = null
+	_pid = 0
+	if _restarts >= 3:
+		_fail("The companion stopped")
+		return
+	# Come back on our own a few times so a crash doesn't cost the taskbar.
+	_restarts += 1
+	push_warning("Oazy host stopped, restarting")
+	status_changed.emit(false)
+	await get_tree().create_timer(1.0).timeout
+	if not _quitting:
+		start()
 
 
 func _exit_tree() -> void:
