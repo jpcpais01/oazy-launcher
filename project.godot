@@ -1,0 +1,71 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Oazy Launcher"
+config/description="A fast, beautiful launcher for the games and apps on your PC."
+config/version="0.0.0-dev"
+run/main_scene="res://scenes/main.tscn"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="OazyLauncher"
+config/features=PackedStringArray("4.5", "GL Compatibility")
+boot_splash/bg_color=Color(0.027, 0.031, 0.051, 1)
+boot_splash/show_image=false
+config/icon="res://assets/icon.png"
+config/windows_native_icon="res://assets/icon.ico"
+
+[autoload]
+
+App="*res://scripts/autoload/app.gd"
+Settings="*res://scripts/autoload/settings.gd"
+Sfx="*res://scripts/autoload/sfx.gd"
+Library="*res://scripts/autoload/library.gd"
+Art="*res://scripts/autoload/art.gd"
+Updater="*res://scripts/autoload/updater.gd"
+
+[debug]
+
+gdscript/warnings/untyped_declaration=0
+gdscript/warnings/inference_on_variant=0
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/size/window_width_override=1440
+window/size/window_height_override=810
+window/size/borderless=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=1
+
+[gui]
+
+common/snap_controls_to_pixels=true
+timers/tooltip_delay_sec=0.35
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=false
+
+[physics]
+
+common/physics_ticks_per_second=30
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+gl_compatibility/driver.windows="opengl3"
+gl_compatibility/fallback_to_angle=false
+textures/canvas_textures/default_texture_filter=3
+environment/defaults/default_clear_color=Color(0.027, 0.031, 0.051, 1)
+2d/snap/snap_2d_transforms_to_pixel=false

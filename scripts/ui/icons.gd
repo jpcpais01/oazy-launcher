@@ -1,0 +1,70 @@
+class_name Icons
+## Stroke icons (24x24 grid, Lucide style) rendered from SVG at runtime, so they
+## stay razor sharp at any UI scale and need no imported assets.
+
+const _HEAD := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+
+const SVGS := {
+	"play": "<path d=\"M7 4.8v14.4a1 1 0 0 0 1.5.86l12-7.2a1 1 0 0 0 0-1.72l-12-7.2A1 1 0 0 0 7 4.8z\" fill=\"currentColor\"/>",
+	"plus": "<path d=\"M12 5v14M5 12h14\"/>",
+	"search": "<circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/>",
+	"settings": "<path d=\"M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>",
+	"home": "<path d=\"M3 10.5 12 3l9 7.5\"/><path d=\"M5 9v11a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9\"/>",
+	"grid": "<rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/>",
+	"heart": "<path d=\"M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z\"/>",
+	"heart_fill": "<path d=\"M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z\" fill=\"currentColor\"/>",
+	"more": "<circle cx=\"5\" cy=\"12\" r=\"1.4\" fill=\"currentColor\"/><circle cx=\"12\" cy=\"12\" r=\"1.4\" fill=\"currentColor\"/><circle cx=\"19\" cy=\"12\" r=\"1.4\" fill=\"currentColor\"/>",
+	"close": "<path d=\"M18 6 6 18M6 6l12 12\"/>",
+	"minimize": "<path d=\"M5 12h14\"/>",
+	"maximize": "<rect x=\"5\" y=\"5\" width=\"14\" height=\"14\" rx=\"2\"/>",
+	"restore": "<rect x=\"4\" y=\"8\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2\"/>",
+	"download": "<path d=\"M12 3v12\"/><path d=\"m7 10 5 5 5-5\"/><path d=\"M5 21h14\"/>",
+	"refresh": "<path d=\"M21 12a9 9 0 0 1-15.5 6.2L3 16\"/><path d=\"M3 21v-5h5\"/><path d=\"M3 12a9 9 0 0 1 15.5-6.2L21 8\"/><path d=\"M21 3v5h-5\"/>",
+	"check": "<path d=\"M20 6 9 17l-5-5\"/>",
+	"folder": "<path d=\"M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z\"/>",
+	"edit": "<path d=\"M12 20h9\"/><path d=\"M16.4 3.6a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z\"/>",
+	"trash": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/>",
+	"image": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2.5\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/><path d=\"m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21\"/>",
+	"sparkles": "<path d=\"M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z\"/><path d=\"M20 3v4M22 5h-4\"/>",
+	"info": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4M12 8h.01\"/>",
+	"alert": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4M12 16h.01\"/>",
+	"gamepad": "<path d=\"M6 11h4M8 9v4M15 12h.01M18 10h.01\"/><path d=\"M17.32 5H6.68a4 4 0 0 0-3.98 3.59C2.6 9.42 2 14.46 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.41-1.41A2 2 0 0 1 9.83 16h4.34a2 2 0 0 1 1.41.59L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.55-.6-6.58-.69-7.26A4 4 0 0 0 17.32 5z\"/>",
+	"app": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2.5\"/><path d=\"M3 9h18M7 6.5h.01M10 6.5h.01\"/>",
+	"clock": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/>",
+	"bolt": "<path d=\"M13 2 4 14h7l-1 8 9-12h-7z\"/>",
+	"chevron_right": "<path d=\"m9 18 6-6-6-6\"/>",
+	"chevron_left": "<path d=\"m15 18-6-6 6-6\"/>",
+	"chevron_down": "<path d=\"m6 9 6 6 6-6\"/>",
+	"external": "<path d=\"M15 3h6v6M10 14 21 3\"/><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>",
+	"sort": "<path d=\"M3 6h18M6 12h12M10 18h4\"/>",
+	"star": "<path d=\"M12 2.5 14.9 8.4l6.5.9-4.7 4.6 1.1 6.5L12 17.3l-5.8 3.1 1.1-6.5L2.6 9.3l6.5-.9z\"/>",
+	"layers": "<path d=\"m12 2 10 5-10 5L2 7z\"/><path d=\"m2 17 10 5 10-5\"/><path d=\"m2 12 10 5 10-5\"/>",
+	"volume": "<path d=\"M11 5 6 9H2v6h4l5 4z\"/><path d=\"M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14\"/>",
+	"monitor": "<rect x=\"2\" y=\"3\" width=\"20\" height=\"14\" rx=\"2\"/><path d=\"M8 21h8M12 17v4\"/>",
+	"palette": "<circle cx=\"13.5\" cy=\"6.5\" r=\".8\" fill=\"currentColor\"/><circle cx=\"17.5\" cy=\"10.5\" r=\".8\" fill=\"currentColor\"/><circle cx=\"8.5\" cy=\"7.5\" r=\".8\" fill=\"currentColor\"/><circle cx=\"6.5\" cy=\"12.5\" r=\".8\" fill=\"currentColor\"/><path d=\"M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.56-2.5 5.56-5.55C21.97 6.01 17.46 2 12 2z\"/>",
+	"logo": "<circle cx=\"11.5\" cy=\"13\" r=\"7\" stroke-width=\"3\" stroke-dasharray=\"36 8\" transform=\"rotate(-20 11.5 13)\"/><circle cx=\"18.2\" cy=\"5.6\" r=\"2.2\" fill=\"currentColor\" stroke=\"none\"/>",
+	"dot": "<circle cx=\"12\" cy=\"12\" r=\"4\" fill=\"currentColor\"/>",
+}
+
+static var _cache := {}
+
+
+## Renders an icon at `px` logical pixels (2x internally for crisp scaling).
+static func tex(name: String, px: int = 24, color: Color = Color.WHITE) -> Texture2D:
+	var key := "%s|%d|%s" % [name, px, color.to_html()]
+	if _cache.has(key):
+		return _cache[key]
+	var body: String = SVGS.get(name, SVGS["dot"])
+	var svg := (_HEAD + body + "</svg>").replace("currentColor", "#" + color.to_html(false))
+	if color.a < 0.999:
+		svg = svg.replace("<svg ", "<svg opacity=\"%.3f\" " % color.a)
+	var img := Image.new()
+	var err := img.load_svg_from_string(svg, float(px) / 24.0 * 2.0)
+	if err != OK:
+		push_warning("Icon %s failed to render" % name)
+		img = Image.create(px * 2, px * 2, false, Image.FORMAT_RGBA8)
+	img.generate_mipmaps()
+	var t := ImageTexture.create_from_image(img)
+	t.set_size_override(Vector2i(px, px))
+	_cache[key] = t
+	return t

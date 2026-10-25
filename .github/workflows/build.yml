@@ -1,0 +1,172 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.5.1"
+  GODOT_STATUS: "stable"
+
+jobs:
+  build:
+    name: Build & sign Windows exe
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out version
+        id: version
+        run: echo "version=$(tools/ci/version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-win64
+
+      - name: Install Godot and the Windows export template
+        run: |
+          set -euo pipefail
+          V="${GODOT_VERSION}-${GODOT_STATUS}"
+          TDIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}"
+          BASE="https://github.com/godotengine/godot/releases/download/${V}"
+          if [ ! -x "$HOME/godot/godot" ]; then
+            mkdir -p "$HOME/godot"
+            curl -fsSL --retry 3 -o /tmp/godot.zip "${BASE}/Godot_v${V}_linux.x86_64.zip"
+            unzip -q /tmp/godot.zip -d "$HOME/godot"
+            mv "$HOME/godot/Godot_v${V}_linux.x86_64" "$HOME/godot/godot"
+            chmod +x "$HOME/godot/godot"
+          fi
+          if [ ! -f "$TDIR/windows_release_x86_64.exe" ]; then
+            mkdir -p "$TDIR"
+            curl -fsSL --retry 3 -o /tmp/templates.tpz "${BASE}/Godot_v${V}_export_templates.tpz"
+            unzip -q -j /tmp/templates.tpz 'templates/windows_release_x86_64.exe' 'templates/version.txt' -d "$TDIR"
+            rm /tmp/templates.tpz
+          fi
+          "$HOME/godot/godot" --version
+
+      - name: Stamp version ${{ steps.version.outputs.version }}
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          sed -i "s|^config/version=.*|config/version=\"$V\"|" project.godot
+          sed -i "s|^application/file_version=.*|application/file_version=\"$V.0\"|; s|^application/product_version=.*|application/product_version=\"$V.0\"|" export_presets.cfg
+          grep -n "config/version" project.godot
+
+      - name: Import project
+        run: |
+          set -o pipefail
+          timeout 300 "$HOME/godot/godot" --headless --path . --import 2>&1 | tee import.log
+          if grep -E "SCRIPT ERROR|Parse Error|Compile Error" import.log; then echo "::error::Script errors during import"; exit 1; fi
+
+      - name: Smoke test (headless, from source)
+        run: |
+          timeout 180 "$HOME/godot/godot" --headless --path . -- --smoke-test > smoke.log 2>&1 || true
+          cat smoke.log
+          if grep -E "SCRIPT ERROR|Parse Error|Compile Error|Failed to load script|Invalid call|Invalid access" smoke.log; then
+            echo "::error::Script errors in smoke test"; exit 1
+          fi
+          grep -q "SMOKE: PASS" smoke.log
+
+      - name: Export Windows exe
+        run: |
+          set -o pipefail
+          mkdir -p build
+          timeout 600 "$HOME/godot/godot" --headless --path . --export-release "Windows" build/OazyLauncher.exe 2>&1 | tee export.log
+          test -s build/OazyLauncher.exe
+          ls -la build
+          extra=$(ls -A build | grep -v '^OazyLauncher.exe$' || true)
+          if [ -n "$extra" ]; then echo "::error::Export produced extra files next to the exe: $extra"; exit 1; fi
+
+      - name: Sign exe
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osslsigncode >/dev/null
+          tools/ci/sign.sh build/OazyLauncher.exe
+          sha256sum build/OazyLauncher.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OazyLauncher
+          path: build/OazyLauncher.exe
+          if-no-files-found: error
+
+  windows-smoke:
+    name: Smoke test packaged exe on Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OazyLauncher
+
+      - name: Check signature and run the exe headless
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature .\OazyLauncher.exe
+          Write-Host "Signature: $($sig.Status) | $($sig.SignerCertificate.Subject)"
+          if (-not $sig.SignerCertificate) { throw "The exe is not signed" }
+          $info = (Get-Item .\OazyLauncher.exe).VersionInfo
+          Write-Host "File version: $($info.FileVersion) | Product: $($info.ProductName)"
+          $p = Start-Process -FilePath .\OazyLauncher.exe -ArgumentList '--headless','--','--smoke-test' -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); throw "Smoke test timed out" }
+          $log = Join-Path $env:APPDATA 'OazyLauncher\logs\godot.log'
+          if (Test-Path $log) { Get-Content $log } else { Write-Host "No log at $log" }
+          Write-Host "Exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "Smoke test failed" }
+          if (-not (Select-String -Path $log -Pattern 'SMOKE: PASS' -Quiet)) { throw "Smoke test did not report PASS" }
+
+  release:
+    name: Publish GitHub release
+    needs: [build, windows-smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: OazyLauncher
+
+      - name: Write patch notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          echo "Previous release: ${prev:-none}"
+          tools/ci/release_notes.sh "$prev" > notes.md
+          cat notes.md
+
+      - name: Publish release v${{ needs.build.outputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ needs.build.outputs.version }}"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            gh release upload "v$V" OazyLauncher.exe --clobber
+          else
+            gh release create "v$V" OazyLauncher.exe \
+              --title "Oazy Launcher $V" \
+              --notes-file notes.md \
+              --target "$GITHUB_SHA" \
+              --latest
+          fi
