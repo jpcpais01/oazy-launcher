@@ -21,8 +21,8 @@ const MARKDOWN := "### Anywhere
 - Drag a window to the top edge to maximise, or to a side to snap.
 
 ### Taskbar
-- **Scroll** over the sound icon to change the volume. Click it for quick settings.
-- **Middle-click** an app to open a new window of it. Click the clock for a calendar.
+- **Scroll** over the sound icon to change the volume, **middle-click** it to mute. Click it for quick settings.
+- **Middle-click** an app to open another window of it. Click the clock for a calendar.
 
 ### Controller
 - **Start** or **Guide** opens Start, **B** closes it."

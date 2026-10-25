@@ -37,6 +37,6 @@ Each change adds a player-facing entry in [`patch-notes/`](patch-notes/README.md
 
 Open the folder in Godot 4.5+. Useful flags: `-- --smoke-test` runs the self-test and exits with its result. `tools/make_icon.py` regenerates the app icon.
 
-Keyboard: type on the desktop to search, Ctrl+F Start search, Ctrl+L Library, Ctrl+, Settings, Ctrl+N add, Ctrl+W close window, Esc minimise window, F11 fullscreen. A controller's Start/Guide button opens Start.
+Keyboard: F1 shows every shortcut. Type on the desktop to search, Ctrl+F Start search, Ctrl+L Library, Ctrl+, Settings, Ctrl+N add, Ctrl+W close window, Esc minimise window, F11 fullscreen. A controller's Start/Guide button opens Start.
 
 `-- --screenshots=<dir>` renders the main screens to PNGs with sample data and mock windows (CI uploads these).

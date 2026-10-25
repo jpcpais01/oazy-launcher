@@ -2,7 +2,8 @@ class_name Flyout
 extends Control
 ## A small glass card that rises from the taskbar tray (quick settings, the
 ## calendar). Subclasses fill `content` in _build(). Closes on a click outside,
-## Esc, or when its tray button is pressed again.
+## Esc, or when its tray button is pressed again. Lives in Start's layer so it
+## floats above apps in shell mode.
 
 signal opened_changed(open: bool)
 
@@ -32,6 +33,18 @@ func _ready() -> void:
 			size = content.size + Vector2(PAD * 2.0, PAD * 2.0)
 			_place()
 	)
+	var surface := Shell.surface_of(self)
+	if surface:
+		# Its own OS window in shell mode: going to any other window closes it.
+		surface.focus_exited.connect(func() -> void:
+			await get_tree().create_timer(0.15).timeout
+			if is_open and not surface.has_focus() and not surface.just_shown(400):
+				close()
+		)
+
+
+func shell_shape() -> Array[Rect2]:
+	return [get_global_rect().grow(30.0)]
 
 
 func _build() -> void:
@@ -75,6 +88,7 @@ func open(from: Control = null) -> void:
 	_tween.tween_property(self, "scale", Vector2.ONE, 0.35)
 	_tween.tween_property(self, "position:y", y, 0.35)
 	Sfx.play(&"open")
+	Shell.focus(self)
 	opened_changed.emit(true)
 
 
@@ -93,7 +107,7 @@ func close() -> void:
 
 ## Sits above the anchor, right-aligned to it, inside the viewport.
 func _place() -> void:
-	var vp := get_viewport_rect().size
+	var vp := Shell.view_size()
 	var r := anchor.get_global_rect() if anchor and is_instance_valid(anchor) else Rect2(vp - Vector2(10, 80), Vector2.ZERO)
 	var x := clampf(r.end.x - size.x + 40.0, 10.0, vp.x - size.x - 10.0)
 	position = Vector2(x, r.position.y - size.y - 18.0)
