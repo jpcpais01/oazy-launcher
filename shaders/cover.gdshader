@@ -1,6 +1,6 @@
 // Rounded artwork tile. Crops the texture to fill (like CSS object-fit: cover),
-// or paints a procedural gradient cover when there is no art. Adds a focus
-// ring, a light sweep and an inner sheen. Drawn on a plain ColorRect.
+// or paints a soft gradient cover when there is no art. Adds a focus ring and
+// a light sweep. Drawn on a plain ColorRect.
 shader_type canvas_item;
 
 uniform sampler2D art : source_color, filter_linear_mipmap, repeat_disable;
@@ -41,14 +41,9 @@ void fragment() {
 		col = mix(color_a.rgb, color_b.rgb, smoothstep(0.0, 1.0, uv.y * 0.85 + uv.x * 0.25 + wave));
 		vec2 c1 = vec2(0.72 + 0.12 * sin(seed * 9.0), 0.22 + 0.08 * cos(seed * 5.0));
 		float blob = max(0.0, 1.0 - length((uv - c1) * vec2(rect_size.x / rect_size.y, 1.0)) * 2.2);
-		col += vec3(1.0) * blob * blob * 0.22;
-		float stripes = step(0.5, fract((uv.x * rect_size.x - uv.y * rect_size.y) / 18.0));
-		col *= 0.94 + 0.06 * stripes;
+		col += vec3(1.0) * blob * blob * 0.12;
 		col *= 1.0 - smoothstep(0.55, 1.0, uv.y) * 0.35;
 	}
-
-	// Inner sheen at the top edge.
-	col += vec3(1.0) * smoothstep(0.25, 0.0, uv.y) * 0.05;
 
 	// Light sweep moving diagonally across.
 	float sw = 1.0 - smoothstep(0.0, 0.1, abs((uv.x + uv.y * 0.6) - sweep));

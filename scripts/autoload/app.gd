@@ -34,6 +34,8 @@ var smoke_test := false
 ## Set by --screenshots=<dir>: renders the main screens to PNGs (CI visual check).
 var screenshot_dir := ""
 var game_running := false
+## The pointer is over Oazy's taskbar (shell mode keeps it smooth then).
+var pointer_on_bar := false: set = set_pointer_on_bar
 
 
 func _ready() -> void:
@@ -100,7 +102,14 @@ func _update_fps(focused: bool) -> void:
 	if smoke_test:
 		return
 	var eco: bool = Settings.get_value("effects") == "eco"
-	if not focused:
+	if Shell.native and Host.fullscreen_app:
+		# A game or video has the screen: nothing of Oazy's is visible.
+		Engine.max_fps = 5
+	elif Shell.native and not focused:
+		# Another app is in front but the taskbar is still on screen; it
+		# speeds up while the pointer is on it.
+		Engine.max_fps = 60 if pointer_on_bar else 30
+	elif not focused:
 		# Behind another app: keep the desktop alive but nearly free.
 		Engine.max_fps = 8 if game_running else 24
 	else:
@@ -108,7 +117,24 @@ func _update_fps(focused: bool) -> void:
 
 
 func refresh_fps() -> void:
-	_update_fps(get_window().has_focus())
+	_update_fps(_app_focused())
+
+
+func set_pointer_on_bar(on: bool) -> void:
+	if on == pointer_on_bar:
+		return
+	pointer_on_bar = on
+	refresh_fps()
+
+
+## Any of Oazy's windows has focus (shell mode has several).
+func _app_focused() -> bool:
+	if get_window().has_focus():
+		return true
+	for w in get_tree().get_nodes_in_group("shell_surface"):
+		if (w as Window).has_focus():
+			return true
+	return false
 
 
 ## The Windows account name, tidied up ("joao.pais" -> "Joao").

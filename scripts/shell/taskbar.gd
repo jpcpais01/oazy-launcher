@@ -38,6 +38,8 @@ func _ready() -> void:
 	offset_top = -(HEIGHT + MARGIN)
 	offset_bottom = -MARGIN
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_entered.connect(func() -> void: App.pointer_on_bar = true)
+	mouse_exited.connect(func() -> void: App.pointer_on_bar = false)
 
 	_glass = GlassPanel.new(true, 22.0, GlassPanel.TINT_BAR)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -235,6 +237,11 @@ func _group(groups: Dictionary, order: Array[String], ref: String) -> Dictionary
 	return groups[ref]
 
 
+## The part of the screen the taskbar's layer keeps (see Shell).
+func shell_shape() -> Array[Rect2]:
+	return [get_global_rect().grow(MARGIN)]
+
+
 func button_for(ref: String) -> TaskbarButton:
 	return _buttons.get(ref)
 
@@ -316,15 +323,16 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 		_menu.add_icon_item(Icons.tex("plus" if running else "play", 18), "New window" if running else "Open", 0)
 	if btn.ref.begins_with("lib:"):
 		_menu.add_icon_item(Icons.tex("info", 18), "Details", 4)
+	main.add_favorite_item(_menu, btn.ref, 5)
 	var pinned := Catalog.is_pinned(btn.ref)
 	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 1)
 	if running:
 		_menu.add_separator()
 		_menu.add_icon_item(Icons.tex("close", 18, App.DANGER.lightened(0.2)), "Close all windows" if btn.window_count() > 1 else "Close window", 2)
 	_menu.reset_size()
-	var vp := get_viewport_rect().size
+	var vp := Shell.view_size()
 	_menu.position = Vector2i(int(clampf(at.x - _menu.size.x / 2.0, 8.0, vp.x - _menu.size.x - 8.0)), int(get_global_rect().position.y - _menu.size.y - 10.0))
-	_menu.popup()
+	Shell.popup(_menu)
 	Sfx.play(&"open")
 
 
@@ -347,6 +355,8 @@ func _on_menu(id: int) -> void:
 				btn.shell_window.close()
 		4:
 			main.focus_entry(btn.ref.substr(4))
+		5:
+			main.toggle_favorite(btn.ref)
 
 
 # --- Tray ----------------------------------------------------------------------------------

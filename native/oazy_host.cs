@@ -44,6 +44,15 @@ namespace Oazy
 		public struct POINT { public int x, y; }
 
 		[StructLayout(LayoutKind.Sequential)]
+		public struct MONITORINFO
+		{
+			public int cbSize;
+			public RECT rcMonitor;
+			public RECT rcWork;
+			public uint dwFlags;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
 		public struct BITMAP
 		{
 			public int bmType, bmWidth, bmHeight, bmWidthBytes;
@@ -168,6 +177,13 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr DispatchMessage(ref MSG msg);
 		[DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint pid, uint thread, uint flags);
 		[DllImport("user32.dll")] public static extern bool LockWorkStation();
+		[DllImport("user32.dll", EntryPoint = "SetWindowLongW")] public static extern int SetWindowLong(IntPtr h, int index, int value);
+		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+		[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+		[DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint action, uint param, ref RECT rect, uint winIni);
+		[DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+		[DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr mon, ref MONITORINFO info);
 		[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 		[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
 		[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
@@ -178,6 +194,8 @@ namespace Oazy
 		[DllImport("kernel32.dll")] public static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX status);
 		[DllImport("kernel32.dll")] public static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
 		[DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
+		[DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT value, int size);
+		[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
 		[DllImport("dwmapi.dll")] public static extern int DwmRegisterThumbnail(IntPtr dest, IntPtr src, out IntPtr thumb);
 		[DllImport("dwmapi.dll")] public static extern int DwmUnregisterThumbnail(IntPtr thumb);
 		[DllImport("dwmapi.dll")] public static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref DWM_THUMBNAIL_PROPERTIES props);
@@ -241,6 +259,17 @@ namespace Oazy
 		const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 		const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;
 		const int SIIGBF_ICONONLY = 4;
+		const int SW_HIDE = 0;
+		const int SW_SHOWMINNOACTIVE = 7;
+		const int SW_SHOWNA = 8;
+		const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200;
+		const uint SPI_GETWORKAREA = 0x30, SPI_SETWORKAREA = 0x2F, SPIF_SENDCHANGE = 0x2;
+		const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+		const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+		const int DWMWA_BORDER_COLOR = 34, DWMWA_CAPTION_COLOR = 35, DWMWA_TEXT_COLOR = 36;
+		const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+		const int DWM_COLOR_DEFAULT = unchecked((int)0xFFFFFFFF);
+		const int DWM_COLOR_NONE = unchecked((int)0xFFFFFFFE);
 
 		static readonly object OutLock = new object();
 		static readonly object CacheLock = new object();
@@ -257,6 +286,22 @@ namespace Oazy
 		static ulong LastIdle, LastBusy;
 		static Native.PROPERTYKEY PKEY_AppUserModel_ID;
 
+		// Shell mode: Oazy is the desktop. These remember what we changed so it
+		// can all be put back, even after a crash (see RestorePath).
+		static readonly object ShellLock = new object();
+		static bool ShellOn;
+		static IntPtr Desktop = IntPtr.Zero;
+		static bool HideTray;
+		static bool TrayHidden;
+		static readonly List<IntPtr> HiddenDesktop = new List<IntPtr>();
+		static Native.RECT OrigWork, ShellWork;
+		static bool WorkSaved, WorkSet;
+		static readonly List<IntPtr> Peeked = new List<IntPtr>();
+		static bool ThemeOn;
+		static int ThemeBorder, ThemeCaption, ThemeText;
+		static readonly Dictionary<long, int> Themed = new Dictionary<long, int>();
+		static string RestorePath = "";
+
 		[STAThread, HandleProcessCorruptedStateExceptions, SecurityCritical]
 		static int Main(string[] args)
 		{
@@ -265,6 +310,10 @@ namespace Oazy
 			if (args.Length > 0) int.TryParse(args[0], out ParentPid);
 			PKEY_AppUserModel_ID.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
 			PKEY_AppUserModel_ID.pid = 5;
+
+			try { RestorePath = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "shell-restore.txt"); }
+			catch (Exception) { RestorePath = ""; }
+			RecoverStale();
 
 			Out = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
 			Out.AutoFlush = true;
@@ -290,6 +339,7 @@ namespace Oazy
 				Write("{\"id\":" + Num(p[0]) + "," + reply + "}");
 			}
 			ClearThumbs();
+			ExitShell();
 			return 0;
 		}
 
@@ -364,7 +414,18 @@ namespace Oazy
 				case "apps":
 					return "\"ok\":true,\"apps\":" + AppsJson();
 				case "thumb":
-					return Thumb(H(Arg(p, 2)), Int(Arg(p, 3), 0), Int(Arg(p, 4), 0), Int(Arg(p, 5), 0), Int(Arg(p, 6), 0), Int(Arg(p, 7), 255));
+					return Thumb(H(Arg(p, 2)), Int(Arg(p, 3), 0), Int(Arg(p, 4), 0), Int(Arg(p, 5), 0), Int(Arg(p, 6), 0), Int(Arg(p, 7), 255), H(Arg(p, 8)));
+				case "shell":
+					return EnterShell(H(Arg(p, 2)), Int(Arg(p, 3), 0), Arg(p, 4) == "1");
+				case "unshell":
+					ExitShell();
+					return "\"ok\":true";
+				case "style":
+					return Style(H(Arg(p, 2)), Arg(p, 3));
+				case "theme":
+					return Theme(Arg(p, 2) == "1", Int(Arg(p, 3), 0), Int(Arg(p, 4), 0), Int(Arg(p, 5), 0));
+				case "show_desktop":
+					return ShowDesktop();
 				case "thumb_clear":
 					ClearThumbs();
 					return "\"ok\":true";
@@ -509,7 +570,12 @@ namespace Oazy
 				foreach (long k in Aumids.Keys) if (!alive.Contains(k)) gone.Add(k);
 				foreach (long k in gone) Aumids.Remove(k);
 			}
-			return "\"windows\":[" + string.Join(",", list.ToArray()) + "],\"fg\":" + fg.ToInt64() + ",\"self_fg\":" + Json.Bool(fg == Self && Self != IntPtr.Zero);
+			ThemeWindows(alive);
+			uint fgPid;
+			Native.GetWindowThreadProcessId(fg, out fgPid);
+			bool selfFg = fg != IntPtr.Zero && ((fg == Self && Self != IntPtr.Zero) || (ParentPid != 0 && fgPid == (uint)ParentPid));
+			return "\"windows\":[" + string.Join(",", list.ToArray()) + "],\"fg\":" + fg.ToInt64() + ",\"self_fg\":" + Json.Bool(selfFg)
+				+ ",\"fs\":" + Json.Bool(!selfFg && IsFullscreen(fg));
 		}
 
 		static bool Focus(IntPtr h)
@@ -535,15 +601,16 @@ namespace Oazy
 
 		// --- Live thumbnails -------------------------------------------------------
 
-		static string Thumb(IntPtr src, int x, int y, int w, int hgt, int opacity)
+		static string Thumb(IntPtr src, int x, int y, int w, int hgt, int opacity, IntPtr dest)
 		{
-			if (Self == IntPtr.Zero || src == IntPtr.Zero || w <= 0 || hgt <= 0) return "\"ok\":false";
+			if (dest == IntPtr.Zero) dest = Self;
+			if (dest == IntPtr.Zero || src == IntPtr.Zero || w <= 0 || hgt <= 0) return "\"ok\":false";
 			IntPtr thumb;
 			lock (Thumbs)
 			{
 				if (!Thumbs.TryGetValue(src.ToInt64(), out thumb))
 				{
-					if (Native.DwmRegisterThumbnail(Self, src, out thumb) != 0) return "\"ok\":false";
+					if (Native.DwmRegisterThumbnail(dest, src, out thumb) != 0) return "\"ok\":false";
 					Thumbs[src.ToInt64()] = thumb;
 				}
 			}
@@ -784,6 +851,303 @@ namespace Oazy
 				+ ",\"charging\":" + Json.Bool(charging);
 		}
 
+
+		// --- Shell mode ----------------------------------------------------------------
+		//
+		// Oazy's desktop window sits at the bottom of the z-order (above nothing,
+		// since Explorer's desktop is hidden), its taskbar and Start float on top,
+		// and the work area stops above Oazy's taskbar so maximised apps fit. The
+		// Windows taskbar is hidden while this is on.
+
+		static void SetExStyle(IntPtr h, int ex)
+		{
+			Native.SetWindowLong(h, GWL_EXSTYLE, ex);
+			Native.SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | 0x4);
+		}
+
+		static void KeepDesktopDown()
+		{
+			if (Desktop == IntPtr.Zero) return;
+			Native.SetWindowPos(Desktop, new IntPtr(1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+		}
+
+		static Native.RECT MonitorRect(IntPtr h, bool work)
+		{
+			Native.MONITORINFO mi = new Native.MONITORINFO();
+			mi.cbSize = Marshal.SizeOf(typeof(Native.MONITORINFO));
+			IntPtr mon = Native.MonitorFromWindow(h, 1);
+			Native.GetMonitorInfo(mon, ref mi);
+			return work ? mi.rcWork : mi.rcMonitor;
+		}
+
+		static bool SameRect(Native.RECT a, Native.RECT b)
+		{
+			return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
+		}
+
+		static string EnterShell(IntPtr desktop, int reserve, bool hideTray)
+		{
+			lock (ShellLock)
+			{
+				Desktop = desktop;
+				HideTray = hideTray;
+				if (desktop != IntPtr.Zero)
+				{
+					int ex = Native.GetWindowLong(desktop, GWL_EXSTYLE);
+					SetExStyle(desktop, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+				}
+				if (!WorkSaved)
+				{
+					Native.RECT w = new Native.RECT();
+					Native.SystemParametersInfo(SPI_GETWORKAREA, 0, ref w, 0);
+					OrigWork = w;
+					WorkSaved = true;
+				}
+				ShellOn = true;
+				HideExplorer();
+				ShellWork = MonitorRect(desktop, false);
+				ShellWork.Bottom -= Math.Max(0, reserve);
+				WorkSet = reserve > 0;
+				if (WorkSet) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref ShellWork, SPIF_SENDCHANGE);
+				KeepDesktopDown();
+				WriteRestore();
+			}
+			return "\"ok\":true,\"tray_hidden\":" + Json.Bool(TrayHidden);
+		}
+
+		static void HideExplorer()
+		{
+			if (HideTray)
+			{
+				IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
+				if (tray != IntPtr.Zero && Native.IsWindowVisible(tray))
+				{
+					Native.ShowWindow(tray, SW_HIDE);
+					TrayHidden = true;
+				}
+			}
+			// Explorer's own desktop (wallpaper and icons) would cover Oazy's, which
+			// sits at the very bottom.
+			IntPtr progman = Native.FindWindow("Progman", null);
+			uint explorerPid = 0;
+			if (progman != IntPtr.Zero) Native.GetWindowThreadProcessId(progman, out explorerPid);
+			Native.EnumWindows(delegate(IntPtr h, IntPtr l)
+			{
+				string cls = ClassName(h);
+				if ((cls == "Progman" || cls == "WorkerW") && Native.IsWindowVisible(h))
+				{
+					uint pid;
+					Native.GetWindowThreadProcessId(h, out pid);
+					if (pid == explorerPid)
+					{
+						Native.ShowWindow(h, SW_HIDE);
+						if (!HiddenDesktop.Contains(h)) HiddenDesktop.Add(h);
+					}
+				}
+				return true;
+			}, IntPtr.Zero);
+		}
+
+		// Explorer restarts and display changes undo what we set; put it back.
+		static void ReassertShell()
+		{
+			lock (ShellLock)
+			{
+				if (!ShellOn) return;
+				HideExplorer();
+				if (WorkSet)
+				{
+					Native.RECT cur = new Native.RECT();
+					Native.SystemParametersInfo(SPI_GETWORKAREA, 0, ref cur, 0);
+					if (!SameRect(cur, ShellWork)) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref ShellWork, SPIF_SENDCHANGE);
+				}
+			}
+		}
+
+		static void ExitShell()
+		{
+			lock (ShellLock)
+			{
+				if (TrayHidden)
+				{
+					IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
+					if (tray != IntPtr.Zero) Native.ShowWindow(tray, SW_SHOWNA);
+					TrayHidden = false;
+				}
+				foreach (IntPtr h in HiddenDesktop) if (Native.IsWindow(h)) Native.ShowWindow(h, SW_SHOWNA);
+				HiddenDesktop.Clear();
+				if (WorkSet && WorkSaved) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref OrigWork, SPIF_SENDCHANGE);
+				WorkSet = false;
+				ShellOn = false;
+				ThemeOn = false;
+				ResetTheme();
+				try { if (RestorePath != "" && File.Exists(RestorePath)) File.Delete(RestorePath); }
+				catch (Exception) { }
+			}
+		}
+
+		static void WriteRestore()
+		{
+			if (RestorePath == "") return;
+			try
+			{
+				File.WriteAllText(RestorePath, string.Format("{0} {1} {2} {3} {4}", OrigWork.Left, OrigWork.Top, OrigWork.Right, OrigWork.Bottom, TrayHidden ? 1 : 0));
+			}
+			catch (Exception) { }
+		}
+
+		// A previous run ended without cleaning up (killed, power loss): bring the
+		// Windows taskbar, desktop and work area back before anything else.
+		static void RecoverStale()
+		{
+			if (RestorePath == "" || !File.Exists(RestorePath)) return;
+			try
+			{
+				string[] v = File.ReadAllText(RestorePath).Trim().Split(' ');
+				if (v.Length >= 5)
+				{
+					Native.RECT r = new Native.RECT();
+					r.Left = int.Parse(v[0]); r.Top = int.Parse(v[1]); r.Right = int.Parse(v[2]); r.Bottom = int.Parse(v[3]);
+					if (r.Right > r.Left && r.Bottom > r.Top) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref r, SPIF_SENDCHANGE);
+					if (v[4] == "1")
+					{
+						IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
+						if (tray != IntPtr.Zero) Native.ShowWindow(tray, SW_SHOWNA);
+					}
+				}
+				IntPtr progman = Native.FindWindow("Progman", null);
+				if (progman != IntPtr.Zero && !Native.IsWindowVisible(progman)) Native.ShowWindow(progman, SW_SHOWNA);
+				File.Delete(RestorePath);
+			}
+			catch (Exception) { }
+		}
+
+		static bool IsFullscreen(IntPtr h)
+		{
+			if (h == IntPtr.Zero || h == Desktop) return false;
+			string cls = ClassName(h);
+			if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd") return false;
+			Native.RECT r;
+			if (!Native.GetWindowRect(h, out r)) return false;
+			Native.RECT m = MonitorRect(h, false);
+			return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
+		}
+
+		// --- Window looks ------------------------------------------------------------
+
+		// Oazy's own layers (taskbar, Start, previews, dialogs, Oazy's windows) are
+		// screen-sized transparent windows cut to shape: no Alt+Tab entry, no
+		// rounding or frame from Windows, dark like the rest.
+		static string Style(IntPtr h, string kind)
+		{
+			if (h == IntPtr.Zero || !Native.IsWindow(h)) return "\"ok\":false";
+			int ex = Native.GetWindowLong(h, GWL_EXSTYLE);
+			SetExStyle(h, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+			int dark = 1;
+			Native.DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, 4);
+			int corner = 1;
+			Native.DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, 4);
+			int none = DWM_COLOR_NONE;
+			Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref none, 4);
+			return "\"ok\":true,\"kind\":" + Json.Str(kind);
+		}
+
+		// Gives other apps' title bars and borders Oazy's colours (Windows 11).
+		static string Theme(bool on, int border, int caption, int text)
+		{
+			lock (ShellLock)
+			{
+				ThemeOn = on;
+				ThemeBorder = border;
+				ThemeCaption = caption;
+				ThemeText = text;
+				if (!on) ResetTheme();
+				else
+				{
+					// New colours for windows we already themed; their original
+					// dark-mode value stays remembered for the reset.
+					foreach (long k in Themed.Keys)
+					{
+						IntPtr h = new IntPtr(k);
+						int b = border, c = caption, t = text;
+						Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref b, 4);
+						Native.DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, ref c, 4);
+						Native.DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, ref t, 4);
+					}
+				}
+			}
+			Dirty = true;
+			return "\"ok\":true";
+		}
+
+		static void ThemeWindows(HashSet<long> alive)
+		{
+			lock (ShellLock)
+			{
+				List<long> gone = new List<long>();
+				foreach (long k in Themed.Keys) if (!alive.Contains(k)) gone.Add(k);
+				foreach (long k in gone) Themed.Remove(k);
+				if (!ThemeOn) return;
+				foreach (long k in alive)
+				{
+					if (Themed.ContainsKey(k)) continue;
+					IntPtr h = new IntPtr(k);
+					int wasDark;
+					if (Native.DwmGetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, out wasDark, 4) != 0) wasDark = 0;
+					int dark = 1, b = ThemeBorder, c = ThemeCaption, t = ThemeText;
+					Native.DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, 4);
+					Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref b, 4);
+					Native.DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, ref c, 4);
+					Native.DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, ref t, 4);
+					Themed[k] = wasDark;
+				}
+			}
+		}
+
+		static void ResetTheme()
+		{
+			foreach (KeyValuePair<long, int> kv in Themed)
+			{
+				IntPtr h = new IntPtr(kv.Key);
+				if (!Native.IsWindow(h)) continue;
+				int d = DWM_COLOR_DEFAULT, dark = kv.Value;
+				Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref d, 4);
+				d = DWM_COLOR_DEFAULT;
+				Native.DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, ref d, 4);
+				d = DWM_COLOR_DEFAULT;
+				Native.DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, ref d, 4);
+				Native.DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, 4);
+			}
+			Themed.Clear();
+		}
+
+		// Minimise everything to show the desktop; again brings it all back.
+		static string ShowDesktop()
+		{
+			List<IntPtr> open = new List<IntPtr>();
+			Native.EnumWindows(delegate(IntPtr h, IntPtr l)
+			{
+				uint pid;
+				Native.GetWindowThreadProcessId(h, out pid);
+				if (IsAppWindow(h, pid) && !Native.IsIconic(h)) open.Add(h);
+				return true;
+			}, IntPtr.Zero);
+			if (open.Count > 0)
+			{
+				foreach (IntPtr h in open) Native.ShowWindow(h, SW_SHOWMINNOACTIVE);
+				lock (Peeked) { Peeked.Clear(); Peeked.AddRange(open); }
+				return "\"ok\":true,\"action\":\"minimize\"";
+			}
+			List<IntPtr> back;
+			lock (Peeked) { back = new List<IntPtr>(Peeked); Peeked.Clear(); }
+			for (int i = back.Count - 1; i >= 0; i--)
+			{
+				if (Native.IsWindow(back[i]) && Native.IsIconic(back[i])) Native.ShowWindow(back[i], SW_RESTORE);
+			}
+			if (back.Count > 0) Focus(back[0]);
+			return "\"ok\":true,\"action\":\"restore\"";
+		}
+
 		// --- Events: window changes and the home hotkey ----------------------------------
 
 		static void MessageLoop()
@@ -793,7 +1157,7 @@ namespace Oazy
 			Native.SetWinEventHook(0x0003, 0x0003, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x0016, 0x0017, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x8000, 0x8003, IntPtr.Zero, HookProc, 0, 0, 0);
-			Native.SetWinEventHook(0x800C, 0x800C, IntPtr.Zero, HookProc, 0, 0, 0);
+			Native.SetWinEventHook(0x800B, 0x800C, IntPtr.Zero, HookProc, 0, 0, 0);
 			bool hotkey = Native.RegisterHotKey(IntPtr.Zero, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4F);
 			Write("{\"ev\":\"ready\",\"hotkey\":" + Json.Bool(hotkey) + "}");
 			Native.MSG msg;
@@ -808,14 +1172,25 @@ namespace Oazy
 		static void OnWinEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
 		{
 			if (idObject != 0 || idChild != 0 || hwnd == IntPtr.Zero) return;
+			if (ev == 0x800B)
+			{
+				// Location changes are chatty: only the foreground window matters
+				// (it may have just gone fullscreen).
+				if (hwnd == Native.GetForegroundWindow()) Dirty = true;
+				return;
+			}
 			if (ev >= 0x8000 && Native.GetAncestor(hwnd, GA_ROOT) != hwnd) return;
+			if (ev == 0x0003 && ShellOn && hwnd == Desktop) KeepDesktopDown();
 			Dirty = true;
 		}
 
 		static void OnHotkey()
 		{
-			bool wasForeground = Self != IntPtr.Zero && Native.GetForegroundWindow() == Self;
-			if (!wasForeground && Self != IntPtr.Zero) Focus(Self);
+			IntPtr fg = Native.GetForegroundWindow();
+			uint pid;
+			Native.GetWindowThreadProcessId(fg, out pid);
+			bool wasForeground = fg != IntPtr.Zero && (fg == Self || (ParentPid != 0 && pid == (uint)ParentPid));
+			if (!wasForeground && Self != IntPtr.Zero && !ShellOn) Focus(Self);
 			Write("{\"ev\":\"hotkey\",\"was_fg\":" + Json.Bool(wasForeground) + "}");
 		}
 
@@ -836,13 +1211,15 @@ namespace Oazy
 			while (true)
 			{
 				Thread.Sleep(2000);
+				try { ReassertShell(); }
+				catch (Exception) { }
 				if (ParentPid <= 0) continue;
 				try
 				{
 					Process p = Process.GetProcessById(ParentPid);
-					if (p.HasExited) Environment.Exit(0);
+					if (p.HasExited) { ExitShell(); Environment.Exit(0); }
 				}
-				catch (ArgumentException) { ClearThumbs(); Environment.Exit(0); }
+				catch (ArgumentException) { ClearThumbs(); ExitShell(); Environment.Exit(0); }
 				catch (Exception) { }
 			}
 		}

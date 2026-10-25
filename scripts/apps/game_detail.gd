@@ -95,7 +95,7 @@ func _ready() -> void:
 	_fav = FxButton.icon_only("heart", "Favourite", 22, 52)
 	_fav.variant = FxButton.Style.GHOST
 	_fav._apply_style()
-	_fav.pressed.connect(func() -> void: Library.toggle_favorite(entry_id))
+	_fav.pressed.connect(func() -> void: Catalog.toggle_favorite("lib:" + entry_id))
 	actions.add_child(_fav)
 	var edit := FxButton.make("Edit", "edit", FxButton.Style.GHOST, 52)
 	edit.pressed.connect(func() -> void: main.open_edit(entry_id))

@@ -157,6 +157,27 @@ func _logic_tests() -> void:
 	check(Catalog.search("s")[0]["name"] == "Steam", "catalog: recently opened ranks first")
 	Settings.set_value("recent_apps", [])
 
+	# Favourites: anything you can open, in the order you added them.
+	var lib_ref := "lib:" + str(Library.entries[0]["id"])
+	Catalog.set_favorite(lib_ref, false)
+	Catalog.set_favorite("app:Chrome", true)
+	Catalog.set_favorite(lib_ref, true)
+	check(Catalog.is_favorite("app:Chrome") and Catalog.is_favorite(lib_ref), "favourites: add")
+	check(bool(Library.get_entry(lib_ref.substr(4))["favorite"]), "favourites: library entries keep the heart")
+	check(Catalog.favorites().slice(0, 2) == ["app:Chrome", lib_ref], "favourites: in the order added")
+	check(Catalog.toggle_favorite("app:Chrome") == false and not Catalog.favorites().has("app:Chrome"), "favourites: remove")
+	check(not Catalog.can_favorite("web:x") and Catalog.can_favorite("oazy:settings"), "favourites: only things you can open")
+	Library.toggle_favorite(lib_ref.substr(4))
+	check(not Catalog.is_favorite(lib_ref) and not Catalog.favorites().has(lib_ref), "favourites: follow the library's heart")
+	Catalog.set_favorite("app:Chrome", true)
+
+	# Shell mode: a layer's window is cut to the union of what it shows.
+	check(not Shell.native, "shell: one window in tests")
+	var poly := Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(50, 50, 10, 10)] as Array[Rect2], 2.0)
+	check(poly.size() == 13 and poly[1] == Vector2(0, 0) and poly[8] == Vector2(120, 100), "shell: shape of separate parts")
+	check(Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(5, 5, 10, 10)] as Array[Rect2], 1.0).size() == 7, "shell: overlapping parts merge")
+	check(Shell.union_polygon([] as Array[Rect2], 1.0).is_empty(), "shell: nothing to show")
+
 
 func _mock_apps() -> Array:
 	return [
@@ -265,7 +286,23 @@ func _ui_tests() -> void:
 	main.show_entry_menu(first_id, Vector2(200, 200))
 	await _wait(0.30)
 	check(main.modal_open(), "ui: dialogs open")
+	check(_menu_has(main._menu, "favourites"), "favourites: in the library menu")
 	main._menu.hide()
+	main.show_ref_menu("app:Chrome", Vector2(200, 200))
+	check(_menu_has(main._menu, "Remove from favourites"), "favourites: in app menus")
+	main._menu.hide()
+	main.taskbar._on_context(main.taskbar.button_for("app:Chrome"), Vector2(400, 800))
+	check(_menu_has(main.taskbar._menu, "favourites"), "favourites: in the taskbar menu")
+	main.taskbar._menu.hide()
+	main.start.open()
+	await _wait(0.3)
+	check(main.start._favs.visible and main.start._favs.get_child_count() > 0, "favourites: at the top of Start")
+	check(main.start.get_global_rect().end.y <= main.taskbar.get_global_rect().position.y + 1.0, "favourites: Start still fits")
+	main.start._show_menu("app:Chrome", Vector2(300, 300))
+	check(_menu_has(main.start._menu, "favourites"), "favourites: in Start's menu")
+	main.start._menu.hide()
+	main.start.close()
+	check(main.desktop._favs_glass.visible and main.desktop._favs.get_child_count() > 0, "favourites: on the desktop")
 	for m in get_tree().get_nodes_in_group("modal"):
 		m.close()
 	await _wait(0.60)
@@ -330,6 +367,13 @@ func _layout_checks(main: Node, where: String) -> void:
 	check(screen.encloses(main.taskbar.orb.get_global_rect()), "layout(%s): Start orb on screen" % where)
 	check(main.layer.work_rect().end.y <= bar.position.y + 1.0, "layout(%s): windows stay above the taskbar" % where)
 	check(main.desktop.size.distance_to(vp) < 1.0, "layout(%s): desktop fills the window" % where)
+
+
+func _menu_has(menu: PopupMenu, text: String) -> bool:
+	for i in menu.item_count:
+		if menu.get_item_text(i).contains(text):
+			return true
+	return false
 
 
 func _wait(seconds: float) -> void:

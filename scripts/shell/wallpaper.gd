@@ -1,19 +1,22 @@
 class_name Wallpaper
 extends ColorRect
-## The desktop background (shaders/oasis.gdshader). Its sky follows the local
-## time of day unless a fixed light is picked in Settings.
+## The desktop background (shaders/oasis.gdshader): soft pools of colour that
+## follow the local time of day unless a fixed light is picked in Settings.
 
 const SHADER := preload("res://shaders/oasis.gdshader")
-## sky_top, sky_mid, horizon, ground, sun
+## base, pool a, pool b, pool c, glow
 const PALETTES := {
-	"night": [Color("04121d"), Color("0a2f3c"), Color("6a4a5e"), Color("030a0f"), Color("bcd6ff")],
-	"dawn": [Color("0f2747"), Color("2b647b"), Color("f0a47c"), Color("0c151e"), Color("ffd8b6")],
-	"day": [Color("0a3f60"), Color("17808f"), Color("ecca94"), Color("0b1f25"), Color("fff3da")],
-	"dusk": [Color("141a3d"), Color("304b69"), Color("ee8f6b"), Color("0a0f1e"), Color("ffc49c")],
+	"night": [Color("05070d"), Color("1d2b5a"), Color("0d404d"), Color("281a3c"), Color("8fb4ff")],
+	"dawn": [Color("0a1020"), Color("2f3c72"), Color("1b5566"), Color("b5786a"), Color("ffd2b0")],
+	"day": [Color("081722"), Color("17506b"), Color("1f7470"), Color("a7845f"), Color("fff1d6")],
+	"dusk": [Color("0b0919"), Color("3f2a61"), Color("173d55"), Color("b0594f"), Color("ffc0a0")],
 }
-const PARAMS := ["sky_top", "sky_mid", "horizon", "ground", "sun_color"]
+const PARAMS := ["wall_base", "wall_a", "wall_b", "wall_c", "wall_glow"]
 ## Hour -> palette keyframes for "auto".
 const KEYS := [[0.0, "night"], [5.0, "night"], [7.0, "dawn"], [9.5, "day"], [16.5, "day"], [19.0, "dusk"], [21.0, "night"], [24.0, "night"]]
+
+## The wallpaper's current shader parameters, for glass that draws it itself.
+static var shared := {}
 
 var mat: ShaderMaterial
 var _accent_tween: Tween
@@ -32,7 +35,8 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	resized.connect(func() -> void:
 		if size.y > 0.0:
-			mat.set_shader_parameter("aspect", size.x / size.y)
+			_param("aspect", size.x / size.y)
+			_publish()
 	)
 	App.accent_changed.connect(_tween_accent)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
@@ -46,15 +50,15 @@ func _ready() -> void:
 	timer.autostart = true
 	timer.timeout.connect(update_sky)
 	add_child(timer)
-	mat.set_shader_parameter("accent", _accent)
+	_param("accent", _accent)
 	apply_effects()
 	update_sky()
 
 
 func apply_effects() -> void:
 	var eco: bool = Settings.get_value("effects") == "eco"
-	mat.set_shader_parameter("speed", 0.35 if eco else 1.0)
-	mat.set_shader_parameter("bubbles", 0.0 if eco else 1.0)
+	_param("speed", 0.35 if eco else 1.0)
+	_publish()
 
 
 ## Palette for a fixed light, or blended from the clock for "auto".
@@ -81,7 +85,8 @@ func update_sky() -> void:
 	var hour := float(t["hour"]) + float(t["minute"]) / 60.0
 	var p := palette_for(str(Settings.get_value("wallpaper_light")), hour)
 	for i in PARAMS.size():
-		mat.set_shader_parameter(PARAMS[i], p[i])
+		_param(PARAMS[i], p[i])
+	_publish()
 
 
 func _tween_accent(c: Color) -> void:
@@ -91,5 +96,17 @@ func _tween_accent(c: Color) -> void:
 	_accent_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_accent_tween.tween_method(func(k: float) -> void:
 		_accent = from.lerp(c, k)
-		mat.set_shader_parameter("accent", _accent)
+		_param("accent", _accent)
+		_publish()
 	, 0.0, 1.0, 0.8)
+
+
+func _param(param: String, value: Variant) -> void:
+	mat.set_shader_parameter(param, value)
+	if is_inside_tree() and get_tree().current_scene == get_parent():
+		shared[param] = value
+
+
+func _publish() -> void:
+	if is_inside_tree() and get_tree().current_scene == get_parent():
+		get_tree().call_group("glass", "sync_wall")

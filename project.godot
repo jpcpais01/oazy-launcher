@@ -48,6 +48,7 @@ window/size/borderless=true
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/vsync/vsync_mode=1
+window/per_pixel_transparency/allowed=true
 
 [gui]
 

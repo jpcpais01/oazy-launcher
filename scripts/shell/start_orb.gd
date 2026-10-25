@@ -1,7 +1,7 @@
 class_name StartOrb
 extends Control
-## The Start button: a small glossy glass orb in the accent colour, with a
-## halo that blooms on hover and while Start is open.
+## The Start button: a small orb in the accent colour, with a soft halo that
+## blooms on hover and while Start is open.
 
 signal pressed
 
@@ -53,10 +53,10 @@ func set_open(v: bool) -> void:
 
 func _restyle() -> void:
 	var a := App.accent
-	_plate_mat.set_shader_parameter("color_a", a.lightened(0.28))
-	_plate_mat.set_shader_parameter("color_b", a.darkened(0.42))
+	_plate_mat.set_shader_parameter("color_a", a.lightened(0.12))
+	_plate_mat.set_shader_parameter("color_b", a.darkened(0.3))
 	var s := Kit.box(Color(a, 0.0), 999)
-	Kit.shadowed(s, Color(a, 0.55), 16, Vector2.ZERO)
+	Kit.shadowed(s, Color(a, 0.38), 14, Vector2.ZERO)
 	_halo.add_theme_stylebox_override("panel", s)
 
 

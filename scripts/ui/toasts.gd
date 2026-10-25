@@ -18,6 +18,12 @@ func _ready() -> void:
 	add_child(_stack)
 
 
+func shell_shape() -> Array[Rect2]:
+	if _stack.get_child_count() == 0:
+		return []
+	return [_stack.get_global_rect().grow(20.0)]
+
+
 func show_toast(text: String, kind: StringName = &"info", action: Callable = Callable()) -> void:
 	var color := App.accent
 	var icon := "info"

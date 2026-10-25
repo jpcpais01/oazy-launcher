@@ -19,6 +19,33 @@ func _ready() -> void:
 	_ghost.visible = false
 	add_child(_ghost)
 	resized.connect(_fit_windows)
+	var surface := Shell.surface_of(self)
+	if surface:
+		# Shell mode: these windows share one OS window, which comes and goes
+		# from the front as you switch between them and other apps.
+		surface.focus_entered.connect(func() -> void:
+			if active_window() == null:
+				activate(top_window())
+		)
+		surface.focus_exited.connect(deactivate_all)
+
+
+## The part of the screen this layer keeps in shell mode: each open window
+## plus room for its shadow, and the snap preview while dragging.
+func shell_shape() -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	for w in windows():
+		if w.visible and w.modulate.a > 0.01:
+			out.append(w.get_global_rect().grow(20.0))
+	if _ghost.visible:
+		out.append(_ghost.get_global_rect())
+	return out
+
+
+func _input(event: InputEvent) -> void:
+	# In one-window mode main routes clicks; in shell mode the layer does.
+	if Shell.native and event is InputEventMouseButton and event.pressed:
+		press_at(event.position)
 
 
 func windows() -> Array[ShellWindow]:
