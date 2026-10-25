@@ -36,7 +36,7 @@ func shell_shape() -> Array[Rect2]:
 	var out: Array[Rect2] = []
 	for w in windows():
 		if w.visible and w.modulate.a > 0.01:
-			out.append(w.get_global_rect().grow(20.0))
+			out.append(w.shell_rect())
 	if _ghost.visible:
 		out.append(_ghost.get_global_rect())
 	return out

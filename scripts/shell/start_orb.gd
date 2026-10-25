@@ -1,17 +1,16 @@
 class_name StartOrb
 extends Control
-## The Start button: a small orb in the accent colour, with a soft halo that
-## blooms on hover and while Start is open.
+## The Start button: Oazy's own app icon, with a soft halo in the accent colour
+## that blooms on hover and while Start is open.
 
 signal pressed
 
 const SIZE := 50.0
-const PLATE := preload("res://shaders/plate.gdshader")
+const ICON := preload("res://assets/icon.png")
 
 var open := false: set = set_open
 var _halo: Panel
-var _plate_mat: ShaderMaterial
-var _glyph: TextureRect
+var _icon: TextureRect
 var _hot := false
 
 
@@ -23,22 +22,19 @@ func _ready() -> void:
 	pivot_offset = Vector2(SIZE, SIZE) / 2.0
 	_halo = Panel.new()
 	_halo.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_halo.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_halo.position = Vector2(4, 4)
+	_halo.size = Vector2(SIZE - 8.0, SIZE - 8.0)
 	_halo.modulate.a = 0.0
 	add_child(_halo)
-	var plate := ColorRect.new()
-	_plate_mat = ShaderMaterial.new()
-	_plate_mat.shader = PLATE
-	_plate_mat.set_shader_parameter("rect_size", Vector2(SIZE - 6.0, SIZE - 6.0))
-	_plate_mat.set_shader_parameter("radius", (SIZE - 6.0) / 2.0)
-	plate.material = _plate_mat
-	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	plate.position = Vector2(3, 3)
-	plate.size = Vector2(SIZE - 6.0, SIZE - 6.0)
-	add_child(plate)
-	_glyph = Kit.icon_rect("leaf", 22, Color.WHITE)
-	_glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_glyph)
+	_icon = TextureRect.new()
+	_icon.texture = ICON
+	_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_icon.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_icon.position = Vector2(3, 3)
+	_icon.size = Vector2(SIZE - 6.0, SIZE - 6.0)
+	add_child(_icon)
 	mouse_entered.connect(_set_hot.bind(true))
 	mouse_exited.connect(_set_hot.bind(false))
 	App.accent_changed.connect(func(_c: Color) -> void: _restyle())
@@ -53,10 +49,8 @@ func set_open(v: bool) -> void:
 
 func _restyle() -> void:
 	var a := App.accent
-	_plate_mat.set_shader_parameter("color_a", a.lightened(0.12))
-	_plate_mat.set_shader_parameter("color_b", a.darkened(0.3))
-	var s := Kit.box(Color(a, 0.0), 999)
-	Kit.shadowed(s, Color(a, 0.38), 14, Vector2.ZERO)
+	var s := Kit.box(Color(a, 0.0), 12)
+	Kit.shadowed(s, Color(a.lightened(0.2), 0.42), 14, Vector2.ZERO)
 	_halo.add_theme_stylebox_override("panel", s)
 
 

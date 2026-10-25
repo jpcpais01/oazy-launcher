@@ -5,7 +5,7 @@ extends Control
 
 signal visibility_changed_to(open: bool)
 
-const W := 800.0
+const W := 900.0
 const H := 700.0
 const COLS := 6
 const WEB_SEARCH := "https://www.google.com/search?q="
@@ -13,6 +13,7 @@ const WEB_SEARCH := "https://www.google.com/search?q="
 var main: Node
 var is_open := false
 var _glass: GlassPanel
+var _root: VBoxContainer
 var _search: LineEdit
 var _home: Control
 var _all: Control
@@ -40,10 +41,11 @@ func _ready() -> void:
 	size = Vector2(W, H)
 	_glass = GlassPanel.new(true, 26.0, GlassPanel.TINT_POPUP)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_glass.set_shadow_strength(0.5, 50, 20.0)
+	_glass.set_shadow_strength(0.45, 38, 10.0)
 	add_child(_glass)
 
 	var root := Kit.vbox(18)
+	_root = root
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.offset_left = 26
 	root.offset_right = -26
@@ -105,7 +107,7 @@ func _ready() -> void:
 
 
 func shell_shape() -> Array[Rect2]:
-	return [get_global_rect().grow(30.0)]
+	return [_glass.shadow_rect()]
 
 
 # --- Views ------------------------------------------------------------------------------
@@ -145,7 +147,7 @@ func _build_home() -> Control:
 	left.add_child(_recent)
 
 	var right := Kit.vbox(4)
-	right.custom_minimum_size.x = 196
+	right.custom_minimum_size.x = 188
 	view.add_child(right)
 	var user := Kit.hbox(12)
 	user.custom_minimum_size.y = 56
@@ -163,7 +165,8 @@ func _build_home() -> Control:
 	_user_name = Kit.label("", 16, 700, Color.WHITE)
 	_user_name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_user_name.clip_text = true
-	_user_name.custom_minimum_size.x = 130
+	_user_name.custom_minimum_size.x = 120
+	_user_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	user.add_child(_user_name)
 	right.add_child(Kit.spacer(0, 6))
 	right.add_child(_place("Library", "grid", func() -> void: _run(func() -> void: main.open_app(&"library"))))
@@ -246,7 +249,7 @@ func _place(text: String, icon_name: String, cb: Callable) -> Button:
 func _tile(ref: String) -> Control:
 	var it := Catalog.item(ref)
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(118, 104)
+	b.custom_minimum_size = Vector2(104, 100)
 	b.focus_mode = Control.FOCUS_NONE
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	b.tooltip_text = str(it["name"])
@@ -266,7 +269,7 @@ func _tile(ref: String) -> Control:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.clip_text = true
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	l.custom_minimum_size.x = 108
+	l.custom_minimum_size.x = 96
 	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	col.add_child(l)
 	b.pressed.connect(func() -> void: _launch(ref))
@@ -488,7 +491,10 @@ func close() -> void:
 
 func _place_panel() -> void:
 	var vp := Shell.view_size()
-	size = Vector2(minf(W, vp.x - 20.0), minf(H, vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 3.0))
+	# Never narrower than what's inside (long names, big text), or the side
+	# column spills out of the glass.
+	var need := _root.get_combined_minimum_size() + Vector2(52.0, 46.0)
+	size = Vector2(minf(maxf(W, need.x), vp.x - 20.0), minf(maxf(H, need.y), vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 3.0))
 	position = Vector2(Taskbar.MARGIN, vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 2.0 - size.y)
 
 

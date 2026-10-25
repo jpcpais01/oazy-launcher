@@ -113,7 +113,17 @@ func set_active(on: bool) -> void:
 		_title_label.add_theme_color_override("font_color", App.TEXT if on else App.TEXT_MUTE)
 	if _glass:
 		_glass.glow = 0.35 if on else 0.0
-		_glass.set_shadow_strength(0.55 if on else 0.32, 52 if on else 34, 24.0 if on else 14.0)
+		if Shell.native:
+			# Tighter in shell mode: the shadow's ring is part of the layer's
+			# shape, so it would catch clicks meant for the apps around it.
+			_glass.set_shadow_strength(0.45 if on else 0.28, 26 if on else 18, 10.0 if on else 7.0)
+		else:
+			_glass.set_shadow_strength(0.55 if on else 0.32, 52 if on else 34, 24.0 if on else 14.0)
+
+
+## The window and its shadow (what its layer keeps on screen in shell mode).
+func shell_rect() -> Rect2:
+	return _glass.shadow_rect() if _glass else get_global_rect()
 
 
 # --- Open / close / minimise --------------------------------------------------------

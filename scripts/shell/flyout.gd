@@ -44,7 +44,7 @@ func _ready() -> void:
 
 
 func shell_shape() -> Array[Rect2]:
-	return [get_global_rect().grow(30.0)]
+	return [_glass.shadow_rect()]
 
 
 func _build() -> void:

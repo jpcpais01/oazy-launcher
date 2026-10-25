@@ -10,6 +10,8 @@ extends Node
 
 signal windows_changed
 signal hotkey(was_foreground: bool)
+## Ctrl+Alt+D, from any app.
+signal desktop_hotkey
 signal status_changed(available: bool)
 ## Another app went fullscreen (a game, a video) or came back out of it.
 signal fullscreen_changed(on: bool)
@@ -172,6 +174,8 @@ func _on_line(line: String) -> void:
 				_apply_windows(d)
 			"hotkey":
 				hotkey.emit(bool(d.get("was_fg", false)))
+			"desktop_key":
+				desktop_hotkey.emit()
 			"ready":
 				hotkey_ok = bool(d.get("hotkey", false))
 		return

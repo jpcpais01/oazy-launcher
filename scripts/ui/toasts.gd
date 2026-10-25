@@ -21,7 +21,8 @@ func _ready() -> void:
 func shell_shape() -> Array[Rect2]:
 	if _stack.get_child_count() == 0:
 		return []
-	return [_stack.get_global_rect().grow(20.0)]
+	# Room for the cards' shadows (24 + 10 below).
+	return [_stack.get_global_rect().grow(36.0)]
 
 
 func show_toast(text: String, kind: StringName = &"info", action: Callable = Callable()) -> void:

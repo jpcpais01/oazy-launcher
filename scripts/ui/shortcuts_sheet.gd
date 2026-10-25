@@ -2,7 +2,8 @@ class_name ShortcutsSheet
 ## The keyboard shortcuts card (F1, or "keyboard shortcuts" in search).
 
 const MARKDOWN := "### Anywhere
-- **Ctrl + Alt + O** brings Oazy to the front from any app. Press it again in Oazy to open Start.
+- **Ctrl + Alt + O** opens Start from any app.
+- **Ctrl + Alt + D** shows your desktop: every window steps aside. Press it again to bring them back.
 
 ### On the desktop
 - **Just type** to search apps, games, settings, sums and the web.
