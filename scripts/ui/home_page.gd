@@ -34,12 +34,12 @@ var _first_build := true
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	_row = Control.new()
 	_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_row)
 
 	_row_name = Kit.label("", 15, 600, App.TEXT)

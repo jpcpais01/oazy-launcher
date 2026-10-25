@@ -42,6 +42,9 @@ func _ready() -> void:
 		if FileAccess.file_exists(SMOKE_PATH):
 			DirAccess.remove_absolute(SMOKE_PATH)
 	load_library()
+	steam_root = str(Settings.get_value("steam_root"))
+	if steam_root == "" and App.is_windows() and not App.smoke_test:
+		WorkerThreadPool.add_task(func() -> void: _set_steam_root.call_deferred(find_steam_root()), false, "Find Steam")
 	var timer := Timer.new()
 	timer.wait_time = POLL_SECONDS
 	timer.autostart = true
@@ -408,9 +411,15 @@ func _import_worker() -> void:
 	_import_apply.call_deferred(found, root)
 
 
+func _set_steam_root(root: String) -> void:
+	if root != "":
+		steam_root = root
+		Settings.set_value("steam_root", root)
+
+
 func _import_apply(found: Array, root: String) -> void:
 	importing = false
-	steam_root = root
+	_set_steam_root(root)
 	var added := 0
 	for item in found:
 		if _already_imported(item):

@@ -21,11 +21,11 @@ var _dirty := true
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var root := Kit.vbox(22)
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.offset_left = SIDE
 	root.offset_right = -SIDE
 	root.offset_top = 18
@@ -86,7 +86,7 @@ func _ready() -> void:
 
 	_empty = Kit.label("", 18, 500, App.TEXT_DIM)
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_empty.set_anchors_preset(Control.PRESET_CENTER)
+	_empty.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_empty.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_empty.visible = false
 	add_child(_empty)
@@ -137,8 +137,17 @@ func refresh(animate: bool) -> void:
 
 
 func _update_columns() -> void:
-	var w := _scroll.size.x - 12.0
-	_grid.columns = maxi(1, int((w + GAP_X) / (LibraryCard.W + GAP_X)))
+	# Leave room for the side padding and the scrollbar, then widen the cards
+	# so the last column lines up with the right edge.
+	var w := _scroll.size.x - 12.0 - 14.0
+	if w <= 0.0:
+		return
+	var cols := maxi(1, int((w + GAP_X) / (LibraryCard.W + GAP_X)))
+	_grid.columns = cols
+	var card_w := floorf((w - GAP_X * (cols - 1)) / cols)
+	card_w = clampf(card_w, LibraryCard.W * 0.8, LibraryCard.W * 1.4)
+	for c in _cards:
+		c.set_card_width(card_w)
 
 
 func _set_filter(f: String, refresh_now: bool = true) -> void:

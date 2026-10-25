@@ -26,7 +26,7 @@ var _skip := false
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var bg := ColorRect.new()
@@ -37,7 +37,7 @@ func _ready() -> void:
 	_bg_mat.set_shader_parameter("accent", App.DEFAULT_ACCENT)
 	_bg_mat.set_shader_parameter("accent2", App.accent_pair(App.DEFAULT_ACCENT))
 	bg.material = _bg_mat
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 	resized.connect(func() -> void:
@@ -46,7 +46,7 @@ func _ready() -> void:
 	)
 
 	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(center)
 	var col := Kit.vbox(0)
@@ -68,7 +68,7 @@ func _ready() -> void:
 	rm.set_shader_parameter("color_b", App.accent_pair(App.DEFAULT_ACCENT))
 	rm.set_shader_parameter("track", Color(1, 1, 1, 0.05))
 	_ring.material = rm
-	_ring.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mark.add_child(_ring)
 	_logo = TextureRect.new()

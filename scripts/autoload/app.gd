@@ -30,6 +30,8 @@ const ACCENT_SWATCHES := [
 var version := "0.0.0-dev"
 var accent := DEFAULT_ACCENT
 var smoke_test := false
+## Set by --screenshots=<dir>: renders the main screens to PNGs (CI visual check).
+var screenshot_dir := ""
 var game_running := false
 
 
@@ -38,7 +40,16 @@ func _ready() -> void:
 	version = str(ProjectSettings.get_setting("application/config/version", "0.0.0-dev"))
 	var args := OS.get_cmdline_user_args()
 	smoke_test = args.has("--smoke-test") or OS.get_cmdline_args().has("--smoke-test")
-	if smoke_test:
+	for a in args:
+		if a.begins_with("--screenshots="):
+			screenshot_dir = a.get_slice("=", 1)
+			smoke_test = true
+	if screenshot_dir != "":
+		print("Oazy Launcher %s screenshot run -> %s" % [version, screenshot_dir])
+		var shooter: Node = load("res://tests/screenshots.gd").new()
+		shooter.name = "Screenshots"
+		add_child.call_deferred(shooter)
+	elif smoke_test:
 		print("Oazy Launcher %s smoke test starting" % version)
 		var runner: Node = load("res://tests/smoke.gd").new()
 		runner.name = "SmokeTest"

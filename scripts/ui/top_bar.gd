@@ -23,7 +23,7 @@ var _win_from := Vector2i.ZERO
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_TOP_WIDE)
+	set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	custom_minimum_size.y = HEIGHT
 	offset_bottom = HEIGHT
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -37,14 +37,14 @@ func _ready() -> void:
 	gt.fill_to = Vector2(0, 1)
 	var tr := TextureRect.new()
 	tr.texture = gt
-	tr.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_SCALE
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(tr)
 
 	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 30)
 	margin.add_theme_constant_override("margin_right", 14)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE

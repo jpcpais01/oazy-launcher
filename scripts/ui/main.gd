@@ -26,7 +26,7 @@ var _page_tween: Tween
 
 func _ready() -> void:
 	get_tree().root.theme = Kit.build_theme()
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_setup_window()
 
@@ -34,7 +34,7 @@ func _ready() -> void:
 	add_child(backdrop)
 
 	_page_host = Control.new()
-	_page_host.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_page_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_page_host.offset_top = TopBar.HEIGHT
 	_page_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_page_host)
@@ -57,7 +57,7 @@ func _ready() -> void:
 	top_bar.update_pressed.connect(show_update)
 
 	overlay_layer = Control.new()
-	overlay_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(overlay_layer)
 

@@ -11,6 +11,7 @@ const W := 192.0
 const H := 288.0
 
 var entry_id := ""
+var card_w := W
 var cover: CoverArt
 var _holder: Control
 var _name: Label
@@ -26,26 +27,22 @@ func setup(id: String) -> LibraryCard:
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(W, H + 58)
 	focus_mode = Control.FOCUS_ALL
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 	_holder = Control.new()
 	_holder.position = Vector2.ZERO
-	_holder.size = Vector2(W, H)
-	_holder.pivot_offset = Vector2(W, H) / 2.0
 	_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_holder)
 	cover = CoverArt.new()
-	cover.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_holder.add_child(cover)
 	cover.setup(entry_id, 16.0)
 
 	_play_btn = FxButton.icon_only("play", "Play", 20, 46)
 	_play_btn.variant = FxButton.Style.PRIMARY
 	_play_btn._apply_style()
-	_play_btn.position = Vector2(W - 58, H - 58)
 	_play_btn.size = Vector2(46, 46)
 	_play_btn.modulate.a = 0.0
 	_play_btn.focus_mode = Control.FOCUS_NONE
@@ -54,17 +51,14 @@ func _ready() -> void:
 	_holder.add_child(_play_btn)
 
 	_name = Kit.label("", 15, 600, App.TEXT)
-	_name.position = Vector2(2, H + 12)
-	_name.size = Vector2(W - 4, 20)
 	_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_name.clip_text = true
 	add_child(_name)
 	_meta = Kit.label("", 13, 500, App.TEXT_MUTE)
-	_meta.position = Vector2(2, H + 34)
-	_meta.size = Vector2(W - 4, 18)
 	_meta.clip_text = true
 	_meta.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	add_child(_meta)
+	_layout()
 
 	mouse_entered.connect(_set_hot.bind(true))
 	mouse_exited.connect(func() -> void: _set_hot(has_focus()))
@@ -79,6 +73,27 @@ func _ready() -> void:
 	)
 	_refresh_text()
 	cover.set_dim(0.08)
+
+
+## Cards stretch a little so a row always fills the page edge to edge.
+func set_card_width(w: float) -> void:
+	if is_equal_approx(w, card_w):
+		return
+	card_w = w
+	if is_node_ready():
+		_layout()
+
+
+func _layout() -> void:
+	var h := roundf(card_w * H / W)
+	custom_minimum_size = Vector2(card_w, h + 58)
+	_holder.size = Vector2(card_w, h)
+	_holder.pivot_offset = _holder.size / 2.0
+	_play_btn.position = Vector2(card_w - 58, h - 58)
+	_name.position = Vector2(2, h + 12)
+	_name.size = Vector2(card_w - 4, 20)
+	_meta.position = Vector2(2, h + 34)
+	_meta.size = Vector2(card_w - 4, 18)
 
 
 func _refresh_text() -> void:
@@ -140,6 +155,6 @@ func _gui_input(event: InputEvent) -> void:
 		play.emit(entry_id)
 		accept_event()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_MENU:
-		context.emit(entry_id, global_position + Vector2(W / 2.0, H / 2.0))
+		context.emit(entry_id, global_position + _holder.size / 2.0)
 		accept_event()
 

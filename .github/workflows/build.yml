@@ -83,6 +83,30 @@ jobs:
           fi
           grep -q "SMOKE: PASS" smoke.log
 
+      - name: Render screenshots (2560x1440, real renderer)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgl1 libgl1-mesa-dri libglx-mesa0 libxcursor1 libxinerama1 libxrandr2 libxi6 >/dev/null
+          mkdir -p shots
+          xvfb-run -a -s "-screen 0 2560x1440x24" timeout 150 "$HOME/godot/godot" --path . --rendering-driver opengl3 --resolution 2560x1440 -- --screenshots="$PWD/shots" > shots.log 2>&1 || true
+          tail -n 80 shots.log
+          ls -la shots
+
+      - name: Publish screenshots to the ci-screenshots branch
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          ls shots/*.png >/dev/null 2>&1 || exit 0
+          cp shots.log shots/ || true
+          cd shots
+          echo "${{ github.event.pull_request.head.sha || github.sha }}" > SHA.txt
+          git init -q
+          git checkout -q -b ci-screenshots
+          git add -A
+          git -c user.name="oazy-ci" -c user.email="oazy-ci@users.noreply.github.com" commit -qm "Screenshots for ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-screenshots
+
       - name: Export Windows exe
         run: |
           set -o pipefail
@@ -98,8 +122,7 @@ jobs:
           WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq osslsigncode >/dev/null
+          sudo apt-get install -y -qq osslsigncode >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq osslsigncode >/dev/null)
           tools/ci/sign.sh build/OazyLauncher.exe
           sha256sum build/OazyLauncher.exe
 

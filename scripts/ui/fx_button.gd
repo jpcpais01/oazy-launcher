@@ -108,11 +108,17 @@ func _apply_style() -> void:
 				_set_boxes(Color("f4f5f8"), Color.WHITE, Color("dcdde3"), r, 18, Color(0, 0, 0, 0))
 				for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
 					add_theme_color_override(c, Color("0b0c12"))
+				for c in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color", "icon_hover_pressed_color"]:
+					add_theme_color_override(c, Color("0b0c12"))
 			else:
 				_set_boxes(Color(1, 1, 1, 0.06), Color(1, 1, 1, 0.12), Color(1, 1, 1, 0.16), r, 18, Color(1, 1, 1, 0.07))
 				for c in ["font_color", "font_focus_color"]:
 					add_theme_color_override(c, App.TEXT_DIM)
 				for c in ["font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+					add_theme_color_override(c, Color.WHITE)
+				for c in ["icon_normal_color", "icon_focus_color"]:
+					add_theme_color_override(c, App.TEXT_DIM)
+				for c in ["icon_hover_color", "icon_pressed_color", "icon_hover_pressed_color"]:
 					add_theme_color_override(c, Color.WHITE)
 			add_theme_font_size_override("font_size", 15)
 			hover_scale = 1.03
