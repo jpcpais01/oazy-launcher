@@ -1,6 +1,6 @@
 extends Node
-## The user's library: games and apps, persistence, store imports (Steam, Epic, GOG),
-## launching and playtime tracking.
+## The user's library: games and apps, persistence, store imports (Steam, Epic,
+## GOG, EA, Ubisoft, Battle.net, Riot, Amazon, Xbox), launching and playtime tracking.
 
 signal changed
 signal entry_changed(id: String)
@@ -18,6 +18,24 @@ const STEAM_SKIP_WORDS := [
 	"redistributable", "steamworks", "proton", "steam linux runtime",
 	"dedicated server", " sdk", "soundtrack", "steamvr",
 ]
+## Windows "installed programs" lists, read for the launchers without their own files.
+const UNINSTALL_KEYS := [
+	"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+	"HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+	"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+]
+const UNINSTALL_VALUES := ["DisplayName", "DisplayIcon", "InstallLocation", "UninstallString", "Publisher", "SystemComponent", "ParentKeyName", "ReleaseType"]
+## Launchers and helpers that show up next to games in those lists.
+const STORE_SKIP_NAMES := [
+	"riot client", "battle.net", "ea app", "origin", "ubisoft connect", "uplay", "amazon games",
+	"easyanticheat", "easy anti-cheat", "battleye", "vanguard", "directx", "visual c++", "redistributable",
+]
+const SOURCE_LABELS := {
+	"steam": "Steam", "epic": "Epic Games", "gog": "GOG", "ea": "EA app", "ubisoft": "Ubisoft Connect",
+	"battlenet": "Battle.net", "riot": "Riot Games", "amazon": "Amazon Games", "xbox": "Xbox",
+}
+## Import order doubles as preference when one game shows up in two stores.
+const SOURCE_RANK := ["steam", "epic", "gog", "xbox", "ea", "ubisoft", "battlenet", "riot", "amazon"]
 const POLL_SECONDS := 8.0
 const KNOWN_APPS := [
 	"discord", "spotify", "chrome", "firefox", "msedge", "brave", "opera", "obs", "code",
@@ -183,10 +201,9 @@ func query(filter: String, text: String, sort: String) -> Array[Dictionary]:
 
 
 func source_label(e: Dictionary) -> String:
-	match str(e.get("source", "")):
-		"steam": return "Steam"
-		"epic": return "Epic Games"
-		"gog": return "GOG"
+	var src := str(e.get("source", ""))
+	if SOURCE_LABELS.has(src):
+		return SOURCE_LABELS[src]
 	return "Game" if e.get("kind") == "game" else "App"
 
 
@@ -286,6 +303,8 @@ func _launch_path(e: Dictionary) -> bool:
 		return false
 	if path.contains("://"):
 		return OS.shell_open(path) == OK
+	if path.begins_with("shell:"):
+		return OS.create_process("explorer.exe", [path]) > 0
 	# Bare commands ("wt.exe", "code") are found on PATH by `start`.
 	var bare := not path.contains("/") and not path.contains("\\")
 	if not bare and not FileAccess.file_exists(path):
@@ -302,7 +321,8 @@ func _launch_path(e: Dictionary) -> bool:
 	if script.is_empty():
 		return OS.create_process(path, split_args(str(e["args"]))) > 0
 	var pid := OS.create_process("cmd.exe", ["/c", script])
-	if pid > 0 and ext == "exe" and not bare and e["kind"] == "game":
+	# Launcher-run games (Riot) would clock the always-on launcher, not the game.
+	if pid > 0 and ext == "exe" and not bare and e["kind"] == "game" and str(e["source"]) != "riot":
 		_sessions[e["id"]] = {
 			"image": path.get_file().to_lower(),
 			"started": int(Time.get_unix_time_from_system()),
@@ -434,7 +454,10 @@ func _import_worker() -> void:
 		found.append_array(scan_steam_root(root))
 	found.append_array(scan_epic(EPIC_MANIFESTS))
 	found.append_array(scan_gog())
-	_import_apply.call_deferred(found, root)
+	if App.is_windows():
+		found.append_array(scan_uninstall_entries(read_uninstall_registry()))
+		found.append_array(scan_xbox(xbox_roots()))
+	_import_apply.call_deferred(dedupe_found(found), root)
 
 
 func _set_steam_root(root: String) -> void:
@@ -450,6 +473,7 @@ func _import_apply(found: Array, root: String) -> void:
 	for item in found:
 		if _already_imported(item):
 			continue
+		_resolve_xbox_launch(item)
 		var e := make_entry(item)
 		entries.append(e)
 		added += 1
@@ -460,7 +484,11 @@ func _import_apply(found: Array, root: String) -> void:
 
 
 func _already_imported(item: Dictionary) -> bool:
+	var norm := Art.norm_title(str(item.get("name", "")))
 	for e in entries:
+		# The same game from a second store (or added by hand) stays one tile.
+		if norm != "" and e["kind"] == "game" and item.get("kind") == "game" and Art.norm_title(str(e["name"])) == norm:
+			return true
 		match str(item.get("source", "")):
 			"steam":
 				if str(e["steam_appid"]) == str(item["steam_appid"]):
@@ -469,7 +497,7 @@ func _already_imported(item: Dictionary) -> bool:
 				if str(e["epic_app"]) == str(item["epic_app"]):
 					return true
 		var p := str(item.get("path", ""))
-		if p != "" and str(e["path"]).to_lower() == p.to_lower() and e["source"] == item.get("source", ""):
+		if p != "" and str(e["path"]).to_lower() == p.to_lower() and str(e["args"]) == str(item.get("args", "")) and e["source"] == item.get("source", ""):
 			return true
 	return false
 
@@ -584,6 +612,8 @@ static func epic_entry(data: Dictionary) -> Dictionary:
 	var ns := str(data.get("CatalogNamespace", ""))
 	var item_id := str(data.get("CatalogItemId", ""))
 	var install := str(data.get("InstallLocation", "")).replace("\\", "/")
+	if install != "" and OS.get_name() == "Windows" and not DirAccess.dir_exists_absolute(install):
+		return {}
 	var exe := str(data.get("LaunchExecutable", "")).replace("\\", "/")
 	return {
 		"name": str(data.get("DisplayName", app)),
@@ -599,10 +629,13 @@ static func scan_gog() -> Array:
 	var found: Array = []
 	if OS.get_name() != "Windows":
 		return found
-	var out := []
-	if OS.execute("reg", ["query", "HKLM\\SOFTWARE\\WOW6432Node\\GOG.com\\Games", "/s"], out) != 0 or out.is_empty():
-		return found
-	return parse_gog_registry(str(out[0]))
+	for key in ["HKLM\\SOFTWARE\\WOW6432Node\\GOG.com\\Games", "HKLM\\SOFTWARE\\GOG.com\\Games"]:
+		var out := []
+		if OS.execute("reg", ["query", key, "/s"], out) == 0 and not out.is_empty():
+			for item in parse_gog_registry(str(out[0])):
+				if FileAccess.file_exists(str(item["path"])):
+					found.append(item)
+	return found
 
 
 static func parse_gog_registry(text: String) -> Array:
@@ -614,7 +647,7 @@ static func parse_gog_registry(text: String) -> Array:
 			_flush_gog(cur, found)
 			cur = {}
 			continue
-		for key in ["gameName", "exe", "workingDir", "launchParam"]:
+		for key in ["gameName", "exe", "workingDir", "launchParam", "dependsOn", "gameID"]:
 			if line.begins_with(key + " ") and line.contains("REG_SZ"):
 				cur[key] = line.split("REG_SZ", true, 1)[1].strip_edges()
 	_flush_gog(cur, found)
@@ -622,11 +655,215 @@ static func parse_gog_registry(text: String) -> Array:
 
 
 static func _flush_gog(cur: Dictionary, found: Array) -> void:
-	if cur.has("gameName") and cur.has("exe"):
+	# DLCs list the game they belong to in dependsOn.
+	if cur.has("gameName") and cur.has("exe") and str(cur.get("dependsOn", "")) == "":
 		found.append({
 			"name": cur["gameName"],
 			"source": "gog",
 			"kind": "game",
 			"path": str(cur["exe"]).replace("\\", "/"),
 			"args": str(cur.get("launchParam", "")),
+			"cwd": str(cur.get("workingDir", "")).replace("\\", "/"),
+			"gog_id": str(cur.get("gameID", "")),
 		})
+
+
+## One item per game: when two stores report the same title, the earlier one in
+## SOURCE_RANK wins.
+static func dedupe_found(found: Array) -> Array:
+	var best := {}
+	var order: Array[String] = []
+	for item in found:
+		var key := Art.norm_title(str(item.get("name", "")))
+		if key == "" or item.get("kind") != "game":
+			key = "path:" + str(item.get("path", "")).to_lower() + "|" + str(item.get("args", ""))
+		if not best.has(key):
+			best[key] = item
+			order.append(key)
+		elif _rank(item) < _rank(best[key]):
+			best[key] = item
+	var out: Array = []
+	for k in order:
+		out.append(best[k])
+	return out
+
+
+static func _rank(item: Dictionary) -> int:
+	var i := SOURCE_RANK.find(str(item.get("source", "")))
+	return i if i >= 0 else SOURCE_RANK.size()
+
+
+# --- Installed programs list (EA, Ubisoft, Battle.net, Riot, Amazon) -------------
+
+static func read_uninstall_registry() -> Array:
+	var all: Array = []
+	for key in UNINSTALL_KEYS:
+		var out := []
+		if OS.execute("reg", ["query", key, "/s"], out) == 0 and not out.is_empty():
+			all.append_array(parse_reg_blocks(str(out[0]), UNINSTALL_VALUES))
+	return all
+
+
+## Splits `reg query /s` output into one dictionary per key, with "_key" set to
+## the key's last path segment.
+static func parse_reg_blocks(text: String, wanted: Array) -> Array:
+	var blocks: Array = []
+	var cur := {}
+	for raw in text.split("\n"):
+		var line := raw.strip_edges()
+		if line.begins_with("HKEY_"):
+			if not cur.is_empty():
+				blocks.append(cur)
+			cur = {"_key": line.get_slice("\\", line.get_slice_count("\\") - 1)}
+			continue
+		if cur.is_empty():
+			continue
+		for type in ["REG_SZ", "REG_EXPAND_SZ", "REG_DWORD"]:
+			var marker := "    %s    " % type
+			var at := raw.find(marker)
+			if at < 0:
+				continue
+			var name := raw.substr(0, at).strip_edges()
+			if name in wanted:
+				cur[name] = raw.substr(at + marker.length()).strip_edges()
+			break
+	if not cur.is_empty():
+		blocks.append(cur)
+	return blocks
+
+
+## Turns installed-program entries from game launchers into library items.
+static func scan_uninstall_entries(blocks: Array) -> Array:
+	var found: Array = []
+	for b in blocks:
+		var item := uninstall_item(b)
+		if not item.is_empty():
+			found.append(item)
+	return found
+
+
+static func uninstall_item(b: Dictionary) -> Dictionary:
+	var name := str(b.get("DisplayName", "")).strip_edges()
+	if name == "" or b.has("ParentKeyName") or str(b.get("SystemComponent", "")) == "0x1" or b.has("ReleaseType"):
+		return {}
+	var lower := name.to_lower()
+	for w in STORE_SKIP_NAMES:
+		if lower == w or lower.begins_with(w + " "):
+			return {}
+	var key := str(b.get("_key", ""))
+	var uninstall := str(b.get("UninstallString", ""))
+	var u := uninstall.to_lower()
+	var icon_exe := _exe_from(str(b.get("DisplayIcon", "")))
+	var item := {"name": name, "kind": "game"}
+	if u.contains("riotclientservices.exe") and u.contains("--uninstall-product="):
+		var product := _flag(uninstall, "--uninstall-product=")
+		if product == "" or product == "riot_client":
+			return {}
+		item["source"] = "riot"
+		item["path"] = _exe_from(uninstall)
+		item["args"] = "--launch-product=%s --launch-patchline=%s" % [product, _flag(uninstall, "--uninstall-patchline=", "live")]
+	elif key.begins_with("Uplay Install "):
+		item["source"] = "ubisoft"
+		item["path"] = "uplay://launch/%s/0" % key.trim_prefix("Uplay Install ").strip_edges()
+	elif u.contains("amazon game remover") and u.contains(" -p "):
+		item["source"] = "amazon"
+		item["path"] = "amazon-games://play/" + uninstall.get_slice(" -p ", 1).strip_edges().get_slice(" ", 0)
+	elif u.contains("battle.net") and u.contains("--uid="):
+		if icon_exe == "" or _flag(uninstall, "--uid=").begins_with("battle.net"):
+			return {}
+		item["source"] = "battlenet"
+		item["path"] = icon_exe
+	elif u.contains("eainstaller") or u.contains("touchup.exe") or u.contains("ea desktop"):
+		if icon_exe == "":
+			return {}
+		item["source"] = "ea"
+		item["path"] = icon_exe
+	else:
+		return {}
+	return item
+
+
+## The executable in a quoted or unquoted command line / icon path ("x.exe,0").
+static func _exe_from(text: String) -> String:
+	var s := text.strip_edges()
+	if s.begins_with("\""):
+		s = s.substr(1).get_slice("\"", 0)
+	else:
+		var at := s.to_lower().find(".exe")
+		if at < 0:
+			return ""
+		s = s.substr(0, at + 4)
+	s = s.get_slice(",", 0).strip_edges().replace("\\", "/")
+	return s if s.to_lower().ends_with(".exe") else ""
+
+
+static func _flag(cmd: String, flag: String, fallback: String = "") -> String:
+	var at := cmd.find(flag)
+	if at < 0:
+		return fallback
+	var v := cmd.substr(at + flag.length()).strip_edges()
+	if v.begins_with("\""):
+		return v.substr(1).get_slice("\"", 0)
+	return v.get_slice(" ", 0)
+
+
+# --- Xbox app / Game Pass ----------------------------------------------------------
+
+static func xbox_roots() -> PackedStringArray:
+	var roots := PackedStringArray()
+	for i in range(67, 91):
+		var dir := "%s:/XboxGames" % char(i)
+		if DirAccess.dir_exists_absolute(dir):
+			roots.append(dir)
+	return roots
+
+
+## Xbox app games live in <drive>:/XboxGames/<game>/Content with a
+## MicrosoftGame.config describing the title and its executable.
+static func scan_xbox(roots: PackedStringArray) -> Array:
+	var found: Array = []
+	for root in roots:
+		for game in DirAccess.get_directories_at(root):
+			var content := root.path_join(game).path_join("Content")
+			var config := content.path_join("MicrosoftGame.config")
+			if not FileAccess.file_exists(config):
+				continue
+			var item := xbox_item(FileAccess.get_file_as_string(config), content)
+			if not item.is_empty():
+				found.append(item)
+	return found
+
+
+static func xbox_item(xml: String, content: String) -> Dictionary:
+	var identity := _xml_attr(xml, "Identity", "Name")
+	var exe := _xml_attr(xml, "Executable", "Name")
+	var name := _xml_attr(xml, "ShellVisuals", "DefaultDisplayName")
+	if name == "" or name.begins_with("ms-resource:"):
+		name = Fmt.pretty_name(content.get_base_dir())
+	if exe == "" and identity == "":
+		return {}
+	return {
+		"name": name,
+		"source": "xbox",
+		"kind": "game",
+		"path": content.path_join(exe.replace("\\", "/")) if exe != "" else "",
+		"xbox_package": identity,
+	}
+
+
+static func _xml_attr(xml: String, tag: String, attr: String) -> String:
+	var re := RegEx.create_from_string("<%s\\b[^>]*\\b%s=\"([^\"]*)\"" % [tag, attr])
+	var m := re.search(xml)
+	return m.get_string(1).strip_edges() if m else ""
+
+
+## Store-packaged games must start through their app id; the exe alone is locked.
+func _resolve_xbox_launch(item: Dictionary) -> void:
+	var pkg := str(item.get("xbox_package", "")).to_lower()
+	if pkg == "":
+		return
+	for a in Catalog.apps:
+		var id := str(a["id"])
+		if id.to_lower().begins_with(pkg + "_") and id.contains("!"):
+			item["path"] = "shell:AppsFolder\\" + id
+			return

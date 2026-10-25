@@ -93,6 +93,21 @@ func _logic_tests() -> void:
 	check(gdb.get(&"cover") == "https://images.gog.com/x.jpg" and gdb.get(&"logo") == "https://images.gog.com/l.png", "art: gamesdb images")
 	check(Art.match_wiki({"query": {"pages": [{"title": "Fortnite Battle Royale", "index": 1, "thumbnail": {"source": "a"}}, {"title": "Fortnite (video game)", "index": 2, "thumbnail": {"source": "b"}}]}}, "Fortnite") == "b", "art: wikipedia picks the matching page")
 
+	# Store discovery from the installed-programs list and Xbox games.
+	var reg := "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Riot Game valorant.live\r\n    DisplayName    REG_SZ    VALORANT\r\n    UninstallString    REG_SZ    \"C:\\Riot Games\\Riot Client\\RiotClientServices.exe\" --uninstall-product=valorant --uninstall-patchline=live\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Uplay Install 5059\r\n    DisplayName    REG_SZ    Rainbow Six Siege\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Overwatch\r\n    DisplayName    REG_SZ    Overwatch\r\n    DisplayIcon    REG_SZ    \"C:\\Program Files (x86)\\Overwatch\\Overwatch Launcher.exe\"\r\n    UninstallString    REG_SZ    \"C:\\ProgramData\\Battle.net\\Agent\\Blizzard Uninstaller.exe\" --lang=enUS --uid=prometheus\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Riot Client\r\n    DisplayName    REG_SZ    Riot Client\r\n    UninstallString    REG_SZ    \"C:\\Riot Games\\Riot Client\\RiotClientServices.exe\" --uninstall-product=riot_client\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\7-Zip\r\n    DisplayName    REG_SZ    7-Zip\r\n    SystemComponent    REG_DWORD    0x0\r\n"
+	var blocks := Library.parse_reg_blocks(reg, Library.UNINSTALL_VALUES)
+	check(blocks.size() == 5 and blocks[1]["_key"] == "Uplay Install 5059", "discovery: reads registry blocks")
+	var stores := Library.scan_uninstall_entries(blocks)
+	check(stores.size() == 3, "discovery: keeps games, skips launchers and other programs")
+	check(stores[0]["source"] == "riot" and stores[0]["path"] == "C:/Riot Games/Riot Client/RiotClientServices.exe" and stores[0]["args"] == "--launch-product=valorant --launch-patchline=live", "discovery: riot games launch through the client")
+	check(stores[1]["path"] == "uplay://launch/5059/0", "discovery: ubisoft launch link")
+	check(stores[2]["source"] == "battlenet" and stores[2]["path"].ends_with("Overwatch Launcher.exe"), "discovery: battle.net game exe")
+	var xb := Library.xbox_item("<Game><Identity Name=\"Microsoft.Forza5\" Version=\"1\"/><ExecutableList><Executable Name=\"ForzaHorizon5.exe\" Id=\"Game\"/></ExecutableList><ShellVisuals DefaultDisplayName=\"Forza Horizon 5\"/></Game>", "D:/XboxGames/Forza Horizon 5/Content")
+	check(xb.get("name") == "Forza Horizon 5" and xb.get("path") == "D:/XboxGames/Forza Horizon 5/Content/ForzaHorizon5.exe" and xb.get("xbox_package") == "Microsoft.Forza5", "discovery: xbox game config")
+	var deduped := Library.dedupe_found([{"name": "Apex Legends", "kind": "game", "source": "ea", "path": "a"}, {"name": "Apex Legends™", "kind": "game", "source": "steam", "path": "b"}])
+	check(deduped.size() == 1 and deduped[0]["source"] == "steam", "discovery: one tile per game, best store wins")
+	check(not Catalog.is_clutter("Debugger Pro", "x") and Catalog.is_clutter("Game Setup", "x") and Catalog.is_clutter("Thing", "C:/Thing/unins000.exe"), "catalog: clutter matches whole words and helper exes")
+
 	# Library CRUD (smoke runs use a throwaway file).
 	var id := Library.add_entry({"name": "Smoke Game", "path": "C:/Games/smoke.exe"})
 	check(Library.has_entry(id), "library: add")

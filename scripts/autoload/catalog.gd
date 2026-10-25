@@ -19,7 +19,9 @@ const OAZY_APPS := {
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
 }
 ## Start menu clutter that ships next to real apps.
-const SKIP_WORDS := ["uninstall", "readme", "read me", "help", "documentation", "release notes", "website", "license", "manual", "changelog", "what's new", "support", "faq", "eula", "recovery", "debug"]
+const SKIP_WORDS := ["uninstall", "uninstaller", "readme", "read me", "help", "documentation", "release notes", "website", "license", "manual", "changelog", "what's new", "support", "faq", "eula", "recovery", "debug", "setup", "installer", "updater", "crash reporter", "bug reporter", "repair", "safe mode", "migration assistant"]
+## Executables that are never what you meant to open.
+const SKIP_EXES := ["unins000.exe", "uninstall.exe", "uninst.exe", "setup.exe", "updater.exe", "update.exe", "crashreporter.exe", "crashpad_handler.exe", "vc_redist.x64.exe", "vc_redist.x86.exe", "dxsetup.exe"]
 ## First-run taskbar pins, in order, matched against installed app names.
 const DEFAULT_PINS := ["google chrome", "file explorer", "claude", "steam", "discord", "spotify", "visual studio code", "terminal"]
 const SHELLS := ["cmd.exe", "powershell.exe", "pwsh.exe", "wt.exe", "windowsterminal.exe", "conhost.exe", "openconsole.exe"]
@@ -71,9 +73,12 @@ func _set_apps(raw: Array, save: bool) -> void:
 			continue
 		var name := str(a.get("name", "")).strip_edges()
 		var id := str(a.get("id", ""))
-		if name == "" or id == "" or seen.has(id.to_lower()) or is_clutter(name, id):
+		# The same app is often in Start twice (per-user and all-users shortcuts).
+		var name_key := "name:" + name.to_lower()
+		if name == "" or id == "" or seen.has(id.to_lower()) or seen.has(name_key) or is_clutter(name, id):
 			continue
 		seen[id.to_lower()] = true
+		seen[name_key] = true
 		list.append({"name": name, "id": id})
 	list.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
 		return str(x["name"]).naturalnocasecmp_to(str(y["name"])) < 0
@@ -93,11 +98,17 @@ func _set_apps(raw: Array, save: bool) -> void:
 
 
 static func is_clutter(name: String, id: String) -> bool:
-	var lower := " " + name.to_lower() + " "
+	# Whole words only, so "Debugger" or "Helpdesk Pro" stay.
+	var lower := " "
+	for c in name.to_lower():
+		lower += c if (c >= "a" and c <= "z") or (c >= "0" and c <= "9") or c == "'" else " "
+	lower += " "
 	for w in SKIP_WORDS:
-		if lower.contains(w):
+		if lower.contains(" " + w + " "):
 			return true
 	var l := id.to_lower()
+	if l.replace("\\", "/").get_file() in SKIP_EXES:
+		return true
 	return l.begins_with("http") or l.ends_with(".url") or l.ends_with(".txt") or l.ends_with(".pdf") or l.ends_with(".chm") or l.ends_with(".html")
 
 
@@ -191,7 +202,14 @@ func all_items() -> Array[Dictionary]:
 	var list: Array[Dictionary] = []
 	for ref in OAZY_APPS.keys():
 		list.append(item(ref))
+	var games := {}
+	for e in Library.entries:
+		if e["kind"] == "game":
+			games[Art.norm_title(str(e["name"]))] = true
 	for a in apps:
+		# A game's Start shortcut would duplicate its library tile.
+		if games.has(Art.norm_title(str(a["name"]))):
+			continue
 		list.append(item("app:" + str(a["id"])))
 	for e in Library.entries:
 		if e["kind"] == "app":
