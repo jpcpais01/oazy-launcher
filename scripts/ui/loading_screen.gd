@@ -8,12 +8,10 @@ signal finished
 ## Emitted right as the fade starts so Home can choreograph its entrance under it.
 signal finished_early
 
-const AURORA := preload("res://shaders/aurora.gdshader")
 const RING := preload("res://shaders/ring.gdshader")
 const BAR := preload("res://shaders/shine_bar.gdshader")
 const MIN_TIME := 1.35
 
-var _bg_mat: ShaderMaterial
 var _ring: ColorRect
 var _logo: TextureRect
 var _word: Label
@@ -29,21 +27,9 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
-	var bg := ColorRect.new()
-	_bg_mat = ShaderMaterial.new()
-	_bg_mat.shader = AURORA
-	_bg_mat.set_shader_parameter("focus_center", 1.0)
-	_bg_mat.set_shader_parameter("intensity", 1.15)
-	_bg_mat.set_shader_parameter("accent", App.DEFAULT_ACCENT)
-	_bg_mat.set_shader_parameter("accent2", App.accent_pair(App.DEFAULT_ACCENT))
-	bg.material = _bg_mat
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bg := Wallpaper.new()
 	add_child(bg)
-	resized.connect(func() -> void:
-		if size.y > 0.0:
-			_bg_mat.set_shader_parameter("aspect", size.x / size.y)
-	)
+	bg.mat.set_shader_parameter("focus_center", 1.0)
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -64,8 +50,8 @@ func _ready() -> void:
 	rm.shader = RING
 	rm.set_shader_parameter("indeterminate", 1.0)
 	rm.set_shader_parameter("thickness", 0.035)
-	rm.set_shader_parameter("color_a", App.DEFAULT_ACCENT)
-	rm.set_shader_parameter("color_b", App.accent_pair(App.DEFAULT_ACCENT))
+	rm.set_shader_parameter("color_a", App.accent)
+	rm.set_shader_parameter("color_b", App.accent_pair(App.accent))
 	rm.set_shader_parameter("track", Color(1, 1, 1, 0.05))
 	_ring.material = rm
 	_ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -90,7 +76,7 @@ func _ready() -> void:
 	_word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_word)
 	col.add_child(Kit.spacer(0, 6))
-	_tag = Kit.label("Your games, one place", 17, 500, Color(1, 1, 1, 0.6))
+	_tag = Kit.label("Welcome home", 17, 500, Color(1, 1, 1, 0.66))
 	_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_tag)
 
@@ -110,8 +96,8 @@ func _ready() -> void:
 	_bar_mat = ShaderMaterial.new()
 	_bar_mat.shader = BAR
 	_bar_mat.set_shader_parameter("rect_size", Vector2(280, 3))
-	_bar_mat.set_shader_parameter("color_a", App.DEFAULT_ACCENT)
-	_bar_mat.set_shader_parameter("color_b", App.accent_pair(App.DEFAULT_ACCENT))
+	_bar_mat.set_shader_parameter("color_a", App.accent)
+	_bar_mat.set_shader_parameter("color_b", App.accent_pair(App.accent))
 	bar.material = _bar_mat
 	bar_holder.add_child(bar)
 
@@ -168,15 +154,12 @@ func run() -> void:
 			waited += get_process_delta_time()
 
 	_step("Loading artwork", 0.55)
-	var warm := Library.recent().slice(0, 14)
+	var warm := Library.recent().slice(0, 8)
 	for e in warm:
 		Art.get_art(str(e["id"]), &"cover")
-	var sel := str(Settings.get_value("last_selected"))
-	if sel == "" and not warm.is_empty():
-		sel = str(warm[0]["id"])
-	if sel != "":
-		Art.get_art(sel, &"hero")
-		Art.get_art(sel, &"logo")
+	if not warm.is_empty():
+		Art.get_art(str(warm[0]["id"]), &"hero")
+		Art.get_art(str(warm[0]["id"]), &"logo")
 	var waited_art := 0.0
 	while waited_art < 0.9 and not fast and not _skip:
 		var all_done := true

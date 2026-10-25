@@ -1,80 +1,102 @@
 extends Control
-## Root of the app: builds the interface, owns navigation, the borderless
-## window, context menus, launching and every overlay.
+## Root of Oazy, a desktop shell: wallpaper, desktop widgets, Oazy's own
+## windows, the taskbar, Start and every overlay. Also owns the window mode,
+## launching, context menus and keyboard shortcuts.
 
-const PAGE_ORDER := [&"home", &"library", &"settings"]
 const GRIP := 6.0
+const APP_TITLES := {&"library": "Library", &"settings": "Settings"}
+const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(940, 800)}
 
-var backdrop: Backdrop
-var top_bar: TopBar
-var home: HomePage
-var library_page: LibraryPage
-var settings_page: SettingsPage
-var current_page: StringName = &"home"
-var toasts: Toasts
+var wallpaper: Wallpaper
+var desktop: Desktop
+var layer: WindowLayer
+var taskbar: Taskbar
+var start: StartPanel
+var preview: TaskPreview
 var overlay_layer: Control
+var toasts: Toasts
 var loaded := false
 
-var _pages := {}
-var _page_host: Control
+var _chrome: Control
+var _max_btn: FxButton
 var _menu: PopupMenu
 var _menu_id := ""
+var _desk_menu: PopupMenu
 var _grips: Array[Control] = []
 var _launching := false
-var _page_tween: Tween
 
 
 func _ready() -> void:
 	get_tree().root.theme = Kit.build_theme()
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	App.set_accent(Color(str(Settings.get_value("accent"))))
 	_setup_window()
 
-	backdrop = Backdrop.new()
-	add_child(backdrop)
-
-	_page_host = Control.new()
-	_page_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_page_host.offset_top = TopBar.HEIGHT
-	_page_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_page_host)
-	home = HomePage.new()
-	home.main = self
-	library_page = LibraryPage.new()
-	library_page.main = self
-	settings_page = SettingsPage.new()
-	settings_page.main = self
-	_pages = {&"home": home, &"library": library_page, &"settings": settings_page}
-	for key in PAGE_ORDER:
-		var p: Control = _pages[key]
-		_page_host.add_child(p)
-		p.visible = key == &"home"
-
-	top_bar = TopBar.new()
-	add_child(top_bar)
-	top_bar.tab_selected.connect(go)
-	top_bar.settings_pressed.connect(func() -> void: go(&"home" if current_page == &"settings" else &"settings"))
-	top_bar.update_pressed.connect(show_update)
+	wallpaper = Wallpaper.new()
+	add_child(wallpaper)
+	desktop = Desktop.new()
+	desktop.main = self
+	add_child(desktop)
+	layer = WindowLayer.new()
+	layer.main = self
+	layer.reserved_bottom = Taskbar.HEIGHT + Taskbar.MARGIN * 2.0 + 4.0
+	add_child(layer)
+	preview = TaskPreview.new()
+	preview.main = self
+	taskbar = Taskbar.new()
+	taskbar.main = self
+	taskbar.layer = layer
+	taskbar.preview = preview
+	add_child(taskbar)
+	add_child(preview)
+	start = StartPanel.new()
+	start.main = self
+	add_child(start)
+	taskbar.start_pressed.connect(start.toggle)
+	taskbar.search_pressed.connect(func() -> void: start.open())
+	start.visibility_changed_to.connect(func(o: bool) -> void:
+		taskbar.orb.open = o
+		if o:
+			preview.hide_preview()
+	)
 
 	overlay_layer = Control.new()
 	overlay_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(overlay_layer)
-
 	toasts = Toasts.new()
 	add_child(toasts)
 
 	_menu = PopupMenu.new()
 	_menu.id_pressed.connect(_on_menu)
 	add_child(_menu)
+	_desk_menu = PopupMenu.new()
+	_desk_menu.id_pressed.connect(_on_desk_menu)
+	add_child(_desk_menu)
 
+	_build_window_chrome()
 	_add_resize_grips()
 
 	App.toast_requested.connect(func(text: String, kind: StringName) -> void: toasts.show_toast(text, kind))
+	App.open_page.connect(func(page: StringName) -> void: open_app(page))
+	App.launch_requested.connect(launch)
 	Library.import_finished.connect(_on_import_finished)
 	Updater.state_changed.connect(_on_update_state)
+	Host.hotkey.connect(_on_hotkey)
+	Host.status_changed.connect(_on_host_status)
 	get_window().files_dropped.connect(_on_files_dropped)
-	get_window().size_changed.connect(_sync_grips)
+	get_window().size_changed.connect(_sync_window_ui)
+	get_window().focus_entered.connect(func() -> void:
+		if not Host.available:
+			Host.self_foreground = true
+		taskbar.queue_rebuild()
+	)
+
+	if not App.smoke_test or App.is_windows():
+		Host.start()
+	if App.is_windows() and not App.smoke_test and not Settings.get_value("claude_checked"):
+		WorkerThreadPool.add_task(func() -> void: _add_claude_code.call_deferred(Library.detect_claude_code()), false, "Find Claude Code")
 
 	var loading := LoadingScreen.new()
 	add_child(loading)
@@ -82,15 +104,14 @@ func _ready() -> void:
 	loading.run()
 
 
-# --- Window ----------------------------------------------------------------------
+# --- Window mode -------------------------------------------------------------------------
 
 func _setup_window() -> void:
 	var w := get_window()
-	w.min_size = Vector2i(1080, 640)
+	w.min_size = Vector2i(1100, 680)
 	if App.smoke_test:
 		return
-	var screen := w.current_screen
-	var usable := DisplayServer.screen_get_usable_rect(screen)
+	var usable := DisplayServer.screen_get_usable_rect(w.current_screen)
 	var saved: Variant = Settings.get_value("window_rect")
 	if saved is Array and saved.size() == 4:
 		var r := Rect2i(int(saved[0]), int(saved[1]), int(saved[2]), int(saved[3]))
@@ -102,17 +123,65 @@ func _setup_window() -> void:
 		var size_fit := Vector2i(mini(int(h * 16.0 / 9.0), int(usable.size.x * 0.92)), h)
 		w.size = size_fit
 		w.position = usable.position + (usable.size - size_fit) / 2
-	if Settings.get_value("start_fullscreen"):
+	if Settings.get_value("shell_fullscreen"):
 		w.mode = Window.MODE_FULLSCREEN
 
 
-func toggle_fullscreen() -> void:
+func apply_window_mode(fullscreen: bool) -> void:
+	if App.smoke_test:
+		return
 	var w := get_window()
-	w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
-	_sync_grips()
+	if fullscreen:
+		if w.mode == Window.MODE_WINDOWED:
+			Settings.set_value("window_rect", [w.position.x, w.position.y, w.size.x, w.size.y])
+		w.mode = Window.MODE_FULLSCREEN
+	else:
+		w.mode = Window.MODE_WINDOWED
+	_sync_window_ui()
+
+
+func toggle_fullscreen() -> void:
+	var full := get_window().mode != Window.MODE_FULLSCREEN
+	Settings.set_value("shell_fullscreen", full)
+	apply_window_mode(full)
+
+
+func _build_window_chrome() -> void:
+	# Only shown when Oazy runs in a window: a drag strip and the usual buttons.
+	_chrome = Control.new()
+	_chrome.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_chrome.offset_bottom = 34
+	_chrome.mouse_filter = Control.MOUSE_FILTER_STOP
+	_chrome.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			if e.double_click:
+				toggle_fullscreen()
+			elif DisplayServer.has_method("window_start_drag"):
+				DisplayServer.call("window_start_drag")
+	)
+	add_child(_chrome)
+	var row := Kit.hbox(2)
+	row.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	row.offset_right = -8
+	row.offset_top = 4
+	_chrome.add_child(row)
+	var min_btn := FxButton.icon_only("minimize", "Minimise", 16, 28)
+	min_btn.pressed.connect(func() -> void: get_window().mode = Window.MODE_MINIMIZED)
+	_max_btn = FxButton.icon_only("maximize", "Fullscreen", 14, 28)
+	_max_btn.pressed.connect(toggle_fullscreen)
+	var close_btn := FxButton.icon_only("close", "Close Oazy", 16, 28)
+	close_btn.add_theme_stylebox_override("hover", Kit.box(Color(1.0, 0.36, 0.42, 0.9), 999))
+	close_btn.pressed.connect(quit)
+	for b in [min_btn, _max_btn, close_btn]:
+		b.focus_mode = Control.FOCUS_NONE
+		b.hover_scale = 1.0
+		row.add_child(b)
 
 
 func _add_resize_grips() -> void:
+	if not DisplayServer.has_method("window_start_resize"):
+		return
 	# Edge index matches DisplayServer.WindowResizeEdge.
 	var specs := [
 		[0, Control.PRESET_TOP_LEFT, Control.CURSOR_FDIAGSIZE, Vector2(GRIP * 2, GRIP * 2)],
@@ -124,8 +193,6 @@ func _add_resize_grips() -> void:
 		[6, Control.PRESET_BOTTOM_WIDE, Control.CURSOR_VSIZE, Vector2(0, GRIP)],
 		[7, Control.PRESET_BOTTOM_RIGHT, Control.CURSOR_FDIAGSIZE, Vector2(GRIP * 2, GRIP * 2)],
 	]
-	if not DisplayServer.has_method("window_start_resize"):
-		return
 	for s in specs:
 		var g := Control.new()
 		g.mouse_default_cursor_shape = s[2]
@@ -139,13 +206,15 @@ func _add_resize_grips() -> void:
 		)
 		add_child(g)
 		_grips.append(g)
-	_sync_grips()
+	_sync_window_ui()
 
 
-func _sync_grips() -> void:
-	var windowed := get_window().mode == Window.MODE_WINDOWED
+func _sync_window_ui() -> void:
+	var windowed := get_window().mode == Window.MODE_WINDOWED and not App.smoke_test
 	for g in _grips:
 		g.visible = windowed
+	if _chrome:
+		_chrome.visible = windowed
 
 
 func _exit_tree() -> void:
@@ -155,57 +224,95 @@ func _exit_tree() -> void:
 	Settings.save()
 
 
-# --- Navigation ----------------------------------------------------------------------
+func quit() -> void:
+	Settings.save()
+	Host.shutdown()
+	get_tree().quit()
 
-func go(page: StringName) -> void:
-	if page == current_page or not _pages.has(page):
-		return
-	var old: Control = _pages[current_page]
-	var fresh: Control = _pages[page]
-	var dir := signf(PAGE_ORDER.find(page) - PAGE_ORDER.find(current_page))
-	current_page = page
-	top_bar.select(page)
-	Sfx.play(&"move", 0.9)
-	if _page_tween and _page_tween.is_valid():
-		_page_tween.kill()
-	for p in _pages.values():
-		if p != old and p != fresh:
-			p.visible = false
-	fresh.visible = true
-	fresh.modulate.a = 0.0
-	fresh.position.x = 48.0 * dir
-	old.position.x = 0.0
-	_page_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_page_tween.tween_property(old, "modulate:a", 0.0, 0.18)
-	_page_tween.tween_property(old, "position:x", -32.0 * dir, 0.3)
-	_page_tween.tween_property(fresh, "modulate:a", 1.0, 0.4).set_delay(0.06)
-	_page_tween.tween_property(fresh, "position:x", 0.0, 0.5).set_delay(0.06)
-	_page_tween.chain().tween_callback(func() -> void:
-		old.visible = false
-		old.position.x = 0.0
-	)
-	get_viewport().gui_release_focus()
-	if fresh.has_method("on_shown"):
-		fresh.on_shown()
-	if page == &"home":
-		home._apply_hero()
+
+# --- Oazy's own apps -------------------------------------------------------------------------
+
+func open_app(name: StringName) -> ShellWindow:
+	if not APP_TITLES.has(name):
+		return null
+	start.close()
+	var ref := "oazy:" + String(name)
+	var existing := layer.find(ref)
+	if existing:
+		focus_shell_window(existing)
+		return existing
+	var win := ShellWindow.new().setup(ref, APP_TITLES[name])
+	layer.open_window(win, APP_SIZES[name])
+	var content: Control
+	match name:
+		&"library":
+			var lib := LibraryApp.new()
+			lib.main = self
+			content = lib
+		&"settings":
+			var st := SettingsApp.new()
+			st.main = self
+			content = st
+	win.body.add_child(content)
+	if not Host.self_foreground:
+		Host.go_home()
+	return win
+
+
+func focus_shell_window(win: ShellWindow) -> void:
+	if not Host.self_foreground:
+		Host.go_home()
+	layer.activate(win)
+
+
+func toggle_shell_window(win: ShellWindow) -> void:
+	if win.minimized:
+		focus_shell_window(win)
+	elif win.active and Host.self_foreground:
+		win.minimize()
 	else:
-		backdrop.set_hero(null)
+		focus_shell_window(win)
 
 
 func focus_entry(id: String) -> void:
-	go(&"home")
-	home.select_id(id)
+	var win := open_app(&"library")
+	if win and win.body.get_child_count() > 0:
+		var app: LibraryApp = win.body.get_child(0)
+		app.show_entry(id)
+
+
+func show_desktop() -> void:
+	start.close()
+	var any_open := false
+	for w in layer.windows():
+		if not w.minimized:
+			any_open = true
+	if any_open:
+		layer.minimize_all()
+	else:
+		for w in layer.windows():
+			w.unminimize()
+	if not Host.self_foreground:
+		Host.go_home()
 
 
 func modal_open() -> bool:
 	return not get_tree().get_nodes_in_group("modal").is_empty()
 
 
-# --- Actions -------------------------------------------------------------------------
+# --- Actions -------------------------------------------------------------------------------
 
 func launch(id: String) -> void:
 	if _launching or not Library.has_entry(id):
+		return
+	start.close()
+	var e := Library.get_entry(id)
+	if e["kind"] != "game":
+		var ok := Library.launch(id) if not App.smoke_test else true
+		var btn := taskbar.button_for("lib:" + id)
+		if ok and btn and btn.window_count() == 0:
+			btn.start_launching()
+		Sfx.play(&"select")
 		return
 	_launching = true
 	var overlay := LaunchOverlay.new().setup(id)
@@ -222,9 +329,9 @@ func launch(id: String) -> void:
 
 
 func open_add(prefill: Dictionary) -> void:
+	start.close()
 	var d := EditDialog.new()
 	d.prefill = prefill.duplicate()
-	d.on_saved = func(id: String) -> void: focus_entry(id)
 	overlay_layer.add_child(d)
 
 
@@ -246,7 +353,20 @@ func confirm_remove(id: String) -> void:
 	d.on_confirm = func() -> void:
 		Library.remove_entry(id)
 		Art.forget(id)
+		Catalog.set_pinned("lib:" + id, false)
 		App.toast("Removed %s" % e["name"])
+	overlay_layer.add_child(d)
+
+
+func confirm_power(kind: String) -> void:
+	var d := ConfirmDialog.new()
+	d.title = "Restart your PC?" if kind == "restart" else "Shut down your PC?"
+	d.message = "Save anything you're working on first. Open apps will be closed."
+	d.confirm_text = "Restart" if kind == "restart" else "Shut down"
+	d.danger = true
+	d.on_confirm = func() -> void:
+		if App.is_windows() and not App.smoke_test:
+			OS.create_process("shutdown", ["/r" if kind == "restart" else "/s", "/t", "0"])
 	overlay_layer.add_child(d)
 
 
@@ -295,7 +415,18 @@ func set_autostart(on: bool) -> void:
 		App.toast("Couldn't register Oazy to start with Windows", &"error")
 
 
-# --- Context menu --------------------------------------------------------------------
+func _add_claude_code(fields: Dictionary) -> void:
+	Settings.set_value("claude_checked", true)
+	if fields.is_empty():
+		return
+	for e in Library.entries:
+		if str(e["name"]) == "Claude Code":
+			return
+	var id := Library.add_entry(fields)
+	Catalog.set_pinned("lib:" + id, true)
+
+
+# --- Context menus -------------------------------------------------------------------------
 
 func show_entry_menu(id: String, at: Vector2) -> void:
 	var e := Library.get_entry(id)
@@ -306,6 +437,8 @@ func show_entry_menu(id: String, at: Vector2) -> void:
 	var is_game: bool = e["kind"] == "game"
 	_menu.add_icon_item(Icons.tex("play", 18), "Play" if is_game else "Open", 0)
 	_menu.add_icon_item(Icons.tex("heart_fill" if e["favorite"] else "heart", 18), "Remove from favourites" if e["favorite"] else "Add to favourites", 1)
+	var pinned := Catalog.is_pinned("lib:" + id)
+	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 5)
 	_menu.add_separator()
 	_menu.add_icon_item(Icons.tex("edit", 18), "Edit details", 2)
 	var path := str(e["path"])
@@ -339,13 +472,41 @@ func _on_menu(item: int) -> void:
 			OS.shell_show_in_file_manager(str(e["path"]))
 		4:
 			confirm_remove(id)
+		5:
+			Catalog.set_pinned("lib:" + id, not Catalog.is_pinned("lib:" + id))
 
 
-# --- Events ----------------------------------------------------------------------------
+func _show_desktop_menu(at: Vector2) -> void:
+	_desk_menu.clear()
+	_desk_menu.add_icon_item(Icons.tex("plus", 18), "Add a game or app", 0)
+	_desk_menu.add_icon_item(Icons.tex("grid", 18), "Open Library", 1)
+	_desk_menu.add_separator()
+	_desk_menu.add_icon_item(Icons.tex("palette", 18), "Personalise", 2)
+	_desk_menu.add_icon_item(Icons.tex("desktop", 18), "Fullscreen" if get_window().mode != Window.MODE_FULLSCREEN else "Run in a window", 3)
+	_desk_menu.reset_size()
+	_desk_menu.position = Vector2i(at)
+	_desk_menu.popup()
+	Sfx.play(&"open")
+
+
+func _on_desk_menu(item: int) -> void:
+	match item:
+		0:
+			open_add({})
+		1:
+			open_app(&"library")
+		2:
+			open_app(&"settings")
+		3:
+			toggle_fullscreen()
+
+
+# --- Events ----------------------------------------------------------------------------------
 
 func _on_loaded() -> void:
 	loaded = true
-	home.intro()
+	desktop.intro()
+	taskbar.intro()
 	Sfx.play(&"open", 0.8)
 	_post_update_welcome()
 
@@ -361,8 +522,15 @@ func _post_update_welcome() -> void:
 		overlay_layer.add_child(d)
 		Settings.set_value("pending_update_version", "")
 		Settings.set_value("pending_update_notes", "")
+	elif not Settings.get_value("seen_shell_intro") and not App.smoke_test:
+		var d2 := NotesDialog.new()
+		d2.title = "Welcome home"
+		d2.subtitle = "Oazy is now your desktop. Here's the quick tour."
+		d2.markdown = "### Your PC, one calm place\n- **Start** (the orb, bottom left) opens anything: apps, games, folders and the web. Or just start typing on the desktop.\n- **The taskbar** shows everything that's open, Chrome, Claude Code, your games, with live previews when you hover.\n- **Press Ctrl + Alt + O** in any app to come straight back here.\n- Drag windows by the top, to the top edge to maximise, or to a side to snap. Right-click anything for more."
+		overlay_layer.add_child(d2)
 	elif last != "" and last != App.version:
 		toasts.show_toast("Updated to Oazy %s" % App.version, &"update", show_patch_notes)
+	Settings.set_value("seen_shell_intro", true)
 	Settings.set_value("last_seen_version", App.version)
 
 
@@ -380,6 +548,18 @@ func _on_update_state(state: StringName) -> void:
 		toasts.show_toast("Oazy %s is available. See what's new" % Updater.latest.get("version", ""), &"update", show_update)
 
 
+func _on_hotkey(was_foreground: bool) -> void:
+	if was_foreground:
+		start.toggle()
+	else:
+		Sfx.play(&"open", 1.1)
+
+
+func _on_host_status(ok: bool) -> void:
+	if not ok and Host.failed and loaded and App.is_windows():
+		App.toast("Oazy couldn't connect to Windows, so open apps won't show on the taskbar", &"error")
+
+
 func _on_files_dropped(files: PackedStringArray) -> void:
 	if files.is_empty() or modal_open():
 		return
@@ -390,43 +570,52 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 	open_add(Library.infer_from_path(path))
 
 
-# --- Input -----------------------------------------------------------------------------
+# --- Input -------------------------------------------------------------------------------------
+
+func _input(event: InputEvent) -> void:
+	# Clicking a window raises it; clicking the bare desktop deactivates them.
+	if event is InputEventMouseButton and event.pressed and loaded and not modal_open():
+		var pos: Vector2 = event.position
+		if taskbar.get_global_rect().has_point(pos) or (start.is_open and start.get_global_rect().has_point(pos)) or (preview.visible and preview.get_global_rect().has_point(pos)):
+			return
+		layer.press_at(pos)
+
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT and not modal_open():
+		_show_desktop_menu(event.position)
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var k: InputEventKey = event
 		if k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed):
 			toggle_fullscreen()
 		elif modal_open():
 			return
-		elif k.keycode == KEY_TAB and not k.ctrl_pressed:
-			_cycle_page(-1 if k.shift_pressed else 1)
 		elif k.keycode == KEY_F and k.ctrl_pressed:
-			go(&"library")
-			library_page.focus_search()
+			start.open()
+		elif k.keycode == KEY_L and k.ctrl_pressed:
+			open_app(&"library")
 		elif k.keycode == KEY_N and k.ctrl_pressed:
 			open_add({})
 		elif k.keycode == KEY_COMMA and k.ctrl_pressed:
-			go(&"settings")
-		elif k.keycode == KEY_ESCAPE and current_page != &"home":
-			Sfx.play(&"back")
-			go(&"home")
+			open_app(&"settings")
+		elif k.keycode == KEY_W and k.ctrl_pressed and layer.active_window():
+			layer.active_window().close()
+		elif k.keycode == KEY_ESCAPE and layer.active_window():
+			layer.active_window().minimize()
+		elif k.unicode > 32 and not k.ctrl_pressed and not k.alt_pressed and get_viewport().gui_get_focus_owner() == null and layer.active_window() == null:
+			# Type on the desktop to search, like Start.
+			start.open(char(k.unicode))
 		else:
 			return
 		get_viewport().set_input_as_handled()
 	elif event is InputEventJoypadButton and event.pressed and not modal_open():
 		var j: InputEventJoypadButton = event
-		if j.button_index == JOY_BUTTON_LEFT_SHOULDER:
-			_cycle_page(-1)
-		elif j.button_index == JOY_BUTTON_RIGHT_SHOULDER:
-			_cycle_page(1)
-		elif j.button_index == JOY_BUTTON_B and current_page != &"home":
-			go(&"home")
+		if j.button_index == JOY_BUTTON_START or j.button_index == JOY_BUTTON_GUIDE:
+			start.toggle()
+		elif j.button_index == JOY_BUTTON_B and start.is_open:
+			start.close()
 		else:
 			return
 		get_viewport().set_input_as_handled()
-
-
-func _cycle_page(dir: int) -> void:
-	var i := PAGE_ORDER.find(current_page)
-	go(PAGE_ORDER[wrapi(i + dir, 0, PAGE_ORDER.size())])

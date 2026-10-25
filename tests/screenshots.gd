@@ -29,7 +29,23 @@ func _ready() -> void:
 		})
 		i += 1
 	Library.add_entry({"name": "Hollow Knight", "path": "C:/Games/Hollow Knight/hollow_knight.exe", "playtime": 41 * 3600, "last_played": now - 86400 * 30})
-	Library.add_entry({"name": "Discord", "path": "C:/Apps/Discord.exe", "kind": "app", "launches": 3})
+	Library.add_entry({"name": "Claude Code", "kind": "app", "path": "C:/Windows/System32/cmd.exe", "args": "/k claude", "launches": 40, "last_played": now - 600})
+	Catalog.set_mock_apps([
+		{"name": "Google Chrome", "id": "Chrome"},
+		{"name": "File Explorer", "id": "Microsoft.Windows.Explorer"},
+		{"name": "Discord", "id": "com.squirrel.Discord.Discord"},
+		{"name": "Spotify", "id": "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"},
+		{"name": "Steam", "id": "C:/Program Files (x86)/Steam/steam.exe"},
+		{"name": "Visual Studio Code", "id": "Microsoft.VisualStudioCode"},
+		{"name": "Terminal", "id": "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"},
+		{"name": "Notepad", "id": "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"},
+		{"name": "Calculator", "id": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"},
+		{"name": "Paint", "id": "Microsoft.Paint_8wekyb3d8bbwe!App"},
+		{"name": "OBS Studio", "id": "C:/Program Files/obs-studio/bin/64bit/obs64.exe"},
+		{"name": "Figma", "id": "com.squirrel.figma.Figma"},
+		{"name": "Photos", "id": "Microsoft.Windows.Photos_8wekyb3d8bbwe!App"},
+		{"name": "Microsoft Edge", "id": "MSEdge"},
+	])
 	await _wait(0.7)
 	await shot("00-loading")
 	var main := get_tree().current_scene
@@ -48,50 +64,69 @@ func _ready() -> void:
 			break
 		await _wait(0.25)
 		waited += 0.25
-	main.home.select_id(str(Library.recent()[0]["id"]))
+	await _wait_for_hero(str(Library.recent()[0]["id"]))
+	main.desktop.refresh()
+	main.desktop.show_mock_stats(0.23, 0.58)
+	Host.set_mock_windows([
+		{"hwnd": 101, "title": "Oazy – Google Chrome", "exe": "C:/Program Files/Google/Chrome/Application/chrome.exe", "aumid": "Chrome", "name": "Google Chrome"},
+		{"hwnd": 102, "title": "Claude Code", "exe": "C:/Windows/System32/cmd.exe", "name": "Windows Command Processor"},
+		{"hwnd": 103, "title": "#general - Discord", "exe": "C:/Users/joao/AppData/Local/Discord/app-1.0/Discord.exe", "aumid": "com.squirrel.Discord.Discord", "name": "Discord"},
+	], 0)
 	await _wait(2.5)
-	await shot("01-home")
-	main.home.move(2)
+	await shot("01-desktop")
+	main.start.open()
+	await _wait(0.9)
+	await shot("02-start")
+	main.start.open("c")
+	await _wait(0.6)
+	await shot("03-search")
+	main.start.close()
 	await _wait(0.5)
-	await _wait_for_hero(str(Library.recent()[2]["id"]))
+	var lib: ShellWindow = main.open_app(&"library")
 	await _wait(1.5)
-	await shot("02-home-browse")
-	main.go(&"library")
-	await _wait(1.5)
-	await shot("03-library")
-	main.go(&"settings")
+	await shot("04-library")
+	main.focus_entry(str(Library.recent()[1]["id"]))
+	await _wait_for_hero(str(Library.recent()[1]["id"]))
 	await _wait(1.2)
-	await shot("04-settings")
-	main.go(&"home")
-	await _wait(0.8)
+	await shot("05-game")
+	var settings: ShellWindow = main.open_app(&"settings")
+	await _wait(1.2)
+	await shot("06-settings")
+	var work: Rect2 = main.layer.work_rect()
+	lib.set_rect(Rect2(work.position + Vector2(40, 30), Vector2(work.size.x * 0.56, work.size.y * 0.8)))
+	settings.set_rect(Rect2(work.position + Vector2(work.size.x * 0.48, work.size.y * 0.12), Vector2(work.size.x * 0.48, work.size.y * 0.84)))
+	var chrome: TaskbarButton = main.taskbar.button_for("app:Chrome")
+	if chrome:
+		main.preview.show_for(chrome)
+	await _wait(1.0)
+	await shot("07-windows")
+	main.preview.hide_preview()
 	main.open_add({})
 	await _wait(0.9)
-	await shot("05-add")
+	await shot("08-add")
 	_close_modals()
 	await _wait(0.5)
 	Updater.apply_releases([
-		{"tag_name": "v1.0.9", "published_at": "2026-10-25T10:00:00Z", "body": "### Faster everything\n- **Instant search** in the library.\n- New *Eco* mode for laptops.\n- Fixed artwork for newer Steam games.", "assets": [{"name": "OazyLauncher.exe", "size": 97000000, "browser_download_url": "https://x"}]},
+		{"tag_name": "v2.0.0", "published_at": "2026-10-25T10:00:00Z", "body": "### Oazy is your desktop now\n- **A real taskbar** with everything that's open.\n- Glass windows you can snap, resize and minimise.\n- Start opens any app, game, folder or website.", "assets": [{"name": "OazyLauncher.exe", "size": 97000000, "browser_download_url": "https://x"}]},
 		{"tag_name": "v1.0.8", "published_at": "2026-10-20T10:00:00Z", "body": "### Controller support\n- Shoulder buttons switch pages.", "assets": [{"name": "OazyLauncher.exe", "size": 96000000, "browser_download_url": "https://x"}]},
-	], "1.0.2")
+	], "1.0.3")
 	Updater.state = &"available"
 	main.show_update()
 	await _wait(1.0)
-	await shot("06-update")
+	await shot("09-update")
 	Updater.state = &"downloading"
 	Updater.state_changed.emit(&"downloading")
 	for k in 8:
 		Updater.progress.emit(int(97000000 * 0.06 * (k + 1)), 97000000, 14200000.0)
 		await _wait(0.12)
 	await _wait(0.8)
-	await shot("07-download")
+	await shot("10-download")
 	Updater.state = &"available"
 	_close_modals()
 	await _wait(0.5)
-	main.home.select_id(str(Library.recent()[0]["id"]))
-	await _wait(0.6)
-	main.launch(str(Library.recent()[0]["id"]))
+	main.launch(str(Library.recent()[1]["id"]))
 	await _wait(1.4)
-	await shot("08-launch")
+	await shot("11-launch")
 	print("SCREENSHOTS: DONE")
 	get_tree().quit(0)
 

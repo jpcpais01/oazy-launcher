@@ -94,10 +94,52 @@ func _logic_tests() -> void:
 	Library.load_library()
 	check(Library.entries.size() == 2, "library: save and reload")
 
+	# Shell: search ranking, Start clutter, window grouping and the sky.
+	check(Catalog.match_score("Visual Studio Code", "visual studio code") == 100, "catalog: exact match")
+	check(Catalog.match_score("Google Chrome", "goo") == 80, "catalog: prefix match")
+	check(Catalog.match_score("Google Chrome", "chr") == 60, "catalog: word match")
+	check(Catalog.match_score("Visual Studio Code", "vsc") == 50, "catalog: initials match")
+	check(Catalog.match_score("Spotify", "zzz") == 0, "catalog: no match")
+	check(Catalog.is_clutter("Uninstall Steam", "x") and Catalog.is_clutter("Steam Support", "https://help.steampowered.com"), "catalog: hides uninstallers and links")
+	check(not Catalog.is_clutter("Steam", "C:/Program Files (x86)/Steam/steam.exe"), "catalog: keeps real apps")
+	Catalog.set_mock_apps(_mock_apps())
+	check(not Catalog.find_app("Chrome").is_empty(), "catalog: apps load")
+	check(Catalog.find_app_by_name("Uninstall Discord").is_empty(), "catalog: clutter filtered on load")
+	check(Catalog.ref_for_window({"exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "aumid": "Chrome"}) == "app:Chrome", "catalog: window matched by app id")
+	check(Catalog.ref_for_window({"exe": "C:\\Apps\\app.exe"}).begins_with("lib:"), "catalog: window matched to a library entry")
+	check(Catalog.ref_for_window({"exe": "C:\\Tools\\mystery.exe", "hwnd": 5}) == "win:C:/Tools/mystery.exe", "catalog: unknown windows group by exe")
+	check(Catalog.window_group_name({"title": "Inbox - Mail"}) == "Mail", "catalog: group name from title")
+	check(Catalog.search("chro").size() > 0 and Catalog.search("chro")[0]["name"] == "Google Chrome", "catalog: search finds apps")
+	check(Catalog.search("smoke").size() > 0, "catalog: search finds library entries")
+	check(Catalog.is_pinned("app:Chrome"), "catalog: default pins")
+	Catalog.set_pinned("app:Spotify", false)
+	check(not Catalog.is_pinned("app:Spotify"), "catalog: unpin")
+	Catalog.move_pin("app:Chrome", 2)
+	check(Catalog.pins().find("app:Chrome") == 2, "catalog: move pin")
+	Catalog.reset_pins()
+	check(Catalog.pins().slice(0, 2) == ["oazy:library", "app:Chrome"], "catalog: reset pins")
+	check(Catalog.item("oazy:library")["name"] == "Library", "catalog: Oazy apps")
+	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
+	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
+	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")
+
+
+func _mock_apps() -> Array:
+	return [
+		{"name": "Google Chrome", "id": "Chrome"},
+		{"name": "File Explorer", "id": "Microsoft.Windows.Explorer"},
+		{"name": "Discord", "id": "com.squirrel.Discord.Discord"},
+		{"name": "Uninstall Discord", "id": "C:/Discord/Update.exe"},
+		{"name": "Spotify", "id": "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"},
+		{"name": "Steam", "id": "C:/Program Files (x86)/Steam/steam.exe"},
+		{"name": "Visual Studio Code", "id": "Microsoft.VisualStudioCode"},
+		{"name": "Terminal", "id": "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"},
+	]
+
 
 func _ui_tests() -> void:
 	var main := get_tree().current_scene
-	check(main != null and main.has_method("go"), "ui: main scene loaded")
+	check(main != null and main.has_method("open_app"), "ui: main scene loaded")
 	if main == null:
 		return
 	var waited := 0.0
@@ -105,18 +147,84 @@ func _ui_tests() -> void:
 		await _wait(0.1)
 		waited += 0.1
 	check(main.loaded, "ui: loading screen finished")
-	_layout_checks(main, "home")
-	main.go(&"library")
-	await _wait(0.60)
-	check(main.current_page == &"library", "ui: library page")
-	check(main.library_page._cards.size() == Library.entries.size(), "ui: library shows every entry")
-	main.go(&"settings")
-	await _wait(0.30)
-	main.go(&"home")
-	await _wait(0.30)
-	check(main.home.current_id() != "", "ui: home has a selection")
-	main.home.move(1)
-	main.home.move(-1)
+	await _wait(0.5)
+	_layout_checks(main, "desktop")
+
+	# Real-window plumbing (Windows only), otherwise mock windows.
+	if App.is_windows():
+		await _host_tests()
+		Catalog.set_mock_apps(_mock_apps())
+	Host.set_mock_windows([
+		{"hwnd": 101, "title": "New Tab - Google Chrome", "exe": "C:/Program Files/Google/Chrome/Application/chrome.exe", "aumid": "Chrome", "name": "Google Chrome"},
+		{"hwnd": 102, "title": "Docs - Google Chrome", "exe": "C:/Program Files/Google/Chrome/Application/chrome.exe", "aumid": "Chrome", "name": "Google Chrome"},
+		{"hwnd": 103, "title": "Mystery", "exe": "C:/Tools/mystery.exe"},
+	], 101)
+	main.taskbar.rebuild()
+	var chrome: TaskbarButton = main.taskbar.button_for("app:Chrome")
+	check(chrome != null and chrome.window_count() == 2, "taskbar: groups windows under their pin")
+	check(chrome != null and chrome.active, "taskbar: foreground window is active")
+	check(main.taskbar.button_for("win:C:/Tools/mystery.exe") != null, "taskbar: unpinned windows get a button")
+	if chrome:
+		main.preview.show_for(chrome)
+		await _wait(0.3)
+		check(main.preview.is_showing(), "taskbar: hover preview opens")
+		main.preview.hide_preview()
+	Host.set_mock_windows([])
+	main.taskbar.rebuild()
+	check(main.taskbar.button_for("win:C:/Tools/mystery.exe") == null, "taskbar: closed windows disappear")
+
+	# Oazy's own windows.
+	var lib: ShellWindow = main.open_app(&"library")
+	await _wait(0.6)
+	check(lib != null and main.layer.find("oazy:library") == lib, "windows: library opens")
+	check(lib != null and lib.active, "windows: new window is active")
+	var lib_app: LibraryApp = lib.body.get_child(0)
+	check(lib_app.card_count() == Library.entries.size(), "windows: library shows every entry")
+	check(main.open_app(&"library") == lib, "windows: reopening focuses the same window")
+	var settings: ShellWindow = main.open_app(&"settings")
+	await _wait(0.5)
+	check(settings.active and not lib.active, "windows: focus moves to the newest")
+	check(main.taskbar.button_for("oazy:settings") != null and main.taskbar.button_for("oazy:settings").window_count() == 1, "windows: shell windows on the taskbar")
+	_window_checks(main, lib, "library")
+	_window_checks(main, settings, "settings")
+	settings.toggle_maximize()
+	await _wait(0.5)
+	check(settings.maximized and main.layer.work_rect().grow(1.0).encloses(settings.get_rect()), "windows: maximise fills the work area")
+	settings.toggle_maximize()
+	await _wait(0.5)
+	check(not settings.maximized, "windows: restore")
+	settings.minimize()
+	await _wait(0.5)
+	check(settings.minimized and not settings.visible, "windows: minimise")
+	main.toggle_shell_window(settings)
+	await _wait(0.5)
+	check(not settings.minimized and settings.visible and settings.active, "windows: taskbar brings it back")
+	main.focus_entry(str(Library.recent()[0]["id"]))
+	await _wait(0.6)
+	main.show_desktop()
+	await _wait(0.5)
+	check(lib.minimized and settings.minimized, "windows: show desktop minimises all")
+	main.show_desktop()
+	await _wait(0.5)
+	check(not lib.minimized, "windows: show desktop again restores")
+	settings.close()
+	await _wait(0.5)
+	check(main.layer.find("oazy:settings") == null, "windows: close")
+
+	# Start.
+	main.start.open()
+	await _wait(0.4)
+	check(main.start.is_open, "start: opens")
+	check(main.get_viewport_rect().grow(1.0).encloses(main.start.get_global_rect()), "start: fits on screen")
+	check(main.start.get_global_rect().end.y <= main.taskbar.get_global_rect().position.y + 1.0, "start: sits above the taskbar")
+	main.start.open("chro")
+	await _wait(0.3)
+	check(main.start._rows.size() > 1, "start: search shows results")
+	main.start.close()
+	await _wait(0.4)
+	check(not main.start.is_open, "start: closes")
+
+	# Dialogs, launching and overlays.
 	var first_id := str(Library.recent()[0]["id"])
 	main.open_edit(first_id)
 	main.open_add({"name": "Dropped", "path": "C:/x.exe"})
@@ -135,7 +243,43 @@ func _ui_tests() -> void:
 	main.show_patch_notes()
 	main.toasts.show_toast("Smoke toast", &"success")
 	await _wait(0.90)
-	check(Icons.tex("play", 24) != null, "ui: icons render")
+	check(Icons.tex("play", 24) != null and Icons.tex("leaf", 24) != null, "ui: icons render")
+	for m in get_tree().get_nodes_in_group("modal"):
+		if m.has_method("close"):
+			m.close()
+	await _wait(0.6)
+	_layout_checks(main, "end")
+
+
+## On Windows, the helper must build, connect and answer.
+func _host_tests() -> void:
+	var waited := 0.0
+	while not Host.available and not Host.failed and waited < 30.0:
+		await _wait(0.2)
+		waited += 0.2
+	check(Host.available, "host: connects (%s)" % Host.fail_reason)
+	if not Host.available:
+		return
+	var got := {}
+	Host.request(["windows"], func(d: Dictionary) -> void: got["windows"] = d)
+	Host.request(["apps"], func(d: Dictionary) -> void: got["apps"] = d)
+	Host.request(["stats"], func(d: Dictionary) -> void: got["stats"] = d)
+	Host.render_icon("C:/Windows/explorer.exe", 64, ProjectSettings.globalize_path("user://smoke/explorer.png"), func(d: Dictionary) -> void: got["icon"] = d)
+	waited = 0.0
+	while got.size() < 4 and waited < 30.0:
+		await _wait(0.2)
+		waited += 0.2
+	check(got.has("windows") and got["windows"].get("ok", false), "host: lists windows")
+	check(got.has("apps") and got["apps"].get("apps", []).size() > 0, "host: lists installed apps")
+	check(got.has("stats") and got["stats"].has("cpu"), "host: system stats")
+	check(got.has("icon") and FileAccess.file_exists("user://smoke/explorer.png"), "host: renders icons")
+
+
+func _window_checks(main: Node, win: ShellWindow, where: String) -> void:
+	var work: Rect2 = main.layer.work_rect().grow(1.0)
+	check(work.encloses(win.get_global_rect()), "layout(%s): window inside the work area" % where)
+	check(win.size.x >= ShellWindow.MIN_SIZE.x and win.size.y >= ShellWindow.MIN_SIZE.y, "layout(%s): window has a usable size" % where)
+	check(win.body.size.x > win.size.x * 0.9 and win.body.size.y > win.size.y * 0.7, "layout(%s): window content fills it" % where)
 
 
 ## Catches the class of bug where a panel is anchored but never sized.
@@ -144,17 +288,13 @@ func _layout_checks(main: Node, where: String) -> void:
 	var screen := Rect2(Vector2.ZERO, vp).grow(1.0)
 	check(vp.x > 100.0 and vp.y > 100.0, "layout(%s): viewport has a size" % where)
 	check(main.size.distance_to(vp) < 1.0, "layout(%s): main fills the window" % where)
-	check(main.backdrop.size.distance_to(vp) < 1.0, "layout(%s): backdrop fills the window" % where)
-	check(absf(main.top_bar.size.x - vp.x) < 1.0 and main.top_bar.size.y >= 60.0, "layout(%s): top bar spans the width" % where)
-	check(main.home.size.y > vp.y * 0.75 and main.home.size.x > vp.x * 0.95, "layout(%s): pages fill the screen" % where)
-	check(screen.encloses(main.top_bar._settings_btn.get_global_rect()), "layout(%s): top bar buttons on screen" % where)
-	if main.home._info.visible:
-		check(screen.encloses(main.home._play.get_global_rect()), "layout(%s): play button on screen" % where)
-		check(main.home._play.get_global_rect().position.y > vp.y * 0.5, "layout(%s): play button in the lower half" % where)
-	for t in main.home._tiles:
-		if t.modulate.a > 0.5 and t.position.x < vp.x:
-			check(t.get_global_rect().position.y > main.top_bar.size.y - 1.0, "layout(%s): tiles below the top bar" % where)
-			break
+	check(main.wallpaper.size.distance_to(vp) < 1.0, "layout(%s): wallpaper fills the window" % where)
+	var bar: Rect2 = main.taskbar.get_global_rect()
+	check(screen.encloses(bar) and bar.size.x > vp.x * 0.9 and bar.size.y >= 60.0, "layout(%s): taskbar spans the bottom" % where)
+	check(bar.end.y > vp.y - 20.0, "layout(%s): taskbar at the bottom" % where)
+	check(screen.encloses(main.taskbar.orb.get_global_rect()), "layout(%s): Start orb on screen" % where)
+	check(main.layer.work_rect().end.y <= bar.position.y + 1.0, "layout(%s): windows stay above the taskbar" % where)
+	check(main.desktop.size.distance_to(vp) < 1.0, "layout(%s): desktop fills the window" % where)
 
 
 func _wait(seconds: float) -> void:

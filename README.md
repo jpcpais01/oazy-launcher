@@ -1,12 +1,19 @@
 # Oazy Launcher
 
-A fast, good-looking launcher for the games and apps on a Windows PC, built with Godot 4.
+A personal desktop shell for a Windows PC, built with Godot 4: one calm, glassy place to open apps, games, folders and the web, and to switch between everything that's running.
 
-- Console-style Home with a tile carousel, full-screen artwork and an accent colour taken from each game.
-- Finds Steam, Epic Games and GOG installs automatically and pulls covers, heroes and logos from Steam.
-- Library grid with instant search, filters and sorting. Playtime tracking for games launched from Oazy.
+- **Desktop** with the time, a "continue playing" card, recently played games and a small system glance, over a procedural oasis wallpaper that follows the time of day.
+- **Taskbar** with pinned apps and every open Windows window grouped by app, live DWM previews on hover, click to focus or minimise.
+- **Start** with pinned apps, all installed apps (the Windows AppsFolder), recent games, places, power options and search across apps, games and the web.
+- **Glass windows** for Oazy's own apps (Library, Settings): drag, resize, snap, maximise, minimise, several at once.
+- **Library** that finds Steam, Epic Games and GOG installs, pulls covers, heroes and logos from Steam, and tracks playtime.
+- **Ctrl + Alt + O** brings Oazy to the front from any app.
 - Updates itself from GitHub Releases with a what's-new screen and a live download screen.
-- Everything is drawn with a handful of cheap canvas shaders on the Compatibility renderer, so it starts instantly and idles lightly (it drops to 30 fps when unfocused, 12 fps while a game runs).
+- Drawn with a few cheap canvas shaders (liquid glass, wallpaper) on the Compatibility renderer.
+
+### How Oazy talks to Windows
+
+`native/oazy_host.cs` is a small C# 5 helper that Oazy compiles on first run with the .NET Framework compiler that ships with Windows (`csc.exe`) and caches in the data folder. Oazy talks to it over a pipe: it lists and watches top-level windows, focuses, minimises and closes them, places live window thumbnails, renders app icons, enumerates installed apps and reports CPU and memory. If it can't start, Oazy keeps working with its own windows only.
 
 ## Download
 
@@ -30,4 +37,6 @@ Each change adds a player-facing entry in [`patch-notes/`](patch-notes/README.md
 
 Open the folder in Godot 4.5+. Useful flags: `-- --smoke-test` runs the self-test and exits with its result. `tools/make_icon.py` regenerates the app icon.
 
-Keyboard: arrows/Enter on Home, Tab to switch pages, Ctrl+F search, Ctrl+N add, F favourite, Delete remove, F11 fullscreen. Controllers work too (D-pad, A, B, shoulders).
+Keyboard: type on the desktop to search, Ctrl+F Start search, Ctrl+L Library, Ctrl+, Settings, Ctrl+N add, Ctrl+W close window, Esc minimise window, F11 fullscreen. A controller's Start/Guide button opens Start.
+
+`-- --screenshots=<dir>` renders the main screens to PNGs with sample data and mock windows (CI uploads these).

@@ -5,22 +5,27 @@ signal changed(key: String, value: Variant)
 
 const PATH := "user://settings.cfg"
 const DEFAULTS := {
-	"minimize_on_launch": true,
+	"minimize_for_games": false,
 	"launch_at_startup": false,
-	"start_fullscreen": false,
+	"shell_fullscreen": true,
 	"auto_check_updates": true,
 	"ui_sounds": true,
 	"volume": 0.6,
 	"effects": "high",
-	"accent_mode": "auto",
-	"accent_color": "7c6cff",
+	"accent": "38d6c4",
+	"wallpaper_light": "auto",
+	"user_name": "",
+	"pins": [],
+	"pins_initialized": false,
+	"recent_apps": [],
 	"window_rect": [],
 	"last_seen_version": "",
 	"pending_update_version": "",
 	"pending_update_notes": "",
-	"last_selected": "",
 	"steam_root": "",
 	"first_scan_done": false,
+	"claude_checked": false,
+	"seen_shell_intro": false,
 }
 
 var _values := {}

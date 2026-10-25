@@ -30,6 +30,8 @@ Sfx="*res://scripts/autoload/sfx.gd"
 Library="*res://scripts/autoload/library.gd"
 Art="*res://scripts/autoload/art.gd"
 Updater="*res://scripts/autoload/updater.gd"
+Host="*res://scripts/autoload/host.gd"
+Catalog="*res://scripts/autoload/catalog.gd"
 
 [debug]
 
