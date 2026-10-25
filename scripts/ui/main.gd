@@ -30,6 +30,8 @@ var _grips: Array[Control] = []
 var _launching := false
 var _peeked: Array[ShellWindow] = []
 var _menus: Control
+var quick: QuickSettings
+var calendar: CalendarFlyout
 
 
 func _ready() -> void:
@@ -61,13 +63,21 @@ func _ready() -> void:
 	bar.add_child(preview)
 	start = StartPanel.new()
 	start.main = self
-	Shell.layer("start", {"top": true, "focus": true, "work": true}).add_child(start)
+	var start_layer := Shell.layer("start", {"top": true, "focus": true, "work": true})
+	start_layer.add_child(start)
+	quick = QuickSettings.new()
+	start_layer.add_child(quick)
+	calendar = CalendarFlyout.new()
+	start_layer.add_child(calendar)
+	taskbar.attach_flyouts(quick, calendar)
 	taskbar.start_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
 		taskbar.orb.open = o
 		if o:
 			preview.hide_preview()
+			quick.close()
+			calendar.close()
 	)
 
 	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})
@@ -473,6 +483,11 @@ func show_patch_notes() -> void:
 	overlay_layer.add_child(d)
 
 
+func show_shortcuts() -> void:
+	start.close()
+	overlay_layer.add_child(ShortcutsSheet.dialog())
+
+
 func set_autostart(on: bool) -> void:
 	if not (App.is_windows() and App.is_packaged()):
 		App.toast("Start with Windows works in the installed app")
@@ -606,6 +621,7 @@ func _show_desktop_menu(at: Vector2) -> void:
 	_desk_menu.add_icon_item(Icons.tex("grid", 18), "Open Library", 1)
 	_desk_menu.add_separator()
 	_desk_menu.add_icon_item(Icons.tex("palette", 18), "Personalise", 2)
+	_desk_menu.add_icon_item(Icons.tex("keyboard", 18), "Keyboard shortcuts", 4)
 	if not Shell.native:
 		_desk_menu.add_icon_item(Icons.tex("desktop", 18), "Fullscreen" if get_window().mode != Window.MODE_FULLSCREEN else "Run in a window", 3)
 	popup_menu(_desk_menu, at)
@@ -622,6 +638,8 @@ func _on_desk_menu(item: int) -> void:
 			open_app(&"settings")
 		3:
 			toggle_fullscreen()
+		4:
+			show_shortcuts()
 
 
 # --- Events ----------------------------------------------------------------------------------
@@ -777,6 +795,8 @@ func handle_key(event: InputEvent, from: Window = null) -> bool:
 		toggle_fullscreen()
 	elif modal_open():
 		return false
+	elif k.keycode == KEY_F1 or (k.keycode == KEY_SLASH and k.ctrl_pressed):
+		show_shortcuts()
 	elif k.keycode == KEY_F and k.ctrl_pressed:
 		start.open()
 	elif k.keycode == KEY_L and k.ctrl_pressed:

@@ -2,7 +2,8 @@ class_name Taskbar
 extends Control
 ## The floating glass taskbar. Left: the Start orb and search. Middle: pinned
 ## and running apps, real Windows windows and Oazy's own side by side. Right:
-## updates, the clock and a sliver that shows the desktop.
+## updates, sound (quick settings), the clock (calendar) and a sliver that
+## shows the desktop.
 
 signal start_pressed
 signal search_pressed
@@ -13,6 +14,8 @@ const MARGIN := 10.0
 var main: Node
 var layer: WindowLayer
 var preview: TaskPreview
+var quick: QuickSettings
+var calendar: CalendarFlyout
 var orb: StartOrb
 var _glass: GlassPanel
 var _apps: HBoxContainer
@@ -21,6 +24,8 @@ var _clock: Label
 var _date: Label
 var _update_btn: FxButton
 var _battery: Label
+var _sound: Button
+var _clock_btn: Button
 var _hover_btn: TaskbarButton
 var _hover_timer: Timer
 var _leave_timer: Timer
@@ -71,15 +76,37 @@ func _ready() -> void:
 	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_battery)
 
+	_sound = _tray_button(Vector2(44, 44), "Sound and quick settings")
+	_sound.icon = Icons.tex("volume", 20, Color(1, 1, 1, 0.85))
+	_sound.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sound.pressed.connect(func() -> void:
+		if quick:
+			calendar.close()
+			quick.toggle(_sound)
+	)
+	_sound.gui_input.connect(_on_sound_input)
+	row.add_child(_sound)
+
+	_clock_btn = _tray_button(Vector2(104, 50), "")
+	_clock_btn.pressed.connect(func() -> void:
+		if calendar:
+			quick.close()
+			calendar.toggle(_clock_btn)
+	)
+	row.add_child(_clock_btn)
 	var clock := Kit.vbox(0)
 	clock.alignment = BoxContainer.ALIGNMENT_CENTER
-	clock.custom_minimum_size.x = 92
-	row.add_child(clock)
+	clock.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	clock.offset_right = -6
+	clock.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_clock_btn.add_child(clock)
 	_clock = Kit.label("", 17, 700, App.TEXT, true)
 	_clock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_clock.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clock.add_child(_clock)
 	_date = Kit.label("", 12, 500, App.TEXT_DIM)
 	_date.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_date.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clock.add_child(_date)
 	row.add_child(_desktop_sliver())
 
@@ -98,6 +125,11 @@ func _ready() -> void:
 	)
 	_timer(1.0, _tick, true)
 	_tick()
+	# The sound icon follows changes made elsewhere (keyboard volume keys).
+	_timer(4.0, func() -> void:
+		if quick and Host.available and not quick.is_open:
+			quick.refresh()
+	, true)
 
 	_menu = PopupMenu.new()
 	_menu.id_pressed.connect(_on_menu)
@@ -373,6 +405,55 @@ func _tick() -> void:
 func set_battery(percent: int, charging: bool) -> void:
 	_battery.visible = percent >= 0
 	_battery.text = ("⚡ " if charging else "") + "%d%%" % percent
+	if quick:
+		quick.set_battery(percent, charging)
+
+
+## Wires the tray to its flyouts (they live in Start's layer, above apps).
+func attach_flyouts(q: QuickSettings, c: CalendarFlyout) -> void:
+	quick = q
+	calendar = c
+	quick.volume_changed.connect(_on_volume)
+	Host.status_changed.connect(func(ok: bool) -> void:
+		if ok:
+			quick.refresh()
+	)
+	if Host.available:
+		quick.refresh()
+
+
+func _on_volume(level: float, muted: bool) -> void:
+	_sound.icon = Icons.tex(QuickSettings.icon_for(level, muted), 20, Color(1, 1, 1, 0.85))
+	_sound.tooltip_text = "Muted" if muted else "Volume %d%%" % int(roundf(level * 100.0))
+
+
+func _on_sound_input(e: InputEvent) -> void:
+	if not (e is InputEventMouseButton and e.pressed) or quick == null:
+		return
+	match e.button_index:
+		MOUSE_BUTTON_WHEEL_UP:
+			quick.nudge(0.02)
+		MOUSE_BUTTON_WHEEL_DOWN:
+			quick.nudge(-0.02)
+		MOUSE_BUTTON_MIDDLE:
+			quick.set_muted(not quick.muted)
+		_:
+			return
+	_sound.accept_event()
+
+
+func _tray_button(min_size: Vector2, tip: String) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = min_size
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.tooltip_text = tip
+	b.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.0), 14))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.1), 14, Color(1, 1, 1, 0.1), 1))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.16), 14, Color(1, 1, 1, 0.14), 1))
+	b.add_theme_stylebox_override("hover_pressed", Kit.box(Color(1, 1, 1, 0.16), 14, Color(1, 1, 1, 0.14), 1))
+	return b
 
 
 func _on_update_state(state: StringName) -> void:

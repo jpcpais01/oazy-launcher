@@ -34,6 +34,7 @@ const COMMANDS := [
 	["oazy_notes", "Oazy patch notes", "patch notes whats new changelog oazy", "sparkles", "notes"],
 	["oazy_scan", "Scan this PC for games", "scan games steam epic gog import", "sparkles", "scan"],
 	["oazy_add", "Add a game or app", "add game app new", "plus", "add"],
+	["oazy_keys", "Keyboard shortcuts", "keyboard shortcuts keys hotkeys help", "keyboard", "shortcuts"],
 ]
 
 const _CALC_WORDS := ["sqrt", "pow", "abs", "round", "floor", "ceil", "sin", "cos", "tan", "log", "exp", "pi"]
@@ -142,6 +143,8 @@ static func _run_command(what: String, main: Node) -> void:
 			main.scan_stores()
 		"add":
 			main.open_add({})
+		"shortcuts":
+			main.show_shortcuts()
 
 
 # --- Sums --------------------------------------------------------------------------------

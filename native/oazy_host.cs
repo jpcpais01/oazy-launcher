@@ -3,7 +3,8 @@
 // Godot has no FFI, so everything that needs Win32 lives here: listing the
 // real application windows (like Alt+Tab does), focusing / minimising /
 // closing them, live DWM thumbnails drawn into Oazy's window, app icons,
-// the list of installed apps, system stats and the global "home" hotkey.
+// the list of installed apps, system stats, speaker volume, media keys and
+// the global "home" hotkey.
 //
 // Oazy compiles this file on first run with the C# compiler that ships with
 // every Windows 10/11 (.NET Framework 4.x csc.exe), so it must stay C# 5.
@@ -147,6 +148,42 @@ namespace Oazy
 		public interface IShellItemImageFactory
 		{
 			[PreserveSig] int GetImage(SIZE size, int flags, out IntPtr hbitmap);
+		}
+
+		// Core Audio: the default speakers' master volume and mute.
+		[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+		public class MMDeviceEnumerator { }
+
+		[ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IMMDeviceEnumerator
+		{
+			[PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+			[PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+		}
+
+		[ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IMMDevice
+		{
+			[PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+			[PreserveSig] int OpenPropertyStore(int access, out IPropertyStore store);
+		}
+
+		[ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IAudioEndpointVolume
+		{
+			[PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+			[PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+			[PreserveSig] int GetChannelCount(out uint count);
+			[PreserveSig] int SetMasterVolumeLevel(float db, ref Guid ctx);
+			[PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid ctx);
+			[PreserveSig] int GetMasterVolumeLevel(out float db);
+			[PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+			[PreserveSig] int SetChannelVolumeLevel(uint channel, float db, ref Guid ctx);
+			[PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid ctx);
+			[PreserveSig] int GetChannelVolumeLevel(uint channel, out float db);
+			[PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+			[PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid ctx);
+			[PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
 		}
 
 		[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
@@ -435,6 +472,19 @@ namespace Oazy
 					return "\"ok\":" + Json.Bool(Native.LockWorkStation());
 				case "sleep":
 					return "\"ok\":" + Json.Bool(Native.SetSuspendState(false, false, false));
+				case "volume":
+					return Volume(null, -1);
+				case "volume_set":
+				{
+					float level;
+					if (!float.TryParse(Arg(p, 2), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out level))
+						return "\"ok\":false,\"error\":\"bad level\"";
+					return Volume(Math.Max(0f, Math.Min(1f, level)), -1);
+				}
+				case "mute":
+					return Volume(null, Arg(p, 2) == "1" ? 1 : 0);
+				case "media":
+					return "\"ok\":" + Json.Bool(MediaKey(Arg(p, 2)));
 				case "ping":
 					return "\"ok\":true";
 			}
@@ -1146,6 +1196,82 @@ namespace Oazy
 			}
 			if (back.Count > 0) Focus(back[0]);
 			return "\"ok\":true,\"action\":\"restore\"";
+		}
+
+		// --- Sound and media ----------------------------------------------------------
+
+		static Guid NoContext = Guid.Empty;
+
+		// Reads (and optionally sets) the default output's volume. Looked up on
+		// every call so switching to headphones just works.
+		static string Volume(float? set, int mute)
+		{
+			Native.IMMDeviceEnumerator en = null;
+			Native.IMMDevice dev = null;
+			Native.IAudioEndpointVolume vol = null;
+			try
+			{
+				en = (Native.IMMDeviceEnumerator)new Native.MMDeviceEnumerator();
+				if (en.GetDefaultAudioEndpoint(0, 1, out dev) != 0 || dev == null)
+					return "\"ok\":false,\"error\":\"no speakers\"";
+				Guid iid = typeof(Native.IAudioEndpointVolume).GUID;
+				object o;
+				if (dev.Activate(ref iid, 23, IntPtr.Zero, out o) != 0 || o == null)
+					return "\"ok\":false,\"error\":\"no volume control\"";
+				vol = (Native.IAudioEndpointVolume)o;
+				if (set.HasValue)
+				{
+					vol.SetMasterVolumeLevelScalar(set.Value, ref NoContext);
+					if (set.Value > 0f) vol.SetMute(false, ref NoContext);
+				}
+				if (mute >= 0) vol.SetMute(mute == 1, ref NoContext);
+				float level;
+				bool muted;
+				vol.GetMasterVolumeLevelScalar(out level);
+				vol.GetMute(out muted);
+				return "\"ok\":true,\"level\":" + level.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+					+ ",\"muted\":" + Json.Bool(muted)
+					+ ",\"device\":" + Json.Str(DeviceName(dev));
+			}
+			finally
+			{
+				if (vol != null) Marshal.ReleaseComObject(vol);
+				if (dev != null) Marshal.ReleaseComObject(dev);
+				if (en != null) Marshal.ReleaseComObject(en);
+			}
+		}
+
+		static string DeviceName(Native.IMMDevice dev)
+		{
+			Native.IPropertyStore store;
+			if (dev.OpenPropertyStore(0, out store) != 0 || store == null) return "";
+			try
+			{
+				Native.PROPERTYKEY key;
+				key.fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0");
+				key.pid = 14;
+				Native.PROPVARIANT pv;
+				if (store.GetValue(ref key, out pv) != 0) return "";
+				string name = pv.vt == 31 && pv.p != IntPtr.Zero ? Marshal.PtrToStringUni(pv.p) : "";
+				Native.PropVariantClear(ref pv);
+				return name ?? "";
+			}
+			finally { Marshal.ReleaseComObject(store); }
+		}
+
+		static bool MediaKey(string which)
+		{
+			byte vk;
+			switch (which)
+			{
+				case "play": vk = 0xB3; break;
+				case "next": vk = 0xB0; break;
+				case "prev": vk = 0xB1; break;
+				default: return false;
+			}
+			Native.keybd_event(vk, 0, 0, UIntPtr.Zero);
+			Native.keybd_event(vk, 0, 2, UIntPtr.Zero);
+			return true;
 		}
 
 		// --- Events: window changes and the home hotkey ----------------------------------
