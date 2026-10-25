@@ -80,6 +80,19 @@ func _logic_tests() -> void:
 	check(Updater.verify_file("res://project.godot", 0, "") != "", "updater: rejects non-exe downloads")
 	Updater.apply_releases([], App.version)
 
+	# Artwork lookups: name matching and store payload parsing.
+	check(Art.norm_title("MARVEL RIVALS™") == Art.norm_title("Marvel Rivals"), "art: titles normalise")
+	check(Art.match_steam_search({"items": [{"name": "Marvel Rivals Soundtrack", "id": 1}, {"name": "Marvel Rivals", "id": 2767030}]}, "Marvel Rivals™") == "2767030", "art: steam search exact match")
+	check(Art.match_steam_search({"items": [{"name": "Fortnite Fan Game", "id": 9}]}, "Fortnite") == "", "art: steam search rejects near misses")
+	var ep := Art.epic_ids({"epic_app": "Fortnite", "epic_uri": "com.epicgames.launcher://apps/fn%3A4fe75bbc5a674f4f9b356b5c90567da5%3AFortnite?action=launch&silent=true"})
+	check(ep.get("item") == "4fe75bbc5a674f4f9b356b5c90567da5" and ep.get("app") == "Fortnite", "art: epic ids from launch uri")
+	var cat_json := JSON.stringify([{"id": "abc", "title": "Fortnite", "keyImages": [{"type": "DieselGameBoxTall", "url": "https://cdn1.epicgames.com/tall.jpg"}]}])
+	var cat := Art.parse_epic_catalog(Marshalls.raw_to_base64(cat_json.to_utf8_buffer()))
+	check(cat["by_id"].has("abc") and cat["by_title"]["fortnite"]["DieselGameBoxTall"].ends_with("tall.jpg"), "art: epic catalog cache parses")
+	var gdb := Art.gamesdb_images({"game": {"vertical_cover": {"url_format": "https://images.gog.com/x{formatter}.{ext}"}, "logo": {"url_format": "https://images.gog.com/l{formatter}.{ext}"}}})
+	check(gdb.get(&"cover") == "https://images.gog.com/x.jpg" and gdb.get(&"logo") == "https://images.gog.com/l.png", "art: gamesdb images")
+	check(Art.match_wiki({"query": {"pages": [{"title": "Fortnite Battle Royale", "index": 1, "thumbnail": {"source": "a"}}, {"title": "Fortnite (video game)", "index": 2, "thumbnail": {"source": "b"}}]}}, "Fortnite") == "b", "art: wikipedia picks the matching page")
+
 	# Library CRUD (smoke runs use a throwaway file).
 	var id := Library.add_entry({"name": "Smoke Game", "path": "C:/Games/smoke.exe"})
 	check(Library.has_entry(id), "library: add")
