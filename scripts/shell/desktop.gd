@@ -31,6 +31,7 @@ var _mem: Array = []
 var _hero_id := ""
 var _last_minute := -1
 var _stats_timer: Timer
+var _dim_tween: Tween
 
 
 func _ready() -> void:
@@ -510,3 +511,12 @@ func intro() -> void:
 		var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		t.tween_property(c, "modulate:a", 1.0, 0.7).set_delay(0.12 + i * 0.05)
 		t.tween_property(c, "position:y", y, 0.9).set_delay(0.12 + i * 0.05)
+
+
+## Fades the desktop out while Start is open, so the two never fight for
+## attention (or show a clock cut in half behind Start).
+func dim(on: bool) -> void:
+	if _dim_tween and _dim_tween.is_valid():
+		_dim_tween.kill()
+	_dim_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_dim_tween.tween_property(self, "modulate:a", 0.0 if on else 1.0, 0.22 if on else 0.35)

@@ -23,6 +23,8 @@ var _copy: BackBufferCopy
 var _rect: ColorRect
 var _shadow: Panel
 var _mirror := false
+var _shadow_spread := 0.0
+var _shadow_off := 0.0
 
 
 func _init(isolate: bool = false, r: float = 22.0, t: Color = TINT_WIDGET, shadow: bool = true) -> void:
@@ -86,6 +88,19 @@ func set_shadow_strength(a: float, spread: int = 34, offset_y: float = 14.0) -> 
 	var s := Kit.box(Color(0, 0, 0, 0), int(radius))
 	Kit.shadowed(s, Color(0, 0.02, 0.04, a), spread, Vector2(0, offset_y))
 	_shadow.add_theme_stylebox_override("panel", s)
+	_shadow_spread = spread
+	_shadow_off = offset_y
+
+
+## The panel and its shadow in global coordinates: what a shell layer keeps on
+## screen so the shadow fades out instead of being cut off.
+func shadow_rect() -> Rect2:
+	var r := get_global_rect()
+	if _shadow == null:
+		return r.grow(2.0)
+	var s := _shadow_spread + 2.0
+	var top := maxf(2.0, s - _shadow_off)
+	return Rect2(r.position.x - s, r.position.y - top, r.size.x + s * 2.0, r.size.y + top + s + _shadow_off)
 
 
 ## Eco mode skips the screen blur and uses a more solid tint.

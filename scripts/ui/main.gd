@@ -74,6 +74,7 @@ func _ready() -> void:
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
 		taskbar.orb.open = o
+		desktop.dim(o)
 		if o:
 			preview.hide_preview()
 			quick.close()
@@ -107,6 +108,7 @@ func _ready() -> void:
 	Library.import_finished.connect(_on_import_finished)
 	Updater.state_changed.connect(_on_update_state)
 	Host.hotkey.connect(_on_hotkey)
+	Host.desktop_hotkey.connect(show_desktop)
 	Host.status_changed.connect(_on_host_status)
 	Host.fullscreen_changed.connect(_on_fullscreen_app)
 	Settings.changed.connect(_on_setting)
@@ -668,7 +670,7 @@ func _post_update_welcome() -> void:
 		var d2 := NotesDialog.new()
 		d2.title = "Welcome home"
 		d2.subtitle = "Oazy is now your desktop. Here's the quick tour."
-		d2.markdown = "### Your PC, one calm place\n- **Start** (the orb, bottom left) opens anything: apps, games, folders and the web. Or just start typing on the desktop.\n- **The taskbar** shows everything that's open, Chrome, Claude Code, your games, with live previews when you hover.\n- **Press Ctrl + Alt + O** in any app to open Start.\n- **Right-click** any app or game to add it to your favourites. They live on your desktop and at the top of Start."
+		d2.markdown = "### Your PC, one calm place\n- **Start** (the orb, bottom left) opens anything: apps, games, folders and the web. Or just start typing on the desktop.\n- **The taskbar** shows everything that's open, Chrome, Claude Code, your games, with live previews when you hover.\n- **Press Ctrl + Alt + O** in any app to open Start, and **Ctrl + Alt + D** (or the desktop button on the taskbar) to get back to your desktop.\n- **Right-click** any app or game to add it to your favourites. They live on your desktop and at the top of Start."
 		overlay_layer.add_child(d2)
 	elif last != "" and last != App.version:
 		toasts.show_toast("Updated to Oazy %s" % App.version, &"update", show_patch_notes)

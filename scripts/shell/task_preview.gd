@@ -36,7 +36,7 @@ func _ready() -> void:
 
 
 func shell_shape() -> Array[Rect2]:
-	return [get_global_rect().grow(16.0)]
+	return [_glass.shadow_rect()]
 
 
 func is_showing() -> bool:

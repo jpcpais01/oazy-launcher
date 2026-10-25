@@ -34,12 +34,36 @@ namespace Oazy
 	{
 		public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 		public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time);
+		public delegate IntPtr WndProc(IntPtr h, uint msg, IntPtr w, IntPtr l);
 
 		[StructLayout(LayoutKind.Sequential)]
 		public struct RECT { public int Left, Top, Right, Bottom; }
 
 		[StructLayout(LayoutKind.Sequential)]
 		public struct SIZE { public int cx, cy; }
+
+		[StructLayout(LayoutKind.Sequential)]
+		public struct APPBARDATA
+		{
+			public int cbSize;
+			public IntPtr hWnd;
+			public uint uCallbackMessage;
+			public uint uEdge;
+			public RECT rc;
+			public IntPtr lParam;
+		}
+
+		[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+		public struct WNDCLASSEX
+		{
+			public int cbSize;
+			public uint style;
+			public WndProc lpfnWndProc;
+			public int cbClsExtra, cbWndExtra;
+			public IntPtr hInstance, hIcon, hCursor, hbrBackground;
+			public string lpszMenuName, lpszClassName;
+			public IntPtr hIconSm;
+		}
 
 		[StructLayout(LayoutKind.Sequential)]
 		public struct POINT { public int x, y; }
@@ -187,6 +211,12 @@ namespace Oazy
 		}
 
 		[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+		[DllImport("shell32.dll")] public static extern UIntPtr SHAppBarMessage(uint msg, ref APPBARDATA data);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateWindowEx(int ex, string cls, string name, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
+		[DllImport("user32.dll")] public static extern IntPtr DefWindowProc(IntPtr h, uint msg, IntPtr w, IntPtr l);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetModuleHandle(string name);
 		[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
@@ -295,6 +325,11 @@ namespace Oazy
 		const uint SMTO_ABORTIFHUNG = 2;
 		const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 		const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_NOREPEAT = 0x4000;
+		const uint ABM_NEW = 0, ABM_REMOVE = 1, ABM_QUERYPOS = 2, ABM_SETPOS = 3, ABM_GETSTATE = 4, ABM_SETSTATE = 10;
+		const uint ABE_BOTTOM = 3, ABN_POSCHANGED = 1, ABN_FULLSCREENAPP = 2;
+		const int ABS_AUTOHIDE = 1;
+		const uint WM_APP = 0x8000, WM_APPBAR = WM_APP + 1, WM_SHELL_APPLY = WM_APP + 2, WM_DISPLAYCHANGE = 0x7E;
+		const uint HOTKEY_HOME = 1, HOTKEY_DESKTOP = 2;
 		const int SIIGBF_ICONONLY = 4;
 		const int SW_HIDE = 0;
 		const int SW_SHOWMINNOACTIVE = 7;
@@ -331,8 +366,18 @@ namespace Oazy
 		static bool HideTray;
 		static bool TrayHidden;
 		static readonly List<IntPtr> HiddenDesktop = new List<IntPtr>();
-		static Native.RECT OrigWork, ShellWork;
-		static bool WorkSaved, WorkSet;
+		static Native.RECT OrigWork;
+		static bool WorkSaved;
+		// Oazy's taskbar is a real AppBar, so Windows itself keeps maximised
+		// apps above it. (Setting the work area directly fought Explorer, which
+		// kept putting its own back: windows jumped between the two sizes.)
+		static IntPtr AppBarWnd = IntPtr.Zero;
+		static Native.WndProc AppBarProc;
+		static bool AppBarOn;
+		static int Reserve;
+		static uint TaskbarCreated;
+		// Explorer's taskbar autohide state before we changed it, -1 if untouched.
+		static int TrayState = -1;
 		static readonly List<IntPtr> Peeked = new List<IntPtr>();
 		static bool ThemeOn;
 		static int ThemeBorder, ThemeCaption, ThemeText;
@@ -941,6 +986,7 @@ namespace Oazy
 			{
 				Desktop = desktop;
 				HideTray = hideTray;
+				Reserve = Math.Max(0, reserve);
 				if (desktop != IntPtr.Zero)
 				{
 					int ex = Native.GetWindowLong(desktop, GWL_EXSTYLE);
@@ -954,15 +1000,143 @@ namespace Oazy
 					WorkSaved = true;
 				}
 				ShellOn = true;
+				if (HideTray) AutoHideTray(true);
 				HideExplorer();
-				ShellWork = MonitorRect(desktop, false);
-				ShellWork.Bottom -= Math.Max(0, reserve);
-				WorkSet = reserve > 0;
-				if (WorkSet) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref ShellWork, SPIF_SENDCHANGE);
 				KeepDesktopDown();
 				WriteRestore();
 			}
-			return "\"ok\":true,\"tray_hidden\":" + Json.Bool(TrayHidden);
+			// The AppBar lives on the message loop's thread.
+			ApplyAppBar(true);
+			return "\"ok\":true,\"tray_hidden\":" + Json.Bool(TrayHidden) + ",\"appbar\":" + Json.Bool(AppBarOn);
+		}
+
+		static void ApplyAppBar(bool wait)
+		{
+			if (AppBarWnd == IntPtr.Zero) return;
+			if (wait)
+			{
+				IntPtr ignored;
+				Native.SendMessageTimeout(AppBarWnd, WM_SHELL_APPLY, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 3000, out ignored);
+			}
+			else Native.PostMessage(AppBarWnd, WM_SHELL_APPLY, IntPtr.Zero, IntPtr.Zero);
+		}
+
+		static Native.APPBARDATA BarData()
+		{
+			Native.APPBARDATA d = new Native.APPBARDATA();
+			d.cbSize = Marshal.SizeOf(typeof(Native.APPBARDATA));
+			d.hWnd = AppBarWnd;
+			d.uCallbackMessage = WM_APPBAR;
+			d.uEdge = ABE_BOTTOM;
+			return d;
+		}
+
+		// Message loop thread only. Registers, places or removes the AppBar to
+		// match the shell state.
+		static void SyncAppBar()
+		{
+			bool want;
+			int reserve;
+			IntPtr desktop;
+			lock (ShellLock) { want = ShellOn && HideTray && Reserve > 0; reserve = Reserve; desktop = Desktop; }
+			Native.APPBARDATA d = BarData();
+			if (!want)
+			{
+				if (AppBarOn) Native.SHAppBarMessage(ABM_REMOVE, ref d);
+				AppBarOn = false;
+				return;
+			}
+			if (!AppBarOn)
+			{
+				AppBarOn = Native.SHAppBarMessage(ABM_NEW, ref d) != UIntPtr.Zero;
+				if (!AppBarOn) return;
+			}
+			Native.RECT mon = MonitorRect(desktop != IntPtr.Zero ? desktop : AppBarWnd, false);
+			d.rc = mon;
+			d.rc.Top = mon.Bottom - reserve;
+			Native.SHAppBarMessage(ABM_QUERYPOS, ref d);
+			// Other bars on the same edge may push it up; keep its height.
+			d.rc.Top = d.rc.Bottom - reserve;
+			Native.SHAppBarMessage(ABM_SETPOS, ref d);
+			Native.SetWindowPos(AppBarWnd, IntPtr.Zero, d.rc.Left, d.rc.Top, d.rc.Right - d.rc.Left, d.rc.Bottom - d.rc.Top, SWP_NOACTIVATE | SWP_NOOWNERZORDER | 0x4);
+		}
+
+		static IntPtr OnAppBarMessage(IntPtr h, uint msg, IntPtr w, IntPtr l)
+		{
+			try
+			{
+				if (msg == WM_SHELL_APPLY)
+				{
+					SyncAppBar();
+					return IntPtr.Zero;
+				}
+				if (msg == WM_APPBAR)
+				{
+					uint code = (uint)w.ToInt64();
+					if (code == ABN_POSCHANGED && AppBarOn) SyncAppBar();
+					else if (code == ABN_FULLSCREENAPP) Dirty = true;
+					return IntPtr.Zero;
+				}
+				if (msg == WM_DISPLAYCHANGE && AppBarOn)
+				{
+					SyncAppBar();
+				}
+				else if (TaskbarCreated != 0 && msg == TaskbarCreated)
+				{
+					// Explorer restarted: it forgot our bar and showed its own.
+					AppBarOn = false;
+					lock (ShellLock)
+					{
+						if (ShellOn && HideTray) { TrayHidden = false; AutoHideTray(true); HideExplorer(); }
+					}
+					SyncAppBar();
+				}
+			}
+			catch (Exception) { }
+			return Native.DefWindowProc(h, msg, w, l);
+		}
+
+		static void CreateAppBarWindow()
+		{
+			AppBarProc = new Native.WndProc(OnAppBarMessage);
+			Native.WNDCLASSEX wc = new Native.WNDCLASSEX();
+			wc.cbSize = Marshal.SizeOf(typeof(Native.WNDCLASSEX));
+			wc.lpfnWndProc = AppBarProc;
+			wc.hInstance = Native.GetModuleHandle(null);
+			wc.lpszClassName = "OazyTaskbarSpace";
+			Native.RegisterClassEx(ref wc);
+			// Never shown: it only tells Windows how much room Oazy's taskbar takes.
+			AppBarWnd = Native.CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, "OazyTaskbarSpace", "Oazy taskbar", 0x80000000, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
+			TaskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
+		}
+
+		// Explorer's taskbar on autohide gives its space back; ours takes it.
+		static void AutoHideTray(bool on)
+		{
+			IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
+			if (tray == IntPtr.Zero) return;
+			Native.APPBARDATA d = new Native.APPBARDATA();
+			d.cbSize = Marshal.SizeOf(typeof(Native.APPBARDATA));
+			d.hWnd = tray;
+			int state = (int)Native.SHAppBarMessage(ABM_GETSTATE, ref d).ToUInt32();
+			if (on)
+			{
+				if (TrayState < 0) TrayState = state;
+				if ((state & ABS_AUTOHIDE) == 0)
+				{
+					d.lParam = new IntPtr(state | ABS_AUTOHIDE);
+					Native.SHAppBarMessage(ABM_SETSTATE, ref d);
+				}
+			}
+			else if (TrayState >= 0)
+			{
+				if (state != TrayState)
+				{
+					d.lParam = new IntPtr(TrayState);
+					Native.SHAppBarMessage(ABM_SETSTATE, ref d);
+				}
+				TrayState = -1;
+			}
 		}
 
 		static void HideExplorer()
@@ -970,11 +1144,8 @@ namespace Oazy
 			if (HideTray)
 			{
 				IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
-				if (tray != IntPtr.Zero && Native.IsWindowVisible(tray))
-				{
-					Native.ShowWindow(tray, SW_HIDE);
-					TrayHidden = true;
-				}
+				if (tray != IntPtr.Zero && Native.IsWindowVisible(tray)) Native.ShowWindow(tray, SW_HIDE);
+				if (tray != IntPtr.Zero) TrayHidden = true;
 			}
 			// Explorer's own desktop (wallpaper and icons) would cover Oazy's, which
 			// sits at the very bottom.
@@ -998,26 +1169,28 @@ namespace Oazy
 			}, IntPtr.Zero);
 		}
 
-		// Explorer restarts and display changes undo what we set; put it back.
+		// Explorer brings its taskbar and desktop back now and then (Win key,
+		// restarts); hide them again. The work area is left to the AppBar.
 		static void ReassertShell()
 		{
 			lock (ShellLock)
 			{
 				if (!ShellOn) return;
 				HideExplorer();
-				if (WorkSet)
-				{
-					Native.RECT cur = new Native.RECT();
-					Native.SystemParametersInfo(SPI_GETWORKAREA, 0, ref cur, 0);
-					if (!SameRect(cur, ShellWork)) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref ShellWork, SPIF_SENDCHANGE);
-				}
 			}
+			if (!AppBarOn) ApplyAppBar(false);
 		}
 
 		static void ExitShell()
 		{
 			lock (ShellLock)
 			{
+				ShellOn = false;
+			}
+			if (AppBarOn) ApplyAppBar(true);
+			lock (ShellLock)
+			{
+				AutoHideTray(false);
 				if (TrayHidden)
 				{
 					IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
@@ -1026,9 +1199,6 @@ namespace Oazy
 				}
 				foreach (IntPtr h in HiddenDesktop) if (Native.IsWindow(h)) Native.ShowWindow(h, SW_SHOWNA);
 				HiddenDesktop.Clear();
-				if (WorkSet && WorkSaved) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref OrigWork, SPIF_SENDCHANGE);
-				WorkSet = false;
-				ShellOn = false;
 				ThemeOn = false;
 				ResetTheme();
 				try { if (RestorePath != "" && File.Exists(RestorePath)) File.Delete(RestorePath); }
@@ -1041,7 +1211,7 @@ namespace Oazy
 			if (RestorePath == "") return;
 			try
 			{
-				File.WriteAllText(RestorePath, string.Format("{0} {1} {2} {3} {4}", OrigWork.Left, OrigWork.Top, OrigWork.Right, OrigWork.Bottom, TrayHidden ? 1 : 0));
+				File.WriteAllText(RestorePath, string.Format("{0} {1} {2} {3} {4} {5}", OrigWork.Left, OrigWork.Top, OrigWork.Right, OrigWork.Bottom, HideTray ? 1 : 0, TrayState));
 			}
 			catch (Exception) { }
 		}
@@ -1059,6 +1229,8 @@ namespace Oazy
 					Native.RECT r = new Native.RECT();
 					r.Left = int.Parse(v[0]); r.Top = int.Parse(v[1]); r.Right = int.Parse(v[2]); r.Bottom = int.Parse(v[3]);
 					if (r.Right > r.Left && r.Bottom > r.Top) Native.SystemParametersInfo(SPI_SETWORKAREA, 0, ref r, SPIF_SENDCHANGE);
+					if (v.Length >= 6 && int.TryParse(v[5], out TrayState) && TrayState >= 0) AutoHideTray(false);
+					TrayState = -1;
 					if (v[4] == "1")
 					{
 						IntPtr tray = Native.FindWindow("Shell_TrayWnd", null);
@@ -1284,12 +1456,16 @@ namespace Oazy
 			Native.SetWinEventHook(0x0016, 0x0017, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x8000, 0x8003, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x800B, 0x800C, IntPtr.Zero, HookProc, 0, 0, 0);
-			bool hotkey = Native.RegisterHotKey(IntPtr.Zero, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4F);
+			bool hotkey = Native.RegisterHotKey(IntPtr.Zero, (int)HOTKEY_HOME, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4F);
+			Native.RegisterHotKey(IntPtr.Zero, (int)HOTKEY_DESKTOP, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x44);
+			try { CreateAppBarWindow(); }
+			catch (Exception) { AppBarWnd = IntPtr.Zero; }
 			Write("{\"ev\":\"ready\",\"hotkey\":" + Json.Bool(hotkey) + "}");
 			Native.MSG msg;
 			while (Native.GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
 			{
-				if (msg.message == WM_HOTKEY) OnHotkey();
+				if (msg.message == WM_HOTKEY && (uint)msg.wParam.ToInt64() == HOTKEY_DESKTOP) Write("{\"ev\":\"desktop_key\"}");
+				else if (msg.message == WM_HOTKEY) OnHotkey();
 				Native.TranslateMessage(ref msg);
 				Native.DispatchMessage(ref msg);
 			}
@@ -1306,6 +1482,12 @@ namespace Oazy
 				return;
 			}
 			if (ev >= 0x8000 && Native.GetAncestor(hwnd, GA_ROOT) != hwnd) return;
+			if (ev == 0x8002 && ShellOn && TrayHidden && ClassName(hwnd) == "Shell_TrayWnd")
+			{
+				// Explorer showed its taskbar (Win key): Oazy's is the one in use.
+				Native.ShowWindow(hwnd, SW_HIDE);
+				return;
+			}
 			if (ev == 0x0003 && ShellOn && hwnd == Desktop) KeepDesktopDown();
 			Dirty = true;
 		}

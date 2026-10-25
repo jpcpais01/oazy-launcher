@@ -48,7 +48,8 @@ func _ready() -> void:
 
 	_glass = GlassPanel.new(true, 22.0, GlassPanel.TINT_BAR)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_glass.set_shadow_strength(0.45, 30, 10.0)
+	# A tight shadow: the strip above the taskbar belongs to apps in shell mode.
+	_glass.set_shadow_strength(0.4, 16, 6.0)
 	add_child(_glass)
 
 	var row := Kit.hbox(10)
@@ -75,6 +76,12 @@ func _ready() -> void:
 	_battery.visible = false
 	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_battery)
+
+	var desk := _tray_button(Vector2(44, 44), "Show desktop (Ctrl + Alt + D)")
+	desk.icon = Icons.tex("desktop", 20, Color(1, 1, 1, 0.85))
+	desk.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desk.pressed.connect(func() -> void: main.show_desktop())
+	row.add_child(desk)
 
 	_sound = _tray_button(Vector2(44, 44), "Sound and quick settings")
 	_sound.icon = Icons.tex("volume", 20, Color(1, 1, 1, 0.85))
@@ -182,11 +189,17 @@ func _search_pill() -> Control:
 
 func _desktop_sliver() -> Control:
 	var s := Button.new()
-	s.custom_minimum_size = Vector2(10, 40)
+	s.custom_minimum_size = Vector2(12, 40)
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	s.focus_mode = Control.FOCUS_NONE
-	s.tooltip_text = "Show desktop"
-	s.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.0), 6))
+	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	s.tooltip_text = "Show desktop (Ctrl + Alt + D)"
+	# A faint line, like the end of the bar, so it can be found.
+	var line := Kit.box(Color(0, 0, 0, 0), 6)
+	line.border_color = Color(1, 1, 1, 0.14)
+	line.border_width_left = 1
+	line.content_margin_left = 0
+	s.add_theme_stylebox_override("normal", line)
 	s.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.16), 6, Color(1, 1, 1, 0.2), 1))
 	s.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.24), 6))
 	s.pressed.connect(func() -> void: main.show_desktop())
@@ -271,7 +284,7 @@ func _group(groups: Dictionary, order: Array[String], ref: String) -> Dictionary
 
 ## The part of the screen the taskbar's layer keeps (see Shell).
 func shell_shape() -> Array[Rect2]:
-	return [get_global_rect().grow(MARGIN)]
+	return [_glass.shadow_rect()]
 
 
 func button_for(ref: String) -> TaskbarButton:
