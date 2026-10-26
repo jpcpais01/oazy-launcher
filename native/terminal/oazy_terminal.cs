@@ -78,6 +78,8 @@ namespace OazyTerminal
 		[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 		[DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO info);
 		[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+		[DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
+		[DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
 
 		[StructLayout(LayoutKind.Sequential)]
 		public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags, uCount, dwTimeout; }
@@ -981,7 +983,20 @@ namespace OazyTerminal
 		{
 			base.OnShown(e);
 			if (startMaximized) WindowState = FormWindowState.Maximized;
+			RefreshFrame();
+			BeginInvoke((Action)RefreshFrame);
 			Init();
+		}
+
+		// Until the frame is recalculated once the window is on screen, DWM keeps
+		// painting a dark caption strip across the top of the glass (as in Oazy Browser).
+		void RefreshFrame()
+		{
+			int color = unchecked((int)0xFFFFFFFF); // DWMWA_COLOR_DEFAULT
+			Native.DwmSetWindowAttribute(Handle, 35, ref color, 4);
+			long style = Native.GetWindowLongPtr(Handle, -16).ToInt64() & ~0x00C00000L;
+			Native.SetWindowLongPtr(Handle, -16, new IntPtr(style));
+			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 		}
 
 		bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
