@@ -46,9 +46,21 @@ var _clock_btn: Button
 var _weather_btn: Button
 var _weather_icon: TextureRect
 var _weather_temp: Label
+## Hover intent for the window previews (see _step_preview).
 var _hover_btn: TaskbarButton
-var _hover_timer: Timer
-var _leave_timer: Timer
+## How long the pointer has been on _hover_btn, and how long it has held still.
+var _dwell := 0.0
+var _still := 0.0
+var _last_pointer := Vector2.INF
+## How long the pointer has been off the preview's button, the card and the way between.
+var _away := 0.0
+## Where the pointer last was on the preview's button: the tip of the path up to the card.
+var _anchor := Vector2.ZERO
+## Clicked or right-clicked: no preview for it until the pointer leaves it.
+var _hush: TaskbarButton
+var _closed_at := -100000
+## The preview open now was opened from here (tests open it by hand).
+var _managing := false
 var _menu: PopupMenu
 var _menu_btn: TaskbarButton
 var _rebuild_queued := false
@@ -159,11 +171,6 @@ func _ready() -> void:
 	_apps.resized.connect(_snap_apps)
 	add_child(_apps)
 
-	_hover_timer = _timer(0.45, _on_hover_timeout)
-	_leave_timer = _timer(0.28, func() -> void:
-		_hover_btn = null
-		preview.hide_preview()
-	)
 	_timer(1.0, _tick, true)
 	_tick()
 	# The sound icon follows changes made elsewhere (keyboard volume keys).
@@ -182,12 +189,6 @@ func _ready() -> void:
 	Library.changed.connect(queue_rebuild)
 	Updater.state_changed.connect(_on_update_state)
 	layer.changed.connect(queue_rebuild)
-	preview.hover_changed.connect(func(on: bool) -> void:
-		if on:
-			_leave_timer.stop()
-		else:
-			_leave_timer.start()
-	)
 	rebuild()
 
 
@@ -354,8 +355,10 @@ func rebuild() -> void:
 		if not keep.has(ref):
 			var gone: TaskbarButton = _buttons[ref]
 			_buttons.erase(ref)
-			if gone == _hover_btn:
+			if gone == preview.button:
 				preview.hide_preview()
+			if gone == _hover_btn:
+				_hover_btn = null
 			gone.cancel_drag()
 			gone.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			var t := gone.create_tween().set_parallel(true)
@@ -470,9 +473,7 @@ func _step_apps(delta: float) -> bool:
 
 
 func _on_drag_started(btn: TaskbarButton) -> void:
-	_hover_timer.stop()
-	_leave_timer.stop()
-	preview.hide_preview()
+	_close_preview()
 	_drag_btn = btn
 	_drag_grab = get_global_mouse_position().x - btn.global_position.x
 	btn.set_lifted(true)
@@ -525,7 +526,8 @@ func _process(delta: float) -> void:
 	if _reflowing:
 		_reflowing = _step_apps(delta)
 	var lens := _step_lens(delta)
-	set_process(_reflowing or lens)
+	var hover := _step_preview(delta)
+	set_process(_reflowing or lens or hover)
 
 
 ## Springs the lens after the active button; returns true while it moves.
@@ -633,18 +635,16 @@ func intro() -> void:
 # --- Interaction --------------------------------------------------------------------------
 
 func _on_click(btn: TaskbarButton) -> void:
-	_hover_timer.stop()
 	if btn.shell_window != null and btn.windows.is_empty():
-		preview.hide_preview()
+		_close_preview(btn)
 		main.toggle_shell_window(btn.shell_window)
 	elif btn.windows.size() == 1 and btn.shell_window == null:
-		preview.hide_preview()
+		_close_preview(btn)
 		Host.toggle(int(btn.windows[0]["hwnd"]))
 	elif btn.window_count() > 1:
-		_hover_btn = btn
-		preview.show_for(btn)
+		_open_preview(btn, get_global_mouse_position())
 	else:
-		preview.hide_preview()
+		_close_preview(btn)
 		_launch(btn)
 
 
@@ -655,27 +655,120 @@ func _launch(btn: TaskbarButton) -> void:
 		Sfx.play(&"select")
 
 
-func _on_hover(btn: TaskbarButton, on: bool) -> void:
-	if on:
-		_hover_btn = btn
-		_leave_timer.stop()
-		if preview.is_showing():
-			preview.show_for(btn)
-		else:
-			_hover_timer.start()
+func _on_hover(_btn: TaskbarButton, _on: bool) -> void:
+	# The preview follows the pointer itself (see _step_preview); this only
+	# wakes it up.
+	set_process(true)
+
+
+# --- Window previews ------------------------------------------------------------------
+# One card that follows the pointer along the taskbar. It opens after the
+# pointer rests on an app, glides to the next app as the pointer moves along,
+# and stays while the pointer heads up to it: from where it left the button,
+# anywhere inside the triangle up to the card's bottom corners counts as on
+# the way, even across other apps' buttons. It closes a moment after the
+# pointer is off the button, the card and that path. All of this is worked
+# out from where the pointer is each frame, not from enter and leave events,
+# so a fast sweep can't leave it confused.
+
+const OPEN_DELAY := 0.4
+## How far under the card still counts as just below it.
+const GAP_SLACK := TaskPreview.GAP + 4.0
+## Reopening right after it closed (sweeping back) is immediate.
+const REOPEN_WINDOW := 400
+const CLOSE_DELAY := 0.3
+## On the way to the card, another app takes it only once the pointer rests there.
+const SWITCH_REST := 0.12
+
+
+func _step_preview(delta: float) -> bool:
+	if _drag_btn or _menu.visible or not is_visible_in_tree():
+		_hover_btn = null
+		return false
+	var p := get_global_mouse_position()
+	var moved := _last_pointer == Vector2.INF or p.distance_to(_last_pointer) > 2.0
+	_last_pointer = p
+	_still = 0.0 if moved else _still + delta
+	var over := _button_at(p)
+	if over != _hover_btn:
+		_hover_btn = over
+		_dwell = 0.0
 	else:
-		_hover_timer.stop()
-		_leave_timer.start()
+		_dwell += delta
+	if _hush and over != _hush:
+		_hush = null
+	if not preview.open:
+		if over and over != _hush and (_dwell >= OPEN_DELAY or Time.get_ticks_msec() - _closed_at < REOPEN_WINDOW):
+			_open_preview(over, p)
+		return over != null
+	if not _managing:
+		return false
+	var target := preview.button
+	if target == null or not is_instance_valid(target):
+		_close_preview()
+		return false
+	if over == target:
+		_anchor = p
+		_away = 0.0
+		return true
+	if preview.get_global_rect().grow(6.0).has_point(p):
+		_away = 0.0
+		return true
+	var heading := _heading_to_preview(p)
+	if over and over != _hush and (not heading or _still >= SWITCH_REST):
+		_open_preview(over, p)
+		return true
+	if heading:
+		_away = 0.0
+		return true
+	_away += delta
+	if _away >= CLOSE_DELAY:
+		_close_preview()
+	return true
 
 
-func _on_hover_timeout() -> void:
-	if _hover_btn and is_instance_valid(_hover_btn) and _hover_btn.get_global_rect().has_point(get_global_mouse_position()):
-		preview.show_for(_hover_btn)
+func _open_preview(btn: TaskbarButton, at: Vector2) -> void:
+	_managing = true
+	_anchor = at
+	_away = 0.0
+	preview.show_for(btn)
+	set_process(true)
+
+
+## Closes the card; `hush` keeps it from reopening for that button until the pointer leaves it.
+func _close_preview(hush: TaskbarButton = null) -> void:
+	if hush:
+		_hush = hush
+	if preview.open:
+		_closed_at = Time.get_ticks_msec()
+	_managing = false
+	preview.hide_preview()
+
+
+func _button_at(p: Vector2) -> TaskbarButton:
+	for b in _order:
+		if is_instance_valid(b) and b.visible and b.get_global_rect().grow(2.0).has_point(p):
+			return b
+	return null
+
+
+## The pointer is on its way from the button up to the card: inside the
+## triangle from where it left the button to the card's bottom corners, or in
+## the strip right under the card.
+func _heading_to_preview(p: Vector2) -> bool:
+	var r := preview.get_global_rect()
+	var bottom := r.position.y + r.size.y
+	if p.y < bottom - 2.0:
+		return false
+	var left := Vector2(r.position.x - 12.0, bottom)
+	var right := Vector2(r.end.x + 12.0, bottom)
+	if Geometry2D.point_is_inside_triangle(p, _anchor, left, right):
+		return true
+	return p.x >= r.position.x and p.x <= r.end.x and p.y <= bottom + GAP_SLACK
 
 
 func _on_context(btn: TaskbarButton, at: Vector2) -> void:
-	_hover_timer.stop()
-	preview.hide_preview()
+	_close_preview(btn)
 	_menu_btn = btn
 	_menu.clear()
 	_menu.add_item(str(btn.item.get("name", "")), 99)

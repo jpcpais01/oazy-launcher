@@ -3,20 +3,26 @@ extends Control
 ## The card that rises above a taskbar button: each window of that app with
 ## its title, a close button and a live preview drawn by Windows (DWM
 ## thumbnails), or just the app's name for pinned apps that aren't open.
-
-signal hover_changed(on: bool)
+## There is only ever one: moving along the taskbar glides it from app to app
+## (the taskbar decides when, see Taskbar._step_preview).
 
 const CARD_W := 252.0
 const THUMB := Vector2(228, 132)
+## Space between the card and the taskbar button it belongs to.
+const GAP := 14.0
 
 var button: TaskbarButton
 var main: Node
+## Showing (or on its way in) for `button`; false once it starts to close.
+var open := false
 var _glass: GlassPanel
 var _content: HBoxContainer
 var _slots: Array = []
 var _tween: Tween
 var _thumbs_on := false
 var _serial := 0
+## What the card was built from, so going back to the same app doesn't rebuild it.
+var _built := ""
 
 
 func _ready() -> void:
@@ -28,29 +34,91 @@ func _ready() -> void:
 	_content = Kit.hbox(8)
 	_content.position = Vector2(10, 10)
 	add_child(_content)
-	mouse_entered.connect(func() -> void: hover_changed.emit(true))
-	mouse_exited.connect(func() -> void:
-		if not get_global_rect().has_point(get_global_mouse_position()):
-			hover_changed.emit(false)
-	)
 
 
+## The card, plus the strip between it and its button, so the pointer stays
+## on Oazy's taskbar all the way up.
 func shell_shape() -> Array[Rect2]:
-	return [_glass.shadow_rect()]
+	var shape: Array[Rect2] = [_glass.shadow_rect()]
+	if open and is_instance_valid(button):
+		var bottom := position.y + size.y
+		var top := button.get_global_rect().position.y
+		if top > bottom:
+			shape.append(Rect2(position.x, bottom, size.x, top - bottom + 2.0))
+	return shape
 
 
 func is_showing() -> bool:
 	return visible and modulate.a > 0.01
 
 
+func _signature(btn: TaskbarButton) -> String:
+	var parts := PackedStringArray([btn.ref, str(btn.item.get("name", ""))])
+	if btn.shell_window != null:
+		parts.append("oazy:%d:%s:%s" % [btn.shell_window.get_instance_id(), btn.shell_window.title, btn.shell_window.minimized])
+	for w in btn.windows.slice(0, 4):
+		parts.append("%d:%s:%s" % [int(w["hwnd"]), str(w.get("title", "")), bool(w.get("min", false))])
+	return "|".join(parts)
+
+
 func show_for(btn: TaskbarButton) -> void:
+	var sig := _signature(btn)
+	if open and btn == button and sig == _built and is_showing():
+		return
 	_serial += 1
 	var serial := _serial
+	# Stop a fade-out first, or its "hide" at the end would land after this.
+	if _tween and _tween.is_valid():
+		_tween.kill()
+	var gliding := open and is_showing()
+	open = true
 	clear_thumbs()
 	button = btn
-	for c in _content.get_children():
-		c.queue_free()
-	_slots.clear()
+	if sig != _built:
+		_built = sig
+		for c in _content.get_children():
+			_content.remove_child(c)
+			c.queue_free()
+		_slots.clear()
+		_build(btn)
+	# Laid out next frame; until then the old card keeps its shape, empty,
+	# rather than the new contents spilling out of it.
+	_content.modulate.a = 0.0
+	visible = true
+	await get_tree().process_frame
+	if serial != _serial or not is_instance_valid(btn):
+		return
+	_content.reset_size()
+	var want := _content.size + Vector2(20, 20)
+	var center := btn.get_global_rect().get_center()
+	var vp := Shell.view_size()
+	var top := btn.get_global_rect().position.y - GAP - want.y
+	var at := Vector2(clampf(center.x - want.x / 2.0, 10.0, vp.x - want.x - 10.0), top)
+	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	if gliding:
+		# Already up for another app: slide and reshape into place.
+		_tween.tween_property(self, "position", at, 0.22)
+		_tween.tween_property(self, "size", want, 0.22)
+		_tween.tween_property(self, "modulate:a", 1.0, 0.1)
+		_tween.tween_property(self, "scale", Vector2.ONE, 0.2)
+		_tween.tween_property(_content, "modulate:a", 1.0, 0.16).set_delay(0.06)
+	else:
+		position = at
+		size = want
+		if modulate.a < 0.5:
+			modulate.a = 0.0
+			scale = Vector2.ONE * 0.94
+		_tween.tween_property(self, "modulate:a", 1.0, 0.16)
+		_tween.tween_property(self, "scale", Vector2.ONE, 0.3)
+		_content.modulate.a = 1.0
+	pivot_offset = Vector2(center.x - at.x, want.y)
+	# Live pictures go in once the card has stopped moving.
+	await get_tree().create_timer(0.24).timeout
+	if serial == _serial and open:
+		_show_thumbs()
+
+
+func _build(btn: TaskbarButton) -> void:
 	if btn.window_count() == 0:
 		var pill := Kit.vbox(2)
 		pill.add_child(Kit.label(str(btn.item.get("name", "")), 15, 600, App.TEXT))
@@ -67,32 +135,11 @@ func show_for(btn: TaskbarButton) -> void:
 			_content.add_child(_card_for_shell(btn.shell_window))
 		for w in btn.windows.slice(0, 4):
 			_content.add_child(_card_for_window(w))
-	visible = true
-	await get_tree().process_frame
-	if serial != _serial or not is_instance_valid(btn):
-		return
-	_content.reset_size()
-	size = _content.size + Vector2(20, 20)
-	var center := btn.get_global_rect().get_center()
-	var vp := Shell.view_size()
-	var top := btn.get_global_rect().position.y - 14.0 - size.y
-	position = Vector2(clampf(center.x - size.x / 2.0, 10.0, vp.x - size.x - 10.0), top)
-	pivot_offset = Vector2(center.x - position.x, size.y)
-	if _tween and _tween.is_valid():
-		_tween.kill()
-	if modulate.a < 0.5:
-		modulate.a = 0.0
-		scale = Vector2.ONE * 0.94
-	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_tween.tween_property(self, "modulate:a", 1.0, 0.16)
-	_tween.tween_property(self, "scale", Vector2.ONE, 0.3)
-	await get_tree().create_timer(0.2).timeout
-	if serial == _serial and visible:
-		_show_thumbs()
 
 
 func hide_preview() -> void:
 	_serial += 1
+	open = false
 	clear_thumbs()
 	if not visible:
 		return
@@ -100,7 +147,10 @@ func hide_preview() -> void:
 		_tween.kill()
 	_tween = create_tween()
 	_tween.tween_property(self, "modulate:a", 0.0, 0.12)
-	_tween.tween_callback(func() -> void: visible = false)
+	_tween.tween_callback(func() -> void:
+		visible = false
+		_built = ""
+	)
 
 
 func clear_thumbs() -> void:
