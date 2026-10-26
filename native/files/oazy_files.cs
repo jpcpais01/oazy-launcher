@@ -136,7 +136,7 @@ namespace OazyFiles
 			[PreserveSig] int GetImage(SIZE size, int flags, out IntPtr bitmap);
 		}
 
-		public const int SIIGBF_RESIZETOFIT = 0, SIIGBF_ICONONLY = 4;
+		public const int SIIGBF_RESIZETOFIT = 0, SIIGBF_ICONONLY = 4, SIIGBF_THUMBNAILONLY = 8;
 
 		[DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
 		public static extern void SHCreateItemFromParsingName(string path, IntPtr bindCtx, [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
@@ -1126,8 +1126,15 @@ namespace OazyFiles
 			try
 			{
 				Native.SIZE s = new Native.SIZE { cx = size, cy = size };
-				int hr = f.GetImage(s, thumb ? Native.SIIGBF_RESIZETOFIT : Native.SIIGBF_ICONONLY, out hbm);
-				if (hr != 0 && thumb) hr = f.GetImage(s, Native.SIIGBF_ICONONLY, out hbm);
+				int hr = thumb ? f.GetImage(s, Native.SIIGBF_THUMBNAILONLY, out hbm) : -1;
+				if (hr != 0 && thumb)
+				{
+					// No thumbnail from the shell (thumbnails switched off, or no
+					// handler): draw common pictures ourselves.
+					byte[] own = Picture(path, size, out type);
+					if (own != null) return own;
+				}
+				if (hr != 0) hr = f.GetImage(s, Native.SIIGBF_ICONONLY, out hbm);
 				if (hr != 0 || hbm == IntPtr.Zero) return null;
 				return Encode(hbm, out type);
 			}
@@ -1136,6 +1143,36 @@ namespace OazyFiles
 				if (hbm != IntPtr.Zero) Native.DeleteObject(hbm);
 				Marshal.ReleaseComObject(f);
 			}
+		}
+
+		static readonly string[] PICTURES = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
+
+		// A picture scaled to fit `size`, read with GDI+.
+		static byte[] Picture(string path, int size, out string type)
+		{
+			type = null;
+			try
+			{
+				if (Array.IndexOf(PICTURES, Path.GetExtension(path).ToLowerInvariant()) < 0) return null;
+				if (new FileInfo(path).Length > 48L * 1024 * 1024) return null;
+				using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+				using (Image img = Image.FromStream(fs, false, false))
+				{
+					double k = Math.Min(1.0, Math.Min((double)size / img.Width, (double)size / img.Height));
+					int w = Math.Max(1, (int)Math.Round(img.Width * k)), h = Math.Max(1, (int)Math.Round(img.Height * k));
+					using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
+					{
+						using (Graphics g = Graphics.FromImage(bmp))
+						{
+							g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+							g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+							g.DrawImage(img, 0, 0, w, h);
+						}
+						return Save(bmp, !Image.IsAlphaPixelFormat(img.PixelFormat), out type);
+					}
+				}
+			}
+			catch { type = null; return null; }
 		}
 
 		// The shell's bitmap (32-bit, premultiplied alpha) as a PNG, or a JPEG
@@ -1183,24 +1220,30 @@ namespace OazyFiles
 				BitmapData data = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
 				for (int y = 0; y < h; y++) Marshal.Copy(px, y * w * 4, new IntPtr(data.Scan0.ToInt64() + (long)y * data.Stride), w * 4);
 				bmp.UnlockBits(data);
-				using (MemoryStream ms = new MemoryStream())
+				return Save(bmp, opaque, out type);
+			}
+		}
+
+		static byte[] Save(Bitmap bmp, bool opaque, out string type)
+		{
+			int w = bmp.Width, h = bmp.Height;
+			using (MemoryStream ms = new MemoryStream())
+			{
+				if (opaque && w * h > 96 * 96)
 				{
-					if (opaque && w * h > 96 * 96)
-					{
-						ImageCodecInfo jpeg = null;
-						foreach (ImageCodecInfo c in ImageCodecInfo.GetImageEncoders()) if (c.MimeType == "image/jpeg") jpeg = c;
-						EncoderParameters p = new EncoderParameters(1);
-						p.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
-						using (Bitmap rgb = bmp.Clone(new Rectangle(0, 0, w, h), PixelFormat.Format24bppRgb)) rgb.Save(ms, jpeg, p);
-						type = "image/jpeg";
-					}
-					else
-					{
-						bmp.Save(ms, ImageFormat.Png);
-						type = "image/png";
-					}
-					return ms.ToArray();
+					ImageCodecInfo jpeg = null;
+					foreach (ImageCodecInfo c in ImageCodecInfo.GetImageEncoders()) if (c.MimeType == "image/jpeg") jpeg = c;
+					EncoderParameters p = new EncoderParameters(1);
+					p.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+					using (Bitmap rgb = bmp.Clone(new Rectangle(0, 0, w, h), PixelFormat.Format24bppRgb)) rgb.Save(ms, jpeg, p);
+					type = "image/jpeg";
 				}
+				else
+				{
+					bmp.Save(ms, ImageFormat.Png);
+					type = "image/png";
+				}
+				return ms.ToArray();
 			}
 		}
 	}
