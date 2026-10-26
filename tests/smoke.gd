@@ -110,6 +110,27 @@ func _logic_tests() -> void:
 	check(Library.uninstall_item({"_key": "Notepad++", "DisplayName": "Notepad++", "Publisher": "Notepad++ Team", "DisplayIcon": "C:\\Program Files\\Notepad++\\notepad++.exe"}).is_empty(), "discovery: ordinary programs are not games")
 	check(Art.gamesdb_ref({"source": "riot", "args": "--launch-product=league_of_legends --launch-patchline=live"}) == "riot/league_of_legends", "art: riot games use galaxy's riot ids")
 	check(Art.gamesdb_ref({"source": "ubisoft", "path": "uplay://launch/635/0"}) == "uplay/635", "art: ubisoft games use galaxy's uplay ids")
+	# Your own games: Godot exports and art dropped next to the exe.
+	var gd_dir := "user://smoke/own_games/My Game"
+	DirAccess.make_dir_recursive_absolute(gd_dir)
+	var gd_exe := FileAccess.open(gd_dir.path_join("my_game.exe"), FileAccess.WRITE)
+	var junk := PackedByteArray()
+	junk.resize(1024)
+	gd_exe.store_buffer(junk)
+	gd_exe.store_buffer("GDPC".to_ascii_buffer())
+	gd_exe.close()
+	check(Library.is_godot_exe(gd_dir.path_join("my_game.exe")), "own games: godot export recognised")
+	var own := Library.scan_game_folders([{"path": "user://smoke/own_games", "any": false}])
+	check(own.size() == 1 and own[0]["name"] == "My Game" and own[0]["kind"] == "game", "own games: found in a folder")
+	gd_dir = ProjectSettings.globalize_path(gd_dir)
+	for art_file in ["My_Game_banner.png", "cover.jpg", "other_logo.png"]:
+		var af := FileAccess.open(gd_dir.path_join(art_file), FileAccess.WRITE)
+		af.store_string("x")
+		af.close()
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"hero").has(gd_dir.path_join("My_Game_banner.png")), "own games: <name>_banner.png next to the exe is art")
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"cover").has(gd_dir.path_join("cover.jpg")), "own games: plain cover.jpg is art")
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"logo").is_empty(), "own games: another game's logo is ignored")
+
 	var deduped := Library.dedupe_found([{"name": "Apex Legends", "kind": "game", "source": "ea", "path": "a"}, {"name": "Apex Legends™", "kind": "game", "source": "steam", "path": "b"}])
 	check(deduped.size() == 1 and deduped[0]["source"] == "steam", "discovery: one tile per game, best store wins")
 	check(not Catalog.is_clutter("Debugger Pro", "x") and Catalog.is_clutter("Game Setup", "x") and Catalog.is_clutter("Thing", "C:/Thing/unins000.exe"), "catalog: clutter matches whole words and helper exes")
