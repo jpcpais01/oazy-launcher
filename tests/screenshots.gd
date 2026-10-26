@@ -276,6 +276,9 @@ func _ready() -> void:
 		{"tag_name": "v1.0.8", "published_at": "2026-10-20T10:00:00Z", "body": "### Controller support\n- Shoulder buttons switch pages.", "assets": [{"name": "OazyLauncher.exe", "size": 96000000, "browser_download_url": "https://x"}]},
 	], "1.0.3")
 	Updater.state = &"available"
+	Updater.state_changed.emit(&"available")
+	await _wait(2.0)
+	await shot("09a-update-pill")
 	main.show_update()
 	await _wait(1.0)
 	await shot("09-update")
@@ -306,6 +309,21 @@ func _ready() -> void:
 	await _wait(1.8)
 	await shot("10d-welcome")
 	_close_modals()
+	await _wait(0.5)
+	# Downloading in the background: the pill, closed and hovered.
+	Updater.state = &"downloading"
+	Updater.state_changed.emit(&"downloading")
+	main.update_pill._news_left = 0.0
+	main.update_pill._refresh_open()
+	Updater.progress.emit(int(97000000 * 0.42), 97000000, 14200000.0)
+	await _wait(1.4)
+	await shot("10e-pill-downloading")
+	main.update_pill._set_hover(true)
+	await _wait(0.8)
+	await shot("10f-pill-open")
+	main.update_pill._hovered = false
+	Updater.state = &"idle"
+	Updater.state_changed.emit(&"idle")
 	await _wait(0.5)
 	# The launch screen: starting, a slow launcher, and a launch that failed.
 	var game_id := str(Library.entries[0]["id"])
