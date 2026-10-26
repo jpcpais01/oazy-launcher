@@ -3,6 +3,9 @@ extends Control
 ## What's on the desktop behind your windows: the clock, the date and the
 ## weather with a slim system glance under them, your favourites, a "Continue
 ## playing" card with the last game's artwork and recently played covers.
+## One scroll down there's a second screen (DesktopBelow): ten covers,
+## markets, news, the forecast and the month. The wheel glides between the
+## two on a soft spring, and whichever screen is out of sight is parked.
 
 const LEFT := 64.0
 const TOP := 52.0
@@ -19,10 +22,24 @@ const FAV_SIZES := {
 }
 ## How far the desktop eases back while Start is open.
 const DIM_SCALE := 0.97
+## How quickly scrolling settles (a critically damped spring; higher is snappier).
+const SPRING := 10.5
+## Wheel notch inside the second screen, once it's taller than one.
+const STEP := 120.0
 const CLOCK := preload("res://shaders/clock.gdshader")
 const SHADE := preload("res://shaders/hero_shade.gdshader")
 
 var main: Node
+## The first screen (everything above) and the second one, below it.
+var _top: Control
+var below: DesktopBelow
+var _scrim: ColorRect
+var _hint: Button
+var _scroll := 0.0
+var _goal := 0.0
+var _vel := 0.0
+var _pan_timer: Timer
+var _pan_dir := 0.0
 var _greeting: Label
 var _time: Label
 var _date: Label
@@ -58,10 +75,30 @@ var _dim := 0.0
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_process(false)
+	_scrim = ColorRect.new()
+	_scrim.color = Color(0.01, 0.03, 0.05, 0.0)
+	_scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_scrim.visible = false
+	add_child(_scrim)
+	_top = Control.new()
+	_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_top)
+	below = DesktopBelow.new()
+	below.main = main
+	below.visible = false
+	add_child(below)
+	_pan_timer = Timer.new()
+	_pan_timer.one_shot = true
+	_pan_timer.wait_time = 0.16
+	_pan_timer.timeout.connect(_settle)
+	add_child(_pan_timer)
 	_build_clock()
 	_build_hero()
 	_build_favorites()
 	_build_system()
+	_build_hint()
 
 	var tick := Timer.new()
 	tick.wait_time = 1.0
@@ -115,7 +152,7 @@ func _ready() -> void:
 func _build_clock() -> void:
 	_greeting = Kit.label("", 21, 600, Color(1, 1, 1, 0.88))
 	_shadow(_greeting, 3)
-	add_child(_greeting)
+	_top.add_child(_greeting)
 	_time = Kit.label("", 128, 500, Color.WHITE, true)
 	var tv := FontVariation.new()
 	tv.base_font = Kit.font(500, true)
@@ -126,10 +163,10 @@ func _build_clock() -> void:
 	_clock_mat.shader = CLOCK
 	_time.material = _clock_mat
 	_time.resized.connect(func() -> void: _clock_mat.set_shader_parameter("height", _time.size.y))
-	add_child(_time)
+	_top.add_child(_time)
 	_date_row = Kit.hbox(10)
 	_date_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_date_row)
+	_top.add_child(_date_row)
 	_date = Kit.label("", 22, 500, Color(1, 1, 1, 0.78))
 	_shadow(_date, 3)
 	_date_row.add_child(_date)
@@ -203,7 +240,7 @@ func _build_hero() -> void:
 	_hero_glass = GlassPanel.new(false, 26.0, GlassPanel.TINT_WIDGET)
 	_hero_glass.set_shadow_strength(0.28, 30, 12.0)
 	_hero_glass.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(_hero_glass)
+	_top.add_child(_hero_glass)
 	_hero_art = CoverArt.new()
 	_hero_art.glow_enabled = false
 	_hero_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -291,9 +328,9 @@ func _build_hero() -> void:
 
 	_recent_title = Kit.label("Recently played", 15, 700, Color(1, 1, 1, 0.82))
 	_shadow(_recent_title, 3)
-	add_child(_recent_title)
+	_top.add_child(_recent_title)
 	_recent = Kit.hbox(14)
-	add_child(_recent)
+	_top.add_child(_recent)
 
 
 func refresh() -> void:
@@ -435,12 +472,12 @@ func _recent_tile(id: String) -> Control:
 func _build_favorites() -> void:
 	_favs_title = Kit.label("Favourites", 15, 700, Color(1, 1, 1, 0.82))
 	_shadow(_favs_title, 3)
-	add_child(_favs_title)
+	_top.add_child(_favs_title)
 	_favs = GridContainer.new()
 	_favs.columns = FAV_COLS
 	_favs.add_theme_constant_override("h_separation", 4)
 	_favs.add_theme_constant_override("v_separation", 4)
-	add_child(_favs)
+	_top.add_child(_favs)
 
 
 func _fill_favorites() -> void:
@@ -537,7 +574,7 @@ func _build_system() -> void:
 	_system = GlassPanel.new(false, 20.0, GlassPanel.TINT_WIDGET)
 	_system.set_shadow_strength(0.25, 24, 8.0)
 	_system.mouse_filter = Control.MOUSE_FILTER_PASS
-	add_child(_system)
+	_top.add_child(_system)
 	var row := Kit.hbox(18)
 	row.position = Vector2(18, 0)
 	_system.add_child(row)
@@ -683,7 +720,7 @@ func show_mock_stats(cpu: float, mem: float, sensors: Dictionary = {}) -> void:
 
 
 func _poll_stats() -> void:
-	if not Host.available or not is_visible_in_tree() or not (Host.self_foreground or (Shell.native and not Host.fullscreen_app)):
+	if not Host.available or not is_visible_in_tree() or not _top.visible or not (Host.self_foreground or (Shell.native and not Host.fullscreen_app)):
 		return
 	Host.stats(func(d: Dictionary) -> void:
 		if not d.get("ok", false):
@@ -698,8 +735,15 @@ func _poll_stats() -> void:
 # --- Layout ------------------------------------------------------------------------------------
 
 func _layout() -> void:
-	if _time == null or _system == null:
+	if _time == null or _system == null or _hint == null:
 		return
+	_top.size = size
+	below.size = size
+	below.layout_for(size.x, size.y - Taskbar.RESERVE, LEFT)
+	_hint.position = Vector2(roundf((size.x - _hint.size.x) * 0.5), size.y - Taskbar.RESERVE - _hint.size.y - 10.0)
+	_goal = clampf(_goal, 0.0, max_scroll())
+	_scroll = clampf(_scroll, 0.0, max_scroll())
+	_apply_scroll()
 	var w := size.x
 	var hero_w := clampf(w * 0.4, 500.0, 760.0)
 	var hero_h := roundf(hero_w * 9.0 / 16.0)
@@ -735,6 +779,160 @@ func _layout() -> void:
 	_favs_title.position = Vector2(LEFT + 4.0, _recent_title.position.y)
 	_favs.position = Vector2(LEFT - 10.0, _recent.position.y - 6.0)
 	_favs.size = _favs.get_combined_minimum_size()
+
+
+# --- Scrolling ---------------------------------------------------------------------------------
+# Two screens, one above the other. A wheel notch on the first glides all the
+# way to the second (and back), on a critically damped spring so it starts
+# softly, never overshoots and can be redirected mid-flight. Touchpads follow
+# the fingers, then settle on whichever screen they were heading for.
+
+## A faint chevron at the bottom of the first screen: there's more below.
+func _build_hint() -> void:
+	_hint = Button.new()
+	_hint.focus_mode = Control.FOCUS_NONE
+	_hint.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_hint.tooltip_text = "More below"
+	_hint.custom_minimum_size = Vector2(56, 28)
+	_hint.size = Vector2(56, 28)
+	_hint.icon = Icons.tex("chevron_down", 20)
+	_hint.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint.expand_icon = false
+	for st in ["normal", "hover", "pressed", "hover_pressed"]:
+		_hint.add_theme_stylebox_override(st, Kit.empty())
+	_hint.add_theme_color_override("icon_normal_color", Color(1, 1, 1, 0.38))
+	_hint.add_theme_color_override("icon_hover_color", Color(1, 1, 1, 0.85))
+	_hint.add_theme_color_override("icon_pressed_color", Color(1, 1, 1, 0.95))
+	_hint.pressed.connect(func() -> void: page(1))
+	_top.add_child(_hint)
+
+
+## The furthest the desktop scrolls: the second screen, or past it when the
+## second screen is taller than one (a small window).
+func max_scroll() -> float:
+	return maxf(size.y, below.wanted_height + Taskbar.RESERVE)
+
+
+## 1 = the second screen, -1 = back to the first.
+func page(dir: int) -> void:
+	scroll_to(size.y if dir > 0 else 0.0)
+
+
+func scroll_to(y: float) -> void:
+	_goal = clampf(y, 0.0, max_scroll())
+	_sync_active()
+	set_process(true)
+
+
+func at_top() -> bool:
+	return _goal <= 0.5
+
+
+func _wheel_here() -> bool:
+	if main == null or not main.loaded or main.modal_open() or main.start.is_open:
+		return false
+	var hov := get_viewport().gui_get_hovered_control()
+	return hov == null or is_ancestor_of(hov)
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		var mb := event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_WHEEL_UP and mb.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+			return
+		if not _wheel_here():
+			return
+		_wheel(1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1.0, mb.factor if mb.factor > 0.0 else 1.0)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventPanGesture:
+		if not _wheel_here():
+			return
+		var d := (event as InputEventPanGesture).delta.y * 18.0
+		if absf(d) < 0.01:
+			return
+		_pan_dir = signf(d)
+		_goal = clampf(_goal + d, 0.0, max_scroll())
+		_sync_active()
+		set_process(true)
+		_pan_timer.start()
+		get_viewport().set_input_as_handled()
+
+
+func _wheel(dir: float, factor: float) -> void:
+	var p := size.y
+	if dir > 0.0:
+		_goal = p if _goal < p - 1.0 else minf(_goal + STEP * factor, max_scroll())
+	else:
+		_goal = 0.0 if _goal <= p + 1.0 else maxf(_goal - STEP * factor, p)
+	_sync_active()
+	set_process(true)
+
+
+## A touchpad let go between the screens: finish the trip it started.
+func _settle() -> void:
+	var p := size.y
+	if _goal <= 0.0 or _goal >= p:
+		return
+	var k := _goal / p
+	scroll_to(p if (k > 0.18 if _pan_dir > 0.0 else k > 0.82) else 0.0)
+
+
+func _process(delta: float) -> void:
+	# Exact step of a critically damped spring, so it's stable at any frame rate.
+	var x := _scroll - _goal
+	var e := exp(-SPRING * delta)
+	var a := _vel + SPRING * x
+	var nx := (x + a * delta) * e
+	_vel = (_vel - SPRING * a * delta) * e
+	_scroll = _goal + nx
+	if absf(nx) < 0.3 and absf(_vel) < 6.0:
+		_scroll = _goal
+		_vel = 0.0
+		set_process(false)
+	_apply_scroll()
+	if not is_processing():
+		_sync_active()
+
+
+## The second screen wakes as soon as a trip down starts (so its data is on
+## the way while it glides in) and sleeps once the first is fully back.
+func _sync_active() -> void:
+	below.set_active(_goal > 0.0 or _scroll > 0.5)
+
+
+func _apply_scroll() -> void:
+	var p := maxf(size.y, 1.0)
+	var k := clampf(_scroll / p, 0.0, 1.0)
+	_top.position.y = -roundf(_scroll)
+	below.position.y = roundf(p - _scroll)
+	var top_a := 1.0 - smoothstep(0.2, 0.95, k)
+	var below_a := smoothstep(0.08, 0.8, k)
+	_top.modulate.a = top_a
+	below.modulate.a = below_a
+	_top.visible = k < 0.999
+	below.visible = k > 0.001
+	_scrim.visible = k > 0.001
+	_scrim.color.a = 0.14 * k
+	_hint.modulate.a = 1.0 - smoothstep(0.0, 0.12, k)
+	_sync_shadows()
+	# Nothing on the first screen needs to move while it's out of sight.
+	if _zoom_tween and _zoom_tween.is_valid():
+		if _top.visible and not _zoom_tween.is_running():
+			_zoom_tween.play()
+		elif not _top.visible and _zoom_tween.is_running():
+			_zoom_tween.pause()
+
+
+## Modulate isn't group opacity: a fading card's shadow would show through it
+## as a dark smudge, so shadows fade faster than what casts them.
+func _sync_shadows() -> void:
+	var shown := 1.0 - _dim
+	var a := _top.modulate.a * shown
+	_hero_glass.set_shadow_fade(a * a * a)
+	var b := below.modulate.a * shown
+	for c in below.parts():
+		if c is GlassPanel:
+			(c as GlassPanel).set_shadow_fade(b * b * b)
 
 
 func intro() -> void:
@@ -773,4 +971,4 @@ func _set_dim(v: float) -> void:
 	scale = Vector2.ONE * lerpf(1.0, DIM_SCALE, v)
 	# Each layer of the card fades on its own, so the shadow under the art goes
 	# first; otherwise it darkens the half-faded card on the way out.
-	_hero_glass.set_shadow_fade(shown * shown * shown)
+	_sync_shadows()

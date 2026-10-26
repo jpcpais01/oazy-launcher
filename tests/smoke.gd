@@ -372,6 +372,20 @@ func _logic_tests() -> void:
 		check(cur.decode_u16(2) == 2 and cur.decode_u16(4) == CursorSets.SIZES.size(), "pointers: arrow has every size")
 
 
+	# The desktop's second screen: market quotes and headlines.
+	var chart := {"chart": {"result": [{"meta": {"symbol": "AAPL", "regularMarketPrice": 258.1, "chartPreviousClose": 250.0, "currency": "USD", "shortName": "Apple Inc."},
+		"timestamp": [1, 2, 3], "indicators": {"quote": [{"close": [251.0, null, 258.1]}]}}], "error": null}}
+	var q := Markets.parse_chart(chart)
+	check(q.get("symbol") == "AAPL" and is_equal_approx(float(q.get("prev", 0)), 250.0) and (q.get("points", []) as Array).size() == 2, "markets: parses a chart, skipping gaps")
+	check(Markets.parse_chart({"chart": {"result": null, "error": {"code": "Not Found"}}}).is_empty(), "markets: unknown symbol is empty")
+	check(Array(Markets.parse_symbols("aapl, ^gspc  btc-usd;AAPL")) == ["AAPL", "^GSPC", "BTC-USD"], "markets: symbols from typed text")
+	check(Markets.format_price(6712.4, "USD") == "$6,712.40" and Markets.format_price(111842.0, "USD") == "$111,842" and Markets.format_price(0.5) == "0.5000" and Markets.format_price(9.999) == "10.00", "markets: price formatting")
+	var rss := "<?xml version=\"1.0\"?><rss><channel><title>Top stories</title><item><title>Big news about something important - Reuters</title><link>https://news.example/a</link><pubDate>Sun, 26 Oct 2026 10:00:00 GMT</pubDate><source url=\"https://reuters.com\">Reuters</source></item><item><title><![CDATA[Older &amp; smaller story here]]></title><link>https://news.example/b</link><pubDate>Sun, 26 Oct 2026 11:00:00 +0200</pubDate></item></channel></rss>"
+	var items := News.parse_rss(rss.to_utf8_buffer())
+	check(items.size() == 2 and items[0]["title"] == "Big news about something important" and items[0]["source"] == "Reuters", "news: Google-style title and source")
+	check(items.size() == 2 and int(items[0]["at"]) > int(items[1]["at"]), "news: newest first, time zones applied")
+	check(News.parse_date("Sun, 26 Oct 2026 10:00:00 GMT") == Time.get_unix_time_from_datetime_string("2026-10-26T10:00:00"), "news: RFC 822 dates")
+
 func _mock_apps() -> Array:
 	return [
 		{"name": "Google Chrome", "id": "Chrome"},
@@ -398,6 +412,17 @@ func _ui_tests() -> void:
 	check(main.loaded, "ui: loading screen finished")
 	await _wait(0.5)
 	_layout_checks(main, "desktop")
+
+	# Scrolling down to the second screen and back.
+	var desk: Desktop = main.desktop
+	check(not desk.below.visible, "desktop: second screen parked until scrolled to")
+	desk.page(1)
+	await _wait(1.5)
+	check(desk.below.visible and not desk._top.visible and is_equal_approx(desk.below.position.y, 0.0), "desktop: glides to the second screen and parks the first")
+	check(desk.below._cards.get_child_count() == mini(DesktopBelow.CARDS, DesktopBelow.top_refs().size()), "desktop: second screen has its covers")
+	desk.page(-1)
+	await _wait(1.5)
+	check(desk._top.visible and not desk.below.visible and desk._top.position.y == 0.0, "desktop: glides back up")
 
 	# Real-window plumbing (Windows only), otherwise mock windows.
 	if App.is_windows():

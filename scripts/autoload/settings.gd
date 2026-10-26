@@ -41,6 +41,9 @@ const DEFAULTS := {
 	"claude_checked": false,
 	"seen_shell_intro": false,
 	"weather_unit": "auto",
+	## Yahoo Finance symbols on the desktop's second screen.
+	"market_symbols": ["^GSPC", "^IXIC", "NVDA", "AAPL", "MSFT", "BTC-USD"],
+	"news_topic": "top",
 	"browser_links": true,
 	"browser_pinned": false,
 	"terminal_oazy": true,

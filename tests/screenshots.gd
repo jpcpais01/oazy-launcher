@@ -121,6 +121,7 @@ func _ready() -> void:
 			(c as CanvasItem).visible = true
 	Settings.set_value("wallpaper", "oasis")
 	await _wait(1.3)
+	await _below(main)
 	main.weather.open(main.taskbar._weather_btn)
 	await _wait(0.9)
 	await shot("01b-weather")
@@ -331,6 +332,77 @@ func _ready() -> void:
 	await shot("17-cleaner-done")
 	print("SCREENSHOTS: DONE")
 	get_tree().quit(0)
+
+
+## The desktop's second screen: live markets and news when this machine can
+## reach them (CI can), otherwise a made-up but realistic sample.
+func _below(main: Node) -> void:
+	var below: DesktopBelow = main.desktop.below
+	below.set_active(true)
+	below.markets.refresh(true)
+	below.news.refresh(true)
+	var waited := 0.0
+	while waited < 25.0 and (below.markets.busy or below.news.busy):
+		await _wait(0.25)
+		waited += 0.25
+	print("  markets live: %d of %d, news live: %d" % [below.markets.quotes.size(), Markets.symbols().size(), below.news.items().size()], "  (", below.markets.last_error, " / ", below.news.last_error, ")")
+	if below.markets.quotes.size() < Markets.symbols().size():
+		below.markets.set_mock(_mock_quotes())
+	if below.news.items().is_empty():
+		below.news.set_mock(News.topic(), _mock_news())
+	main.desktop.scroll_to(main.desktop.size.y * 0.45)
+	await _wait(0.12)
+	await shot("01s0-desktop-scrolling")
+	main.desktop.page(1)
+	await _wait(1.6)
+	await shot("01s-desktop-below")
+	below._open_market_edit()
+	await _wait(0.3)
+	await shot("01s2-desktop-markets-edit")
+	below._close_market_edit()
+	main.desktop.page(-1)
+	await _wait(1.4)
+
+
+static func _mock_quotes() -> Dictionary:
+	var out := {}
+	var spec := {
+		"^GSPC": [6712.4, 0.62, "S&P 500"], "^IXIC": [22840.1, 0.94, "NASDAQ Composite"], "NVDA": [186.32, 1.84, "NVIDIA Corporation"],
+		"AAPL": [258.11, -0.42, "Apple Inc."], "MSFT": [521.77, 0.31, "Microsoft Corporation"], "BTC-USD": [111842.0, -1.27, "Bitcoin USD"],
+	}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for sym in spec:
+		var price: float = spec[sym][0]
+		var pct: float = spec[sym][1]
+		var prev := price / (1.0 + pct / 100.0)
+		var pts := []
+		var v := prev
+		for i in 78:
+			var drift := (price - v) / float(78 - i)
+			v += drift + rng.randfn(0.0, prev * 0.0018)
+			pts.append(v)
+		pts[-1] = price
+		out[sym] = {"symbol": sym, "name": spec[sym][2], "price": price, "prev": prev, "currency": "USD", "points": pts, "at": int(Time.get_unix_time_from_system())}
+	return out
+
+
+static func _mock_news() -> Array:
+	var now := int(Time.get_unix_time_from_system())
+	var list := [
+		["Central banks signal a slower path for rate cuts as inflation cools unevenly", "Reuters", 18],
+		["Lisbon unveils plan to plant 20,000 trees along the riverfront by 2030", "The Guardian", 42],
+		["Chipmakers rally after record quarter for AI data-centre demand", "Bloomberg", 65],
+		["Scientists map the deepest coral reef yet found in the Atlantic", "BBC News", 96],
+		["The best games of the year so far, from indie gems to blockbusters", "The Verge", 140],
+		["European rail operators agree on single ticket for cross-border trips", "Financial Times", 190],
+		["New battery chemistry promises faster charging for budget electric cars", "Wired", 260],
+		["Champions League: late winner keeps the group wide open", "ESPN", 320],
+	]
+	var out := []
+	for it in list:
+		out.append({"title": it[0], "source": it[1], "link": "https://example.com", "at": now - int(it[2]) * 60})
+	return out
 
 
 func _wait_for_hero(id: String) -> void:
