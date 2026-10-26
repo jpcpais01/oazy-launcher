@@ -1,17 +1,17 @@
 class_name Desktop
 extends Control
-## What's on the desktop behind your windows. One calm composition: a centred
-## glass clock with the date and a greeting, and a single shelf of widgets on
-## the horizon above the taskbar: your favourites, the game you're playing
-## (with the next few one click away), and a glance at this PC.
+## What's on the desktop behind your windows. Your games are the centrepiece:
+## a big banner for the one you're playing and a row of large cover cards for
+## the rest. Beside them, a quiet column: the clock with the weather, your
+## favourites and recent apps, and a glance at this PC.
 
-const SHELF_H := 250.0
-const GAP := 18.0
-const SIDE := 56.0
-const HERO_MIN := 470.0
-const HERO_MAX := 660.0
-const PC_W := 258.0
-const RADIUS := 28.0
+const TOP := 52.0
+const SIDE := 64.0
+const COLUMN := 384.0
+const GAP := 22.0
+const COVER := Vector2(150, 225)
+const COVER_GAP := 18.0
+const RADIUS := 26.0
 const RING := preload("res://shaders/ring.gdshader")
 const CLOCK := preload("res://shaders/clock.gdshader")
 const SHADE := preload("res://shaders/hero_shade.gdshader")
@@ -35,8 +35,10 @@ var _hero_meta: Label
 var _hero_play: FxButton
 var _hero_box: VBoxContainer
 var _empty_box: VBoxContainer
-var _all_games: FxButton
-var _recent: HBoxContainer
+var _games: Control
+var _games_title: Label
+var _library_tile: Button
+var _zoom_tween: Tween
 var _system: GlassPanel
 var _favs_glass: GlassPanel
 var _favs: GridContainer
@@ -110,46 +112,39 @@ func _build_clock() -> void:
 	_clock = Control.new()
 	_clock.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_clock)
-	_date = Kit.label("", 19, 600, Color(1, 1, 1, 0.86))
-	var dv := FontVariation.new()
-	dv.base_font = Kit.font(600)
-	dv.spacing_glyph = 1
-	_date.add_theme_font_override("font", dv)
-	_date.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_shadow(_date, 4)
-	_clock.add_child(_date)
-	_time = Kit.label("", 156, 500, Color.WHITE, true)
+	_greeting = Kit.label("", 20, 600, Color(1, 1, 1, 0.86))
+	_shadow(_greeting, 4)
+	_clock.add_child(_greeting)
+	_time = Kit.label("", 132, 500, Color.WHITE, true)
 	var tv := FontVariation.new()
 	tv.base_font = Kit.font(500, true)
-	tv.spacing_glyph = -5
+	tv.spacing_glyph = -4
 	_time.add_theme_font_override("font", tv)
-	_time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_time.add_theme_color_override("font_shadow_color", Color(0, 0.03, 0.06, 0.18))
 	_time.add_theme_constant_override("shadow_offset_y", 4)
-	_time.add_theme_constant_override("shadow_outline_size", 18)
+	_time.add_theme_constant_override("shadow_outline_size", 16)
 	_clock_mat = ShaderMaterial.new()
 	_clock_mat.shader = CLOCK
 	_clock_mat.set_shader_parameter("speed", 0.0 if Settings.get_value("effects") == "eco" else 1.0)
 	_time.material = _clock_mat
 	_time.resized.connect(func() -> void: _clock_mat.set_shader_parameter("height", _time.size.y))
 	_clock.add_child(_time)
-	# The greeting, and the weather beside it when there is some.
+	# The date, and the weather beside it when there is some.
 	_greet_row = Kit.hbox(10)
-	_greet_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_greet_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_clock.add_child(_greet_row)
-	_greeting = Kit.label("", 17, 500, Color(1, 1, 1, 0.66))
-	_shadow(_greeting, 4)
-	_greet_row.add_child(_greeting)
+	_date = Kit.label("", 17, 500, Color(1, 1, 1, 0.74))
+	_shadow(_date, 4)
+	_greet_row.add_child(_date)
 	_weather_dot = Kit.label("·", 17, 700, Color(1, 1, 1, 0.4))
 	_greet_row.add_child(_weather_dot)
 	_weather_icon = TextureRect.new()
-	_weather_icon.custom_minimum_size = Vector2(24, 24)
+	_weather_icon.custom_minimum_size = Vector2(26, 26)
 	_weather_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_weather_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_weather_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_greet_row.add_child(_weather_icon)
-	_weather_text = Kit.label("", 17, 500, Color(1, 1, 1, 0.66))
+	_weather_text = Kit.label("", 17, 500, Color(1, 1, 1, 0.74))
 	_shadow(_weather_text, 4)
 	_greet_row.add_child(_weather_text)
 	Weather.changed.connect(_update_weather)
@@ -375,8 +370,8 @@ func _build_hero() -> void:
 	_hero_box = Kit.vbox(6)
 	_hero_box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_hero_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_hero_box.offset_left = 28
-	_hero_box.offset_bottom = -24
+	_hero_box.offset_left = 36
+	_hero_box.offset_bottom = -32
 	_hero_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hero_glass.add_child(_hero_box)
 	_hero_kicker = Kit.label("CONTINUE PLAYING", 11, 700, Color(1, 1, 1, 0.7))
@@ -391,26 +386,26 @@ func _build_hero() -> void:
 	_hero_logo.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_hero_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hero_box.add_child(_hero_logo)
-	_hero_title = Kit.label("", 32, 800, Color.WHITE, true)
+	_hero_title = Kit.label("", 40, 800, Color.WHITE, true)
 	_hero_title.custom_minimum_size.x = 300
 	_hero_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hero_title.max_lines_visible = 2
 	_hero_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.35))
 	_hero_title.add_theme_constant_override("shadow_outline_size", 10)
 	_hero_box.add_child(_hero_title)
-	_hero_meta = Kit.label("", 14, 500, Color(1, 1, 1, 0.76))
+	_hero_meta = Kit.label("", 15, 500, Color(1, 1, 1, 0.78))
 	_hero_box.add_child(_hero_meta)
 	_hero_box.add_child(Kit.spacer(0, 6))
 	var buttons := Kit.hbox(10)
 	_hero_box.add_child(buttons)
-	_hero_play = FxButton.make("Play", "play", FxButton.Style.PRIMARY, 44)
-	_hero_play.custom_minimum_size.x = 128
+	_hero_play = FxButton.make("Play", "play", FxButton.Style.PRIMARY, 48)
+	_hero_play.custom_minimum_size.x = 150
 	_hero_play.pressed.connect(func() -> void:
 		if _hero_id != "":
 			main.launch(_hero_id)
 	)
 	buttons.add_child(_hero_play)
-	var more := FxButton.icon_only("more", "More", 20, 44)
+	var more := FxButton.icon_only("more", "More", 20, 48)
 	more.variant = FxButton.Style.GHOST
 	more._apply_style()
 	more.pressed.connect(func() -> void:
@@ -419,19 +414,14 @@ func _build_hero() -> void:
 	)
 	buttons.add_child(more)
 
-	_all_games = FxButton.make("Library", "grid", FxButton.Style.GHOST, 34)
-	_all_games.add_theme_font_size_override("font_size", 13)
-	_all_games.icon = Icons.tex("grid", 15, Color.WHITE)
-	_all_games.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	_all_games.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_all_games.offset_right = -18
-	_all_games.offset_top = 18
-	_all_games.pressed.connect(func() -> void: main.open_app(&"library"))
-	_hero_glass.add_child(_all_games)
 
-	_recent = Kit.hbox(10)
-	_hero_glass.add_child(_recent)
-	_hero_glass.resized.connect(_place_recent)
+	_games = Control.new()
+	_games.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_games)
+	_games_title = Kit.label("Your games", 15, 700, Color(1, 1, 1, 0.82))
+	_shadow(_games_title, 3)
+	add_child(_games_title)
+	_library_tile = _make_library_tile()
 
 	_empty_box = Kit.vbox(10)
 	_empty_box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
@@ -461,29 +451,22 @@ func refresh() -> void:
 	_empty_box.visible = not has
 	_hero_box.visible = has
 	_hero_art.visible = has
-	_all_games.visible = has
 	if has:
 		var keep := _hero_id if Library.has_entry(_hero_id) else str(games[0]["id"])
 		_show_hero(keep)
 	else:
 		_hero_id = ""
-	for c in _recent.get_children():
-		_recent.remove_child(c)
-		c.queue_free()
-	if games.size() > 1:
-		for e in games.slice(0, 4):
-			_recent.add_child(_recent_tile(str(e["id"])))
+	for c in _games.get_children():
+		if c != _library_tile:
+			_games.remove_child(c)
+			c.queue_free()
+	for e in games.slice(0, 12):
+		_games.add_child(_cover_card(str(e["id"])))
+	_games.move_child(_library_tile, -1)
+	_games.visible = has
+	_games_title.visible = has
 	_mark_recent()
 	_layout()
-	_place_recent()
-
-
-## The next few games sit in the hero's bottom-right corner.
-func _place_recent() -> void:
-	var n := _recent.get_child_count()
-	var sz := Vector2(n * 58.0 + maxf(0.0, n - 1.0) * 10.0, 87.0)
-	_recent.size = sz
-	_recent.position = _hero_glass.size - sz - Vector2(22, 22)
 
 
 func _show_hero(id: String) -> void:
@@ -509,17 +492,37 @@ func _show_hero(id: String) -> void:
 	_mark_recent()
 	if changed and is_visible_in_tree():
 		_hero_art.sweep()
+		_hero_art.modulate.a = 0.35
+		Kit.ease_tween(_hero_art, Tween.TRANS_SINE).tween_property(_hero_art, "modulate:a", 1.0, 0.5)
 		_hero_box.modulate.a = 0.0
-		Kit.ease_tween(_hero_box).tween_property(_hero_box, "modulate:a", 1.0, 0.4)
+		var t := Kit.ease_tween(_hero_box)
+		t.tween_property(_hero_box, "modulate:a", 1.0, 0.45)
+	if changed:
+		_drift()
+
+
+## A slow Ken Burns drift on the banner, so the art feels alive.
+func _drift() -> void:
+	if _zoom_tween and _zoom_tween.is_valid():
+		_zoom_tween.kill()
+	_hero_art.set_zoom(0.0)
+	if Settings.get_value("effects") == "eco":
+		return
+	_zoom_tween = create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_zoom_tween.tween_method(_hero_art.set_zoom, 0.0, 0.07, 18.0)
+	_zoom_tween.tween_method(_hero_art.set_zoom, 0.07, 0.0, 18.0)
 
 
 func _mark_recent() -> void:
-	for c in _recent.get_children():
+	for c in _games.get_children():
 		if c.has_meta("id"):
 			var on := str(c.get_meta("id")) == _hero_id
-			c.modulate = Color.WHITE if on else Color(1, 1, 1, 0.62)
+			c.set_meta("on", on)
+			if c.get_meta("hot", false):
+				continue
 			var cover: CoverArt = c.get_child(0)
 			cover.focus_amount = 1.0 if on else 0.0
+			cover.set_dim(0.0 if on else 0.18)
 
 
 func _apply_logo(id: String) -> void:
@@ -527,33 +530,38 @@ func _apply_logo(id: String) -> void:
 	if tex == null:
 		return
 	var sz := tex.get_size()
-	var s := minf(260.0 / sz.x, 84.0 / sz.y)
+	var s := minf(380.0 / sz.x, 130.0 / sz.y)
 	_hero_logo.texture = tex
 	_hero_logo.custom_minimum_size = sz * s
 	_hero_logo.visible = true
 	_hero_title.visible = false
 
 
-func _recent_tile(id: String) -> Control:
+func _cover_card(id: String) -> Control:
 	var holder := Control.new()
 	holder.set_meta("id", id)
-	holder.custom_minimum_size = Vector2(58, 87)
+	holder.custom_minimum_size = COVER
+	holder.size = COVER
 	holder.mouse_filter = Control.MOUSE_FILTER_STOP
 	holder.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	holder.tooltip_text = str(Library.get_entry(id).get("name", ""))
-	holder.pivot_offset = Vector2(29, 87)
+	holder.pivot_offset = Vector2(COVER.x * 0.5, COVER.y)
 	var cover := CoverArt.new()
-	cover.glow_enabled = false
 	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	holder.add_child(cover)
-	cover.setup(id, 10.0)
+	cover.setup(id, 16.0)
 	holder.mouse_entered.connect(func() -> void:
-		Kit.ease_tween(holder, Tween.TRANS_BACK).tween_property(holder, "scale", Vector2.ONE * 1.1, 0.28)
-		holder.modulate = Color.WHITE
+		holder.set_meta("hot", true)
+		cover.sweep()
+		cover.set_dim(0.0)
+		var t := Kit.ease_tween(holder, Tween.TRANS_BACK).set_parallel(true)
+		t.tween_property(holder, "scale", Vector2.ONE * 1.06, 0.3)
+		t.tween_property(cover, "focus_amount", 1.0, 0.25)
 		Sfx.play(&"move", 1.15)
 	)
 	holder.mouse_exited.connect(func() -> void:
-		Kit.ease_tween(holder).tween_property(holder, "scale", Vector2.ONE, 0.28)
+		holder.set_meta("hot", false)
+		Kit.ease_tween(holder).tween_property(holder, "scale", Vector2.ONE, 0.3)
 		_mark_recent()
 	)
 	holder.gui_input.connect(func(ev: InputEvent) -> void:
@@ -569,16 +577,52 @@ func _recent_tile(id: String) -> Control:
 	return holder
 
 
+## The last card in the row: everything else, in the Library.
+func _make_library_tile() -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = COVER
+	b.size = COVER
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.pivot_offset = Vector2(COVER.x * 0.5, COVER.y)
+	b.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.05), 16, Color(1, 1, 1, 0.1), 1))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.1), 16, Color(1, 1, 1, 0.18), 1))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.14), 16, Color(1, 1, 1, 0.18), 1))
+	var c := Kit.vbox(12)
+	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	c.alignment = BoxContainer.ALIGNMENT_CENTER
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(c)
+	var ic := Kit.icon_rect("grid", 30, Color(1, 1, 1, 0.85))
+	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	c.add_child(ic)
+	var l := Kit.label("All games", 14, 600, Color(1, 1, 1, 0.85))
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	c.add_child(l)
+	b.mouse_entered.connect(func() -> void:
+		Kit.ease_tween(b, Tween.TRANS_BACK).tween_property(b, "scale", Vector2.ONE * 1.06, 0.3)
+	)
+	b.mouse_exited.connect(func() -> void:
+		Kit.ease_tween(b).tween_property(b, "scale", Vector2.ONE, 0.3)
+	)
+	b.pressed.connect(func() -> void:
+		Sfx.play(&"select")
+		main.open_app(&"library")
+	)
+	_games.add_child(b)
+	return b
+
+
 # --- This PC ------------------------------------------------------------------------------
 
 func _build_system() -> void:
 	_system = _widget()
-	var col := Kit.vbox(0)
+	var col := Kit.vbox(10)
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	col.offset_left = 18
 	col.offset_right = -18
-	col.offset_top = 18
-	col.offset_bottom = -18
+	col.offset_top = 16
+	col.offset_bottom = -14
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_system.add_child(col)
 	col.add_child(_header("cpu", "This PC"))
@@ -594,12 +638,12 @@ func _build_system() -> void:
 
 ## [value label, caption, ring material, holder]
 func _ring(parent: Control, title: String) -> Array:
-	var holder := Kit.vbox(10)
+	var holder := Kit.vbox(8)
 	holder.alignment = BoxContainer.ALIGNMENT_CENTER
 	holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(holder)
 	var ring := ColorRect.new()
-	ring.custom_minimum_size = Vector2(92, 92)
+	ring.custom_minimum_size = Vector2(74, 74)
 	ring.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ring.color = Color.WHITE
 	var mat := ShaderMaterial.new()
@@ -612,7 +656,7 @@ func _ring(parent: Control, title: String) -> Array:
 	mat.set_shader_parameter("color_b", App.accent.lightened(0.3))
 	ring.material = mat
 	holder.add_child(ring)
-	var pct := Kit.label("–", 22, 700, Color.WHITE, true)
+	var pct := Kit.label("–", 18, 700, Color.WHITE, true)
 	pct.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pct.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -680,61 +724,74 @@ func _poll_stats() -> void:
 # --- Layout ------------------------------------------------------------------------------------
 
 func _layout() -> void:
-	if _time == null or _system == null:
+	if _time == null or _system == null or _games == null:
 		return
 	var w := size.x
 	var bottom := size.y - Taskbar.RESERVE - 34.0
-	var shelf_h := SHELF_H
-	var fav_w := FAV_TILE.x * FAV_COLS + 2.0 * (FAV_COLS - 1) + 36.0
-	var pc_w := PC_W + (110.0 if _battery[3].visible else 0.0)
-	var avail := w - SIDE * 2.0
-	var show_pc := _system.visible
-	var hero_w := clampf(avail - fav_w - (pc_w + GAP if show_pc else 0.0) - GAP, HERO_MIN, HERO_MAX)
-	if show_pc and fav_w + hero_w + pc_w + GAP * 2.0 > avail:
-		show_pc = false
-		hero_w = clampf(avail - fav_w - GAP, HERO_MIN, HERO_MAX)
-	_system.modulate.a = 1.0 if show_pc else 0.0
-	_system.mouse_filter = Control.MOUSE_FILTER_STOP if show_pc else Control.MOUSE_FILTER_IGNORE
-	var total := fav_w + GAP + hero_w + (GAP + pc_w if show_pc else 0.0)
-	var x := roundf((w - total) * 0.5)
-	var y := roundf(bottom - shelf_h)
-	_favs_glass.position = Vector2(x, y)
-	_favs_glass.size = Vector2(fav_w, shelf_h)
-	x += fav_w + GAP
-	_hero_glass.position = Vector2(x, y)
-	_hero_glass.size = Vector2(hero_w, shelf_h)
-	x += hero_w + GAP
-	_system.position = Vector2(x, y)
-	_system.size = Vector2(pc_w, shelf_h)
-	_hero_title.custom_minimum_size.x = clampf(hero_w * 0.5, 240.0, 340.0)
+	var right_x := SIDE + COLUMN + GAP * 2.0
+	var right_w := w - right_x - SIDE
+	# The cover row: as many cards as fit, then "All games", stretched a
+	# touch so the row ends exactly where the banner does.
+	var fit := maxi(2, int((right_w + COVER_GAP) / (COVER.x + COVER_GAP)))
+	var card := Vector2((right_w - COVER_GAP * (fit - 1)) / fit, 0.0)
+	card.y = roundf(card.x * 1.5)
+	var per := card.x + COVER_GAP
+	var shown := 0
+	for c in _games.get_children():
+		var cc := c as Control
+		cc.custom_minimum_size = card
+		cc.size = card
+		cc.pivot_offset = Vector2(card.x * 0.5, card.y)
+		if c == _library_tile:
+			continue
+		cc.visible = shown < fit - 1
+		if cc.visible:
+			cc.position = Vector2(shown * per, 0)
+			shown += 1
+	_library_tile.position = Vector2(shown * per, 0)
+	var row_y := bottom - card.y
+	_games.position = Vector2(right_x, row_y)
+	_games.size = Vector2(right_w, card.y)
+	_games_title.position = Vector2(right_x + 2.0, row_y - 34.0)
+	var hero_bottom := (row_y - 50.0) if _games.visible else bottom
+	_hero_glass.position = Vector2(right_x, TOP)
+	_hero_glass.size = Vector2(right_w, maxf(260.0, hero_bottom - TOP))
+	_hero_title.custom_minimum_size.x = clampf(right_w * 0.5, 300.0, 520.0)
+
+	# The side column: the clock up top, This PC on the floor and your
+	# favourites just above it.
+	var y := bottom
+	if _system.visible:
+		_system.size = Vector2(COLUMN, 150.0)
+		_system.position = Vector2(SIDE, bottom - 150.0)
+		y = _system.position.y - GAP
+	var rows := 0
+	if _favs.visible:
+		rows += 2 if _favs.get_child_count() > FAV_COLS else 1
+	if _recent_apps.visible:
+		rows += 1
+	var fav_h := 32.0 + maxf(1.0, rows) * FAV_TILE.y + (36.0 if _recent_apps.visible and _favs.visible else 0.0) + 22.0
+	_favs_glass.size = Vector2(COLUMN, fav_h)
+	_favs_glass.position = Vector2(SIDE, y - fav_h)
 	_layout_clock()
 
 
 func _layout_clock() -> void:
 	if _favs_glass == null:
 		return
-	var w := size.x
-	var shelf_top := _favs_glass.position.y
-	for l in [_date, _time]:
-		l.size = Vector2(w, 0)
-	var dh := _date.get_combined_minimum_size().y
+	var gh := _greeting.get_combined_minimum_size().y
 	var th := _time.get_combined_minimum_size().y
-	var gh := _greet_row.get_combined_minimum_size().y
-	var block := dh + th + gh - 40.0
-	# Sit a little above the middle of the space over the shelf.
-	var top := roundf(maxf(28.0, (shelf_top - block) * 0.4))
-	_clock.position = Vector2(0, top)
-	_clock.size = Vector2(w, block)
-	_date.position = Vector2(0, 0)
-	_time.position = Vector2(0, dh - 22.0)
-	_greet_row.position = Vector2(0, dh + th - 40.0)
-	_date.size.x = w
-	_time.size.x = w
-	_greet_row.size = Vector2(w, gh)
+	var rh := _greet_row.get_combined_minimum_size().y
+	_clock.position = Vector2(SIDE + 2.0, TOP - 6.0)
+	_greeting.position = Vector2(2, 0)
+	_time.position = Vector2(-6, gh - 22.0)
+	_greet_row.position = Vector2(2, gh + th - 42.0)
+	_greet_row.size = Vector2(COLUMN, rh)
+	_clock.size = Vector2(COLUMN, gh + th + rh - 42.0)
 
 
 func intro() -> void:
-	var items: Array[Control] = [_clock, _favs_glass, _hero_glass, _system]
+	var items: Array[Control] = [_clock, _hero_glass, _games_title, _games, _favs_glass, _system]
 	for i in items.size():
 		var c := items[i]
 		var y := c.position.y
