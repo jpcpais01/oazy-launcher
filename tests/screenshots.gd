@@ -45,6 +45,8 @@ func _ready() -> void:
 		{"name": "Figma", "id": "com.squirrel.figma.Figma"},
 		{"name": "Photos", "id": "Microsoft.Windows.Photos_8wekyb3d8bbwe!App"},
 		{"name": "Microsoft Edge", "id": "MSEdge"},
+		{"name": "Claude", "id": "C:/Users/joao/AppData/Local/AnthropicClaude/claude.exe"},
+		{"name": "WhatsApp", "id": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"},
 	])
 	Catalog.set_favorite("app:Chrome", true)
 	Catalog.set_favorite("lib:" + str(Library.entries[0]["id"]), true)

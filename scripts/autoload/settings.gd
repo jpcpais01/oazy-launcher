@@ -13,7 +13,9 @@ const DEFAULTS := {
 	"theme_app_windows": true,
 	"alt_tab": true,
 	"favorites": [],
-	"custom_icons": ["explorer", "terminal"],
+	"custom_icons": ["explorer", "terminal", "claude", "whatsapp"],
+	## Default custom icons already offered, so new defaults reach old installs once.
+	"custom_icons_offered": [],
 	"auto_check_updates": true,
 	"ui_sounds": true,
 	"volume": 0.6,
@@ -50,11 +52,29 @@ func _ready() -> void:
 	if not App.smoke_test and cfg.load(PATH) == OK and cfg.has_section("settings"):
 		for key in cfg.get_section_keys("settings"):
 			_values[key] = cfg.get_value("settings", key)
+	_offer_new_icons()
 	_save_timer = Timer.new()
 	_save_timer.one_shot = true
 	_save_timer.wait_time = 0.6
 	_save_timer.timeout.connect(save)
 	add_child(_save_timer)
+
+
+## Turns on custom icons that became defaults after this install picked its set.
+func _offer_new_icons() -> void:
+	var on: Array = (_values["custom_icons"] as Array).duplicate()
+	var offered: Array = (_values["custom_icons_offered"] as Array).duplicate()
+	var changed_any := false
+	for key in DEFAULTS["custom_icons"]:
+		if not offered.has(key):
+			offered.append(key)
+			if not on.has(key):
+				on.append(key)
+			changed_any = true
+	if changed_any:
+		_values["custom_icons"] = on
+		_values["custom_icons_offered"] = offered
+		_dirty = true
 
 
 func get_value(key: String) -> Variant:
