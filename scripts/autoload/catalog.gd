@@ -19,6 +19,7 @@ const OAZY_APPS := {
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
 	"oazy:browser": {"name": "Browser", "glyph": "browser", "desc": "Oazy's web browser"},
 	"oazy:terminal": {"name": "Terminal", "glyph": "terminal", "desc": "PowerShell, WSL and Claude Code in Oazy's glass"},
+	"oazy:files": {"name": "Files", "glyph": "folder", "desc": "Your folders in Oazy's glass"},
 	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
 }
 ## Start menu clutter that ships next to real apps.
@@ -131,6 +132,11 @@ func find_app(id: String) -> Dictionary:
 	return _by_id.get(id.to_lower(), {})
 
 
+func _file_explorer() -> Dictionary:
+	var fe := find_app("Microsoft.Windows.Explorer")
+	return fe if not fe.is_empty() else find_app_by_name("File Explorer")
+
+
 func find_app_by_name(name: String) -> Dictionary:
 	var n := name.to_lower()
 	for a in apps:
@@ -175,7 +181,7 @@ func item(ref: String) -> Dictionary:
 
 ## Oazy's apps that run as their own windows rather than inside the shell.
 static func is_own_window_app(ref: String) -> bool:
-	return ref == Browser.REF or ref == Terminal.REF
+	return ref == Browser.REF or ref == Terminal.REF or ref == Files.REF
 
 
 func launch(ref: String) -> bool:
@@ -185,6 +191,9 @@ func launch(ref: String) -> bool:
 	if ref == Terminal.REF:
 		note_recent(ref)
 		return Terminal.open()
+	if ref == Files.REF:
+		note_recent(ref)
+		return Files.open()
 	if OAZY_APPS.has(ref):
 		App.open_page.emit(StringName(ref.substr(5)))
 		return true
@@ -201,6 +210,9 @@ func launch(ref: String) -> bool:
 		var profile := Terminal.profile_for(item(ref)) if Terminal.enabled() else "-"
 		if profile != "-":
 			return Terminal.open({"profile": profile}, run_app)
+		# File Explorer opens Oazy Files.
+		if Files.enabled() and Files.is_explorer(item(ref)):
+			return Files.open({}, run_app)
 		return run_app.call()
 	if ref.begins_with("win:"):
 		var exe := ref.substr(4)
@@ -324,6 +336,10 @@ static func match_score(name: String, needle: String) -> int:
 func ref_for_window(w: Dictionary) -> String:
 	if Browser.owns_window(w):
 		return Browser.REF
+	if Files.owns_window(w):
+		# Groups with the File Explorer pin it stands in for.
+		var fe := _file_explorer()
+		return "app:" + str(fe["id"]) if not fe.is_empty() else Files.REF
 	if Terminal.owns_window(w):
 		# A Claude Code tab groups with its pin; any other tab is the Terminal's.
 		var t := str(w.get("title", "")).to_lower()
@@ -364,9 +380,7 @@ func ref_for_window(w: Dictionary) -> String:
 		return packaged
 	if file == "explorer.exe":
 		# Folder windows rarely carry an app id; they're File Explorer's.
-		var fe := find_app("Microsoft.Windows.Explorer")
-		if fe.is_empty():
-			fe = find_app_by_name("File Explorer")
+		var fe := _file_explorer()
 		if not fe.is_empty():
 			return "app:" + str(fe["id"])
 	# "WhatsApp.Root.exe" is WhatsApp: the first word of the file name.

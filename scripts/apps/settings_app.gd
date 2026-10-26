@@ -10,7 +10,7 @@ const PAGES := [
 	["personalise", "Personalise", "palette", "Colours, wallpaper, pointer, icons and sounds."],
 	["desktop", "Desktop & taskbar", "desktop", "How Oazy sits on your PC, its shortcuts and the desktop's cards."],
 	["apps", "Apps & library", "grid", "Your games and apps, where they come from and how they launch."],
-	["browser", "Browser & terminal", "globe", "Oazy's own browser and terminal, and what opens in them."],
+	["browser", "Browser & files", "globe", "Oazy's own browser, terminal and file explorer, and what opens in them."],
 	["network", "Network", "wifi", "Wi-Fi, cable and the internet."],
 	["performance", "Performance", "bolt", "Effects, frame rate and keeping Windows tidy."],
 	["updates", "Updates", "download", "New versions of Oazy, straight from GitHub."],
@@ -795,6 +795,9 @@ func _build_browser() -> void:
 	_toggle_row(term, "Open terminals in Oazy Terminal", "Terminal, Command Prompt, PowerShell and Claude Code open in Oazy's own terminal, with tabs and split panes.", "terminal_oazy", Callable(), "cmd powershell shell console claude code")
 	_button_row(term, "Open Oazy Terminal", "A new terminal window.", "Open", "terminal", func() -> void: Terminal.open(), "cmd powershell shell console", App.is_windows())
 
+	var files := _group("browser", "Oazy Files")
+	_toggle_row(files, "Open folders in Oazy Files", "File Explorer, Start's folders and folders you find open in Oazy's own file explorer, with tabs, previews and search. Off brings back Windows Explorer.", "files_oazy", Callable(), "explorer folder file manager")
+
 
 # --- Network -------------------------------------------------------------------------------
 
@@ -1019,7 +1022,7 @@ func _build_about() -> void:
 	text.add_child(credits)
 
 	var data := _group("about", "Your data")
-	_button_row(data, "Data folder", "Your library, settings and downloaded artwork live here.", "Open", "folder", func() -> void: OS.shell_open(App.data_dir()), "files appdata storage")
+	_button_row(data, "Data folder", "Your library, settings and downloaded artwork live here.", "Open", "folder", func() -> void: Files.open_folder(App.data_dir()), "files appdata storage")
 
 
 # --- Live state ----------------------------------------------------------------------------
