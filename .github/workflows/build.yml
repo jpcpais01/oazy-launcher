@@ -221,6 +221,69 @@ jobs:
           git -c user.name="oazy-ci" -c user.email="oazy-ci@users.noreply.github.com" commit -qm "Browser screenshots for ${{ github.sha }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-browser-shots
 
+  terminal-selftest:
+    name: Oazy Terminal on real ConPTY and WebView2
+    needs: build
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OazyLauncher
+
+      - name: Make sure the WebView2 runtime is there
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $pv = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+          if (-not $pv -or $pv -eq '0.0.0.0') {
+            Write-Host "Installing the WebView2 runtime"
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile setup.exe
+            Start-Process .\setup.exe -ArgumentList '/silent','/install' -Wait
+            $pv = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+          }
+          Write-Host "WebView2 runtime: $pv"
+
+      - name: Build the terminal, run shells, screenshot
+        shell: pwsh
+        run: |
+          $shots = Join-Path $PWD 'terminal-shots'
+          New-Item -ItemType Directory -Force $shots | Out-Null
+          $p = Start-Process -FilePath .\OazyLauncher.exe -ArgumentList '--headless','--',"--terminal-selftest=$shots" -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); Write-Host "Self-test timed out" }
+          $log = Join-Path $env:APPDATA 'OazyLauncher\logs\godot.log'
+          if (Test-Path $log) { Get-Content $log | Select-String 'TERMINAL|error|Error' }
+          $st = Join-Path $shots 'terminal-selftest.log'
+          if (Test-Path $st) { Get-Content $st }
+          Get-ChildItem $shots
+          # The terminal's own verdict decides; the launcher only hosts the run.
+          $ex = Join-Path $shots 'terminal-exit.txt'
+          if (-not (Test-Path $ex)) { throw "Terminal self-test didn't finish (launcher exit $($p.ExitCode))" }
+          $code = (Get-Content $ex -Raw).Trim()
+          if ($code -ne '0') { throw "Terminal self-test failed (exit $code)" }
+          if ($p.ExitCode -ne 0) { Write-Host "::warning::Launcher exited with $($p.ExitCode) after the terminal self-test passed" }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terminal-shots
+          path: terminal-shots
+          if-no-files-found: ignore
+
+      - name: Publish screenshots to the ci-terminal-shots branch
+        if: always() && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main')
+        shell: pwsh
+        run: |
+          if (-not (Test-Path terminal-shots)) { exit 0 }
+          Set-Location terminal-shots
+          "${{ github.event.pull_request.head.sha || github.sha }}" | Out-File -Encoding ascii SHA.txt
+          git init -q
+          git checkout -q -b ci-terminal-shots
+          git add -A
+          git -c user.name="oazy-ci" -c user.email="oazy-ci@users.noreply.github.com" commit -qm "Terminal screenshots for ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-terminal-shots
+
   release:
     name: Publish GitHub release
     needs: [build, windows-smoke]

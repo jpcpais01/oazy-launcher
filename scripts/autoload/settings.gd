@@ -38,6 +38,8 @@ const DEFAULTS := {
 	"weather_unit": "auto",
 	"browser_links": true,
 	"browser_pinned": false,
+	"terminal_oazy": true,
+	"terminal_pinned": false,
 	"cleaner_watch": true,
 	"pointer": "oazy",
 	"removed_imports": [],

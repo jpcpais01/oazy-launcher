@@ -34,6 +34,7 @@ Host="*res://scripts/autoload/host.gd"
 Catalog="*res://scripts/autoload/catalog.gd"
 Weather="*res://scripts/autoload/weather.gd"
 Browser="*res://scripts/autoload/browser.gd"
+Terminal="*res://scripts/autoload/terminal.gd"
 Cleaner="*res://scripts/autoload/cleaner.gd"
 Cursors="*res://scripts/autoload/cursors.gd"
 

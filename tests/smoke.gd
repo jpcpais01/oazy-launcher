@@ -185,6 +185,23 @@ func _logic_tests() -> void:
 	if App.is_windows():
 		var built := Browser.build()
 		check(built.has("exe"), "browser: compiles on Windows (%s)" % str(built.get("error", "ok")))
+
+	# Oazy Terminal: shells on pseudoconsoles, in an Oazy window of its own.
+	check(Catalog.item(Terminal.REF)["kind"] == "oazy", "terminal: in the catalog")
+	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\terminal\\app-1234abcd\\OazyTerminal.exe", "title": "PowerShell - Oazy Terminal"}) == Terminal.REF, "terminal: windows group under the terminal")
+	check(Catalog.pins().has(Terminal.REF), "terminal: pinned")
+	check(Terminal.profile_for({"ref": "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App", "name": "Terminal"}) == "", "terminal: takes over Windows Terminal")
+	check(Terminal.profile_for({"ref": "app:{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\cmd.exe", "name": "Command Prompt"}) == "cmd", "terminal: Command Prompt opens as cmd")
+	check(Terminal.profile_for({"ref": "app:{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe", "name": "Windows PowerShell"}) == "powershell", "terminal: PowerShell opens as powershell")
+	check(Terminal.profile_for({"ref": "app:{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell_ise.exe", "name": "Windows PowerShell ISE"}) == "-", "terminal: leaves the ISE alone")
+	check(Terminal.profile_for({"ref": "app:Chrome", "name": "Google Chrome"}) == "-", "terminal: leaves other apps alone")
+	check(Terminal.runs_shell("C:/Windows/System32/cmd.exe") and not Terminal.runs_shell("C:/Games/game.exe"), "terminal: shell library entries")
+	var term_files := Terminal.files()
+	for f in term_files:
+		check(FileAccess.file_exists(str(term_files[f])), "terminal: packaged " + str(f))
+	if App.is_windows():
+		var built_term := Terminal.build()
+		check(built_term.has("exe"), "terminal: compiles on Windows (%s)" % str(built_term.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
 	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")
