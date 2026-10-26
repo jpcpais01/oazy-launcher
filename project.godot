@@ -33,6 +33,7 @@ Updater="*res://scripts/autoload/updater.gd"
 Host="*res://scripts/autoload/host.gd"
 Catalog="*res://scripts/autoload/catalog.gd"
 Weather="*res://scripts/autoload/weather.gd"
+Cleaner="*res://scripts/autoload/cleaner.gd"
 
 [debug]
 

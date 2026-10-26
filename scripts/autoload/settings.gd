@@ -34,6 +34,7 @@ const DEFAULTS := {
 	"claude_checked": false,
 	"seen_shell_intro": false,
 	"weather_unit": "auto",
+	"cleaner_watch": true,
 }
 
 var _values := {}

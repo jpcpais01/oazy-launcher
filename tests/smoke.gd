@@ -324,6 +324,49 @@ func _ui_tests() -> void:
 	await _wait(0.5)
 	check(main.layer.find("oazy:settings") == null, "windows: close")
 
+	# Cleaner: scan, pick, apply and undo, against the mock PC.
+	var safe := true
+	for e in Cleaner.catalog.get("apps", []):
+		for pat in Cleaner.catalog.get("protected", []):
+			if str(e["id"]).matchn(str(pat)):
+				safe = false
+	for t in Cleaner.catalog.get("tweaks", []):
+		for op in t["ops"]:
+			var path := str(op.get("path", ""))
+			if path.contains("Defender") or path.contains("WindowsUpdate") or path.contains("\\Services\\") or (op["t"] == "service" and op["name"] != "DiagTrack"):
+				safe = false
+	check(safe and "Microsoft.WindowsStore" in Cleaner.catalog["protected"], "cleaner: catalog never touches protected parts of Windows")
+	var cl: ShellWindow = main.open_app(&"cleaner")
+	await _wait(0.4)
+	check(cl != null and cl.body.get_child(0) is CleanerApp, "cleaner: opens")
+	var cleaner: CleanerApp = cl.body.get_child(0)
+	Cleaner.start_scan()
+	await _cleaner_idle()
+	check(Cleaner.has_scan() and Cleaner.scan["apps"].size() > 0, "cleaner: scan finds bloat")
+	check(Cleaner.is_picked("app:Microsoft.BingNews") and not Cleaner.is_picked("app:SpotifyAB.SpotifyMusic"), "cleaner: only recommended picks are ticked")
+	check(not Cleaner.is_picked("tweak:game_mode") and Cleaner.is_picked("tweak:ads"), "cleaner: done settings aren't picked")
+	check(Cleaner.picks_in("startup") == 0, "cleaner: startup apps are left alone until you choose")
+	for page in ["apps", "startup", "junk", "perf", "privacy", "history", "overview"]:
+		cleaner._go(page)
+		await _wait(0.1)
+	var steam: Dictionary = Cleaner.scan["startup"][0]
+	Cleaner.want_startup(steam, false)
+	check(Cleaner.picks.get(Cleaner.startup_key(steam)) == false and not Cleaner.startup_wanted(steam), "cleaner: startup switch")
+	check(Cleaner.needs_admin(), "cleaner: a restore point asks Windows once")
+	Cleaner.apply_picks()
+	await _cleaner_idle()
+	check(Cleaner.history.size() == 1 and cleaner._page == "result", "cleaner: apply keeps a record")
+	var still := false
+	for a in Cleaner.scan["apps"]:
+		if a["pkg"] == "Microsoft.BingNews":
+			still = true
+	check(not still and Cleaner.picks.is_empty(), "cleaner: applied picks are done")
+	Cleaner.undo_run(str(Cleaner.history[0]["id"]))
+	await _cleaner_idle()
+	check(Cleaner.history[0].get("undone", false), "cleaner: undo")
+	cl.close()
+	await _wait(0.4)
+
 	# Start.
 	main.start.open()
 	await _wait(0.4)
@@ -462,6 +505,14 @@ func _menu_has(menu: PopupMenu, text: String) -> bool:
 		if menu.get_item_text(i).contains(text):
 			return true
 	return false
+
+
+func _cleaner_idle() -> void:
+	var waited := 0.0
+	await _wait(0.1)
+	while (Cleaner.busy() or not Cleaner.has_scan()) and waited < 10.0:
+		await _wait(0.1)
+		waited += 0.1
 
 
 func _wait(seconds: float) -> void:

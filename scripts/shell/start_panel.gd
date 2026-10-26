@@ -177,6 +177,7 @@ func _build_home() -> Control:
 	right.add_child(_place("Documents", "document", func() -> void: _run(func() -> void: _open_folder(OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)))))
 	right.add_child(_place("Pictures", "image", func() -> void: _run(func() -> void: _open_folder(OS.get_system_dir(OS.SYSTEM_DIR_PICTURES)))))
 	right.add_child(_place("Settings", "settings", func() -> void: _run(func() -> void: main.open_app(&"settings"))))
+	right.add_child(_place("Cleaner", "wand", func() -> void: _run(func() -> void: main.open_app(&"cleaner"))))
 	right.add_child(_place("What's new", "sparkles", func() -> void: _run(func() -> void: main.show_patch_notes())))
 	right.add_child(Kit.spacer(0, 0, true))
 	var power := FxButton.make("Power", "power", FxButton.Style.GHOST, 42)
@@ -362,7 +363,7 @@ func _fill_pinned() -> void:
 			break
 		if not refs.has(ref):
 			refs.append(ref)
-	for ref in ["oazy:library", "oazy:settings"]:
+	for ref in ["oazy:library", "oazy:settings", "oazy:cleaner"]:
 		if not refs.has(ref):
 			refs.append(ref)
 	refs = refs.slice(0, COLS * rows)
