@@ -52,7 +52,7 @@ func _ready() -> void:
 		if str(e["name"]) == "Claude Code":
 			Catalog.set_favorite("lib:" + str(e["id"]), true)
 	Catalog.set_favorite("app:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)
-	await _wait(0.7)
+	await _wait(0.4)
 	await shot("00-loading")
 	var main := get_tree().current_scene
 	var waited := 0.0
@@ -159,7 +159,25 @@ func _ready() -> void:
 		await _wait(0.12)
 	await _wait(0.8)
 	await shot("10-download")
+	Updater.state = &"ready"
+	Updater.state_changed.emit(&"ready")
+	await _wait(0.5)
+	await shot("10b-ready")
+	Updater.state = &"installing"
+	Updater.state_changed.emit(&"installing")
+	await _wait(1.6)
+	await shot("10c-restarting")
 	Updater.state = &"available"
+	_close_modals()
+	await _wait(0.5)
+	var welcome := UpdateWelcome.new()
+	welcome.version = "2.1.40"
+	welcome.from_version = "2.1.31"
+	welcome.markdown = Updater.combined_notes()
+	welcome.show_all = main.show_patch_notes
+	main.overlay_layer.add_child(welcome)
+	await _wait(1.8)
+	await shot("10d-welcome")
 	_close_modals()
 	await _wait(0.5)
 	main.launch(str(Library.recent()[1]["id"]))

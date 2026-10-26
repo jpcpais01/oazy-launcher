@@ -28,6 +28,7 @@ const DEFAULTS := {
 	"last_seen_version": "",
 	"pending_update_version": "",
 	"pending_update_notes": "",
+	"pending_update_from": "",
 	"steam_root": "",
 	"first_scan_done": false,
 	"claude_checked": false,

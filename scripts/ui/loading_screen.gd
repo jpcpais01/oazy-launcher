@@ -8,18 +8,15 @@ signal finished
 ## Emitted right as the fade starts so Home can choreograph its entrance under it.
 signal finished_early
 
-const RING := preload("res://shaders/ring.gdshader")
-const BAR := preload("res://shaders/shine_bar.gdshader")
-const MIN_TIME := 1.35
+const MIN_TIME := 0.85
 
-var _ring: ColorRect
+var _orb: UpdateOrb
 var _logo: TextureRect
 var _word: Label
+var _word_font: FontVariation
 var _tag: Label
 var _status: Label
-var _bar_mat: ShaderMaterial
-var _progress := 0.0
-var _shown := 0.0
+var _mark: Control
 var _skip := false
 
 
@@ -39,40 +36,37 @@ func _ready() -> void:
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(col)
 
-	var mark := Control.new()
-	mark.custom_minimum_size = Vector2(190, 190)
-	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var mark_holder := CenterContainer.new()
-	mark_holder.add_child(mark)
+	# The same glass orb the updater uses: it fills with water as Oazy loads,
+	# with the logo floating in it and ripples running out over the wallpaper.
+	_mark = Control.new()
+	_mark.custom_minimum_size = Vector2(420, 420)
+	_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mark.pivot_offset = Vector2(210, 210)
+	# The ripples may run under the wordmark, so the holder is shorter than the orb.
+	var mark_holder := Control.new()
+	mark_holder.custom_minimum_size = Vector2(420, 330)
+	mark_holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	mark_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark_holder.add_child(_mark)
 	col.add_child(mark_holder)
-	_ring = ColorRect.new()
-	var rm := ShaderMaterial.new()
-	rm.shader = RING
-	rm.set_shader_parameter("indeterminate", 1.0)
-	rm.set_shader_parameter("thickness", 0.035)
-	rm.set_shader_parameter("color_a", App.accent)
-	rm.set_shader_parameter("color_b", App.accent_pair(App.accent))
-	rm.set_shader_parameter("track", Color(1, 1, 1, 0.05))
-	_ring.material = rm
-	_ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mark.add_child(_ring)
+	_orb = UpdateOrb.new(420, 0.5)
+	_orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_mark.add_child(_orb)
 	_logo = TextureRect.new()
 	_logo.texture = load("res://assets/icon.png")
 	_logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_logo.position = Vector2(43, 43)
-	_logo.size = Vector2(104, 104)
-	_logo.pivot_offset = Vector2(52, 52)
+	_logo.position = Vector2(160, 160)
+	_logo.size = Vector2(100, 100)
+	_logo.pivot_offset = Vector2(50, 50)
 	_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mark.add_child(_logo)
+	_mark.add_child(_logo)
 
-	col.add_child(Kit.spacer(0, 26))
 	_word = Kit.label("OAZY", 46, 800, Color.WHITE, true)
-	var wv := FontVariation.new()
-	wv.base_font = Kit.font(800, true)
-	wv.spacing_glyph = 14
-	_word.add_theme_font_override("font", wv)
+	_word_font = FontVariation.new()
+	_word_font.base_font = Kit.font(800, true)
+	_word_font.spacing_glyph = 14
+	_word.add_theme_font_override("font", _word_font)
 	_word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_word)
 	col.add_child(Kit.spacer(0, 6))
@@ -80,26 +74,13 @@ func _ready() -> void:
 	_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_tag)
 
-	var bottom := Kit.vbox(12)
-	bottom.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	bottom.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	bottom.offset_bottom = -64
-	add_child(bottom)
-	_status = Kit.label("Starting up", 14, 500, Color(1, 1, 1, 0.55))
+	_status = Kit.label("Starting up", 14, 500, Color(1, 1, 1, 0.5))
+	_status.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	_status.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_status.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_status.offset_bottom = -64
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	bottom.add_child(_status)
-	var bar_holder := CenterContainer.new()
-	bottom.add_child(bar_holder)
-	var bar := ColorRect.new()
-	bar.custom_minimum_size = Vector2(280, 3)
-	_bar_mat = ShaderMaterial.new()
-	_bar_mat.shader = BAR
-	_bar_mat.set_shader_parameter("rect_size", Vector2(280, 3))
-	_bar_mat.set_shader_parameter("color_a", App.accent)
-	_bar_mat.set_shader_parameter("color_b", App.accent_pair(App.accent))
-	bar.material = _bar_mat
-	bar_holder.add_child(bar)
+	add_child(_status)
 
 	var version := Kit.label("v" + App.version, 12, 500, Color(1, 1, 1, 0.3))
 	version.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -112,28 +93,36 @@ func _ready() -> void:
 	_intro()
 
 
+## A drop lands: the orb springs up with a shockwave, the logo bobs to the
+## surface and the wordmark draws its letters together.
 func _intro() -> void:
-	_logo.scale = Vector2.ONE * 0.55
+	_mark.scale = Vector2.ONE * 0.6
+	_mark.modulate.a = 0.0
+	_logo.scale = Vector2.ONE * 0.4
 	_logo.modulate.a = 0.0
-	_ring.modulate.a = 0.0
 	_word.modulate.a = 0.0
 	_tag.modulate.a = 0.0
+	_status.modulate.a = 0.0
+	_word_font.spacing_glyph = 42
+	_orb.snap(0.06)
+	_orb.shockwave(1.1)
 	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_property(_logo, "scale", Vector2.ONE, 0.8)
-	t.tween_property(_logo, "modulate:a", 1.0, 0.4)
-	t.tween_property(_ring, "modulate:a", 1.0, 0.6).set_delay(0.25)
-	t.tween_property(_word, "modulate:a", 1.0, 0.6).set_delay(0.3).set_trans(Tween.TRANS_SINE)
-	t.tween_property(_tag, "modulate:a", 1.0, 0.6).set_delay(0.45).set_trans(Tween.TRANS_SINE)
-
-
-func _process(delta: float) -> void:
-	_shown = lerpf(_shown, _progress, 1.0 - exp(-delta * 6.0))
-	_bar_mat.set_shader_parameter("progress", _shown)
+	t.tween_property(_mark, "scale", Vector2.ONE, 0.6)
+	t.tween_property(_mark, "modulate:a", 1.0, 0.25).set_trans(Tween.TRANS_SINE)
+	t.tween_property(_logo, "scale", Vector2.ONE, 0.65).set_delay(0.08)
+	t.tween_property(_logo, "modulate:a", 1.0, 0.3).set_delay(0.08)
+	t.tween_property(_word, "modulate:a", 1.0, 0.45).set_delay(0.15).set_trans(Tween.TRANS_SINE)
+	t.tween_property(_word_font, "spacing_glyph", 14, 0.7).set_delay(0.1).set_trans(Tween.TRANS_EXPO)
+	t.tween_property(_tag, "modulate:a", 1.0, 0.45).set_delay(0.3).set_trans(Tween.TRANS_SINE)
+	t.tween_property(_status, "modulate:a", 1.0, 0.45).set_delay(0.4).set_trans(Tween.TRANS_SINE)
+	var bob := _logo.create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	bob.tween_property(_logo, "position:y", 152.0, 1.4)
+	bob.tween_property(_logo, "position:y", 160.0, 1.4)
 
 
 func _step(text: String, progress: float) -> void:
 	_status.text = text
-	_progress = progress
+	_orb.target = maxf(_orb.target, progress)
 
 
 ## Runs the boot steps. Every await yields a frame so animation stays fluid.
@@ -182,21 +171,27 @@ func run() -> void:
 		await get_tree().process_frame
 	_step("Ready", 1.0)
 	if not fast:
-		await get_tree().create_timer(0.25).timeout
+		await get_tree().create_timer(0.18).timeout
 	_outro()
 
 
+## The orb fills to the brim, sends one last ripple out, and everything lifts
+## away so the desktop can come in underneath.
 func _outro() -> void:
-	set_process(false)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_orb.shockwave(0.7)
 	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN_OUT)
-	t.tween_property(_logo, "scale", Vector2.ONE * 1.18, 0.6)
-	t.tween_property(self, "modulate:a", 0.0, 0.55).set_delay(0.08)
+	t.tween_property(_mark, "scale", Vector2.ONE * 1.25, 0.5)
+	t.tween_property(_word, "modulate:a", 0.0, 0.25)
+	t.tween_property(_tag, "modulate:a", 0.0, 0.2)
+	t.tween_property(_status, "modulate:a", 0.0, 0.2)
+	t.tween_property(_word_font, "spacing_glyph", 26, 0.4)
+	t.tween_property(self, "modulate:a", 0.0, 0.42).set_delay(0.06)
 	t.chain().tween_callback(func() -> void:
 		finished.emit()
 		queue_free()
 	)
-	await get_tree().create_timer(0.12).timeout
+	await get_tree().create_timer(0.08).timeout
 	finished_early.emit()
 
 
