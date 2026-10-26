@@ -883,6 +883,9 @@ func handle_key(event: InputEvent, from: Window = null) -> bool:
 		win.close()
 	elif k.keycode == KEY_ESCAPE and win:
 		win.minimize()
+	elif (k.keycode == KEY_PAGEDOWN or k.keycode == KEY_PAGEUP) and get_viewport().gui_get_focus_owner() == null and (win == null or (Shell.native and not windows_in_front())):
+		# Down to the desktop's second screen and back.
+		desktop.page(1 if k.keycode == KEY_PAGEDOWN else -1)
 	elif k.unicode > 32 and not k.ctrl_pressed and not k.alt_pressed and get_viewport().gui_get_focus_owner() == null and (win == null or (Shell.native and not windows_in_front())):
 		# Type on the desktop to search, like Start.
 		start.open(char(k.unicode))
