@@ -102,7 +102,11 @@ static func run(ref: String, main: Node) -> void:
 		DisplayServer.clipboard_set(ref.substr(5))
 		App.toast("Copied %s" % ref.substr(5), &"success")
 	elif ref.begins_with("url:"):
-		OS.shell_open(ref.substr(4))
+		var url := ref.substr(4)
+		if Browser.handles_links() and (url.begins_with("http://") or url.begins_with("https://")):
+			Browser.open(url)
+		else:
+			OS.shell_open(url)
 	elif ref.begins_with("path:"):
 		var p := ref.substr(5)
 		if App.is_windows():

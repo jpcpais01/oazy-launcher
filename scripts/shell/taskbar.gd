@@ -447,7 +447,7 @@ func _on_click(btn: TaskbarButton) -> void:
 
 
 func _launch(btn: TaskbarButton) -> void:
-	if Catalog.launch(btn.ref) and not btn.ref.begins_with("oazy:"):
+	if Catalog.launch(btn.ref) and (not btn.ref.begins_with("oazy:") or btn.ref == Browser.REF):
 		if not (btn.ref.begins_with("lib:") and btn.item.get("kind") == "game"):
 			btn.start_launching()
 		Sfx.play(&"select")
@@ -480,7 +480,7 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 	_menu.set_item_disabled(0, true)
 	_menu.add_separator()
 	var running := btn.window_count() > 0
-	if btn.ref.begins_with("oazy:"):
+	if btn.ref.begins_with("oazy:") and btn.ref != Browser.REF:
 		_menu.add_icon_item(Icons.tex("window", 18), "Open", 0)
 	else:
 		_menu.add_icon_item(Icons.tex("plus" if running else "play", 18), "New window" if running else "Open", 0)

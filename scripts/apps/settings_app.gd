@@ -53,6 +53,8 @@ func _ready() -> void:
 		_toggle_row(you, "Match app title bars to Oazy", "Gives other apps' title bars and borders Oazy's colours (Windows 11).", "theme_app_windows")
 	else:
 		_toggle_row(you, "Open in fullscreen", "Oazy covers the whole screen like a real desktop. F11 switches any time.", "shell_fullscreen", func(on: bool) -> void: main.apply_window_mode(on))
+	if App.is_windows():
+		_toggle_row(you, "Open web links in Oazy Browser", "Web searches and addresses from Start open in Oazy's own browser instead of your default one.", "browser_links")
 	_toggle_row(you, "Start with Windows", "Sign in and land straight on your Oazy desktop.", "launch_at_startup", func(on: bool) -> void: main.set_autostart(on))
 	var hk := _row(you, "Open Start from anywhere" if Shell.native else "Come back home from anywhere", "Press Ctrl + Alt + O in any app to open Start." if Shell.native else "Press Ctrl + Alt + O in any app to bring Oazy to the front.")
 	_hotkey_status = Kit.label("", 14, 600, App.TEXT_DIM)

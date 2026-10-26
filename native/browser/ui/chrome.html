@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Oazy Browser</title>
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="chrome.css">
+</head>
+<body>
+<div id="top">
+	<div id="strip">
+		<div id="tabs" role="tablist"></div>
+		<button id="newtab" class="icon-btn" title="New tab (Ctrl+T)"></button>
+		<div id="drag" class="drag"></div>
+		<div id="wincontrols">
+			<button id="win-min" title="Minimise"></button>
+			<button id="win-max" title="Maximise"></button>
+			<button id="win-close" title="Close"></button>
+		</div>
+	</div>
+	<div id="bar">
+		<button id="back" class="icon-btn" title="Back (Alt+Left)"></button>
+		<button id="forward" class="icon-btn" title="Forward (Alt+Right)"></button>
+		<button id="reload" class="icon-btn" title="Reload (Ctrl+R)"></button>
+		<div id="omni">
+			<div id="site"></div>
+			<div id="addr-wrap">
+				<input id="addr" type="text" spellcheck="false" autocomplete="off" autocorrect="off" aria-label="Address and search bar">
+				<div id="addr-pretty"></div>
+			</div>
+			<div id="chip"></div>
+			<span id="zoom-chip" title="Reset zoom"></span>
+			<button id="star" class="icon-btn small" title="Pin to new tab page (Ctrl+D)"></button>
+		</div>
+		<button id="dl" class="icon-btn" title="Downloads (Ctrl+J)"></button>
+		<button id="menu-btn" class="icon-btn" title="Menu"></button>
+		<div id="progress"><i></i></div>
+	</div>
+	<div id="findbar">
+		<div id="find-box">
+			<span class="find-glyph"></span>
+			<input id="find-q" type="text" spellcheck="false" placeholder="Find on page">
+			<span id="find-count"></span>
+		</div>
+		<button id="find-prev" class="icon-btn small" title="Previous (Shift+Enter)"></button>
+		<button id="find-next" class="icon-btn small" title="Next (Enter)"></button>
+		<button id="find-close" class="icon-btn small" title="Close (Esc)"></button>
+	</div>
+</div>
+
+<div id="overlay">
+	<img id="snap" alt="">
+	<div id="veil"></div>
+	<div id="suggest" class="panel"></div>
+	<div id="menu" class="panel"></div>
+	<div id="downloads" class="panel"></div>
+	<div id="history" class="panel"></div>
+	<div id="tabmenu" class="panel"></div>
+</div>
+
+<script src="icons.js"></script>
+<script src="chrome.js"></script>
+</body>
+</html>

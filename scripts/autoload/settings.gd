@@ -33,6 +33,8 @@ const DEFAULTS := {
 	"claude_checked": false,
 	"seen_shell_intro": false,
 	"weather_unit": "auto",
+	"browser_links": true,
+	"browser_pinned": false,
 }
 
 var _values := {}
