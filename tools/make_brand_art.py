@@ -4,17 +4,20 @@
 The .bin suffix keeps Godot from importing them, so they ship as small webp
 files inside the exe (see include_filter in export_presets.cfg).
 
-Original art in each app's brand colours: soft light blooms, a liquid-glass
-sheen and fine grain, with the name set in Outfit. No third-party logos.
-Run: python3 tools/make_brand_art.py  (needs Pillow, numpy, fonttools, brotli)
+Each app's mark and name centred over its brand colours: soft light blooms, a
+liquid-glass orb and fine grain, with the name set in Outfit. Marks come from
+tools/brand_src/marks (CC0: @iconify-json/logos, simple-icons). A finished
+cover in tools/brand_src/<slug>_cover.png is used as it is.
+Run: python3 tools/make_brand_art.py  (needs Pillow, numpy, fonttools, brotli, cairosvg)
 """
-import math, os, random, sys, tempfile, zlib
+import io, math, os, random, sys, tempfile, zlib
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from fontTools.ttLib import TTFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "assets", "brand")
+SRC = os.path.join(ROOT, "tools", "brand_src")
 TMP = os.path.join(tempfile.gettempdir(), "oazy-brand-fonts")
 
 # slug: (title, tagline, base, [bloom colours], ink)
@@ -37,6 +40,7 @@ APPS = {
     "slack": ("Slack", "Where work happens", "#2a0c2b", ["#36c5f0", "#2eb67d", "#ecb22e", "#e01e5a"], "#ffffff"),
     "flow": ("Flow", "Make images and video", "#0b0a1f", ["#7c6cff", "#265cd6", "#c58bff", "#2fd3e6"], "#f4f2ff"),
     "epicgameslauncher": ("Epic Games", "Play, free every week", "#0e0e10", ["#5a5a66", "#d8d8e2", "#2a2a34", "#0078f2"], "#ffffff"),
+    "microsoftteams": ("Teams", "Meet, chat, call", "#14123a", ["#5b5fc7", "#7b83eb", "#4b53bc", "#c5c9ff"], "#ffffff"),
 }
 
 
@@ -115,19 +119,50 @@ def fit(text, weight, width, start):
     return font(weight, size)
 
 
+def mark(slug, size):
+    """The app's mark, about size px on its long side, or None."""
+    path = os.path.join(SRC, "marks", slug + ".svg")
+    if not os.path.exists(path):
+        return None
+    import cairosvg
+    png = cairosvg.svg2png(url=path, output_width=size * 4)
+    im = Image.open(io.BytesIO(png)).convert("RGBA")
+    im = im.crop(im.getbbox())
+    k = size / max(im.size)
+    return im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS)
+
+
+def paste_shadowed(im, layer, xy, blur):
+    """Pastes layer at xy over a soft drop shadow."""
+    shadow = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    a = layer.getchannel("A").point(lambda v: v * 0.55)
+    shadow.paste(Image.new("RGBA", layer.size, (0, 0, 0, 255)), (xy[0], xy[1] + blur // 2), a)
+    im.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(blur)))
+    im.alpha_composite(layer, xy)
+
+
+def centred_text(im, cy, text, fnt, ink, blur):
+    b = fnt.getbbox(text)
+    x = (im.width - (b[2] - b[0])) // 2 - b[0]
+    text_shadow(im, (x, cy - (b[3] - b[1]) // 2 - b[1]), text, fnt, ink, blur)
+
+
 def cover(slug, app):
+    given = os.path.join(SRC, slug + "_cover.png")
+    if os.path.exists(given):
+        im = Image.open(given).convert("RGB").resize((600, 900), Image.LANCZOS)
+        return im.filter(ImageFilter.UnsharpMask(2, 60, 2))
     title, tag, base, blooms, ink = app
     w, h = 600, 900
-    im = background(w, h, base, blooms, zlib.crc32(slug.encode()) & 0xFFFF, (0.58, 0.33), orb=0.26).convert("RGBA")
-    # Bottom scrim so the name always reads.
-    scrim = np.linspace(0, 1, h)[:, None] ** 2.2 * 0.55
-    shade = Image.fromarray((np.repeat(scrim, w, 1) * 255).astype(np.uint8), "L")
-    im.alpha_composite(Image.merge("RGBA", [Image.new("L", (w, h), 0)] * 3 + [shade]))
-    tf = fit(title, "title", w - 96, 104)
-    tb = tf.getbbox(title)
-    ty = h - 150 - (tb[3] - tb[1])
-    text_shadow(im, (48, ty - tb[1]), title, tf, ink, 10)
-    ImageDraw.Draw(im).text((50, h - 120), tag, font=font("tag", 30), fill=ink + "c0")
+    im = background(w, h, base, blooms, zlib.crc32(slug.encode()) & 0xFFFF, (0.5, 0.40), orb=0.25).convert("RGBA")
+    m = mark(slug, 230)
+    if m:
+        paste_shadowed(im, m, ((w - m.width) // 2, int(h * 0.40) - m.height // 2), 18)
+        centred_text(im, int(h * 0.72), title, fit(title, "title", w - 120, 88), ink, 10)
+    else:
+        # No mark: the name is the mark.
+        centred_text(im, int(h * 0.40), title, fit(title, "title", w - 120, 120), ink, 12)
+        centred_text(im, int(h * 0.72), tag, font("tag", 30), ink + "c0", 6)
     return im.convert("RGB")
 
 
@@ -137,12 +172,20 @@ def hero(slug, app):
 
 
 def logo(slug, app):
+    """Mark and name side by side on transparency."""
     title, _, _, _, ink = app
     f = font("title", 200)
     b = f.getbbox(title)
+    tw, th = b[2] - b[0], b[3] - b[1]
+    m = mark(slug, int(th * 1.25))
+    gap = int(th * 0.35) if m else 0
+    mw, mh = (m.width, m.height) if m else (0, 0)
     pad = 40
-    im = Image.new("RGBA", (b[2] - b[0] + pad * 2, b[3] - b[1] + pad * 2), (0, 0, 0, 0))
-    text_shadow(im, (pad - b[0], pad - b[1]), title, f, ink, 14)
+    h = max(th, mh)
+    im = Image.new("RGBA", (mw + gap + tw + pad * 2, h + pad * 2), (0, 0, 0, 0))
+    if m:
+        paste_shadowed(im, m, (pad, pad + (h - mh) // 2), 14)
+    text_shadow(im, (pad + mw + gap - b[0], pad + (h - th) // 2 - b[1]), title, f, ink, 14)
     return im
 
 
