@@ -380,7 +380,12 @@ func _logic_tests() -> void:
 	check(not Shell.native, "shell: one window in tests")
 	var poly := Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(50, 50, 10, 10)] as Array[Rect2], 2.0)
 	check(poly.size() == 13 and poly[1] == Vector2(0, 0) and poly[8] == Vector2(120, 100), "shell: shape of separate parts")
-	check(Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(5, 5, 10, 10)] as Array[Rect2], 1.0).size() == 7, "shell: overlapping parts merge")
+	var both := Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(5, 5, 10, 10)] as Array[Rect2], 1.0)
+	check(Geometry2D.is_point_in_polygon(Vector2(7, 7), both) and Geometry2D.is_point_in_polygon(Vector2(2, 2), both)
+		and Geometry2D.is_point_in_polygon(Vector2(13, 13), both) and Geometry2D.is_point_in_polygon(Vector2(12, 7), both),
+		"shell: overlapping parts join without holes")
+	check(not Geometry2D.is_point_in_polygon(Vector2(2, 13), both) and not Geometry2D.is_point_in_polygon(Vector2(13, 2), both),
+		"shell: nothing between overlapping parts takes clicks")
 	check(Shell.union_polygon([] as Array[Rect2], 1.0).is_empty(), "shell: nothing to show")
 	check(AppIcon.custom_look({"ref": "app:Microsoft.Windows.Explorer", "name": "File Explorer"})[0] == "folder", "icons: File Explorer gets Oazy's folder")
 	check(AppIcon.custom_look({"ref": "win:C:/Windows/explorer.exe", "name": "Windows Explorer"})[0] == "folder", "icons: Explorer windows too")

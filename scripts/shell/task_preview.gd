@@ -15,7 +15,11 @@ var button: TaskbarButton
 var main: Node
 ## Showing (or on its way in) for `button`; false once it starts to close.
 var open := false
+## Where the card is going to be for `button` (empty until it's laid out).
+## Pointer logic aims here, not at a card still gliding over from another app.
+var target_rect := Rect2()
 var _glass: GlassPanel
+var _clip: Control
 var _content: HBoxContainer
 var _slots: Array = []
 var _tween: Tween
@@ -31,9 +35,16 @@ func _ready() -> void:
 	_glass = GlassPanel.new(true, 18.0, GlassPanel.TINT_POPUP)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_glass)
+	# While the card glides and reshapes from one app to the next, the new
+	# app's windows stay inside it instead of spilling over its edges.
+	_clip = Control.new()
+	_clip.clip_contents = true
+	_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_clip.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_clip)
 	_content = Kit.hbox(8)
 	_content.position = Vector2(10, 10)
-	add_child(_content)
+	_clip.add_child(_content)
 
 
 ## The card, plus the strip between it and its button, so the pointer stays
@@ -50,6 +61,18 @@ func shell_shape() -> Array[Rect2]:
 
 func is_showing() -> bool:
 	return visible and modulate.a > 0.01
+
+
+## `p` is on the card, or where it's gliding to, give or take `margin`.
+func covers(p: Vector2, margin: float) -> bool:
+	if get_global_rect().grow(margin).has_point(p):
+		return true
+	return open and target_rect.has_area() and target_rect.grow(margin).has_point(p)
+
+
+## Where the card is headed, or where it is while that's still being worked out.
+func aim_rect() -> Rect2:
+	return target_rect if open and target_rect.has_area() else get_global_rect()
 
 
 func _signature(btn: TaskbarButton) -> String:
@@ -73,6 +96,8 @@ func show_for(btn: TaskbarButton) -> void:
 	var gliding := open and is_showing()
 	open = true
 	clear_thumbs()
+	if btn != button:
+		target_rect = Rect2()
 	button = btn
 	if sig != _built:
 		_built = sig
@@ -94,6 +119,7 @@ func show_for(btn: TaskbarButton) -> void:
 	var vp := Shell.view_size()
 	var top := btn.get_global_rect().position.y - GAP - want.y
 	var at := Vector2(clampf(center.x - want.x / 2.0, 10.0, vp.x - want.x - 10.0), top)
+	target_rect = Rect2(at, want)
 	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	if gliding:
 		# Already up for another app: slide and reshape into place.
@@ -140,6 +166,7 @@ func _build(btn: TaskbarButton) -> void:
 func hide_preview() -> void:
 	_serial += 1
 	open = false
+	target_rect = Rect2()
 	clear_thumbs()
 	if not visible:
 		return

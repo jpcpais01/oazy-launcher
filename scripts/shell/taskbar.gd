@@ -52,7 +52,8 @@ var _weather_icon: TextureRect
 var _weather_temp: Label
 ## Hover intent for the window previews (see _step_preview).
 var _hover_btn: TaskbarButton
-## How long the pointer has been on _hover_btn, and how long it has held still.
+## How long the pointer has been on _hover_btn, and how long it has held still
+## (within REST_SLOP of where it came to rest, _last_pointer).
 var _dwell := 0.0
 var _still := 0.0
 var _last_pointer := Vector2.INF
@@ -678,22 +679,29 @@ func _on_hover(_btn: TaskbarButton, _on: bool) -> void:
 
 # --- Window previews ------------------------------------------------------------------
 # One card that follows the pointer along the taskbar. It opens after the
-# pointer rests on an app, glides to the next app as the pointer moves along,
-# and stays while the pointer heads up to it: from where it left the button,
-# anywhere inside the triangle up to the card's bottom corners counts as on
-# the way, even across other apps' buttons. It closes a moment after the
-# pointer is off the button, the card and that path. All of this is worked
-# out from where the pointer is each frame, not from enter and leave events,
-# so a fast sweep can't leave it confused.
+# pointer rests on an app and moves to another app once the pointer settles on
+# that one's button, so a quick sweep along the bar doesn't flick it through
+# every app on the way. It stays while the pointer heads up to it: from where
+# it left the button, anywhere inside the triangle up to the card's bottom
+# corners counts as on the way, even across other apps' buttons. It closes a
+# moment after the pointer is off the buttons, the card and that path. All of
+# this is worked out from where the pointer is each frame, not from enter and
+# leave events, so a fast sweep can't leave it confused.
 
 const OPEN_DELAY := 0.4
 ## How far under the card still counts as just below it.
 const GAP_SLACK := TaskPreview.GAP + 4.0
 ## Reopening right after it closed (sweeping back) is immediate.
 const REOPEN_WINDOW := 400
-const CLOSE_DELAY := 0.3
-## On the way to the card, another app takes it only once the pointer rests there.
-const SWITCH_REST := 0.12
+const CLOSE_DELAY := 0.45
+## With the card up, another app takes it once the pointer has been on its
+## button this long...
+const SWITCH_DWELL := 0.1
+## ...or, on the way up to the card, once the pointer rests there this long.
+const SWITCH_REST := 0.2
+## Moving less than this (in pixels) still counts as resting, however many
+## frames it's spread over.
+const REST_SLOP := 3.0
 
 
 func _step_preview(delta: float) -> bool:
@@ -701,9 +709,11 @@ func _step_preview(delta: float) -> bool:
 		_hover_btn = null
 		return false
 	var p := get_global_mouse_position()
-	var moved := _last_pointer == Vector2.INF or p.distance_to(_last_pointer) > 2.0
-	_last_pointer = p
-	_still = 0.0 if moved else _still + delta
+	if _last_pointer == Vector2.INF or p.distance_to(_last_pointer) > REST_SLOP:
+		_last_pointer = p
+		_still = 0.0
+	else:
+		_still += delta
 	var over := _button_at(p)
 	if over != _hover_btn:
 		_hover_btn = over
@@ -726,12 +736,17 @@ func _step_preview(delta: float) -> bool:
 		_anchor = p
 		_away = 0.0
 		return true
-	if preview.get_global_rect().grow(6.0).has_point(p):
+	if preview.covers(p, 6.0):
 		_away = 0.0
 		return true
 	var heading := _heading_to_preview(p)
-	if over and over != _hush and (not heading or _still >= SWITCH_REST):
-		_open_preview(over, p)
+	if over and over != _hush:
+		# On another app: it takes the card once the pointer settles there.
+		var settled := (_still >= SWITCH_REST) if heading else (_dwell >= SWITCH_DWELL)
+		if settled:
+			_open_preview(over, p)
+		else:
+			_away = 0.0
 		return true
 	if heading:
 		_away = 0.0
@@ -767,16 +782,16 @@ func _button_at(p: Vector2) -> TaskbarButton:
 	return null
 
 
-## The pointer is on its way from the button up to the card: inside the
-## triangle from where it left the button to the card's bottom corners, or in
-## the strip right under the card.
+## The pointer is on its way from the button up to the card (where the card is
+## going, if it's still gliding there): inside the triangle from where it left
+## the button to the card's bottom corners, or in the strip right under the card.
 func _heading_to_preview(p: Vector2) -> bool:
-	var r := preview.get_global_rect()
-	var bottom := r.position.y + r.size.y
+	var r := preview.aim_rect()
+	var bottom := r.end.y
 	if p.y < bottom - 2.0:
 		return false
-	var left := Vector2(r.position.x - 12.0, bottom)
-	var right := Vector2(r.end.x + 12.0, bottom)
+	var left := Vector2(r.position.x - 20.0, bottom)
+	var right := Vector2(r.end.x + 20.0, bottom)
 	if Geometry2D.point_is_inside_triangle(p, _anchor, left, right):
 		return true
 	return p.x >= r.position.x and p.x <= r.end.x and p.y <= bottom + GAP_SLACK

@@ -32,6 +32,7 @@ var _desk_menu: PopupMenu
 var _grips: Array[Control] = []
 var _launching := false
 var _peeked: Array[ShellWindow] = []
+var _unminimized_at := 0
 var _fg_at_start := 0
 var _menus: Control
 var quick: QuickSettings
@@ -411,21 +412,23 @@ func show_desktop() -> void:
 	start.close()
 	if Shell.native:
 		# Every window steps aside (Oazy's and other apps'), and the next
-		# click brings them back.
-		var open: Array[ShellWindow] = []
-		for w in layer.windows():
-			if not w.minimized:
-				open.append(w)
-		if not open.is_empty():
-			_peeked = open
-			for w in open:
-				w.minimize()
-		else:
-			for w in _peeked:
-				if is_instance_valid(w):
-					w.unminimize()
-			_peeked.clear()
-		Host.show_desktop()
+		# click brings them back. The companion makes the one decision for
+		# both, so Oazy's windows never stay up while the rest go (or the
+		# other way round).
+		var open := _open_shell_windows()
+		if not Host.available:
+			_peek_shell_windows(not open.is_empty())
+			return
+		Host.show_desktop(not open.is_empty(), Shell.hwnd_of(layer), func(d: Dictionary) -> void:
+			var action := str(d.get("action", ""))
+			if action == "hide":
+				_peek_shell_windows(true)
+			elif action == "restore":
+				var had := not _peeked.is_empty()
+				_peek_shell_windows(false)
+				if had and (bool(d.get("oazy_front", false)) or not bool(d.get("restored", false))):
+					Shell.focus(layer)
+		)
 		return
 	var any_open := false
 	for w in layer.windows():
@@ -438,6 +441,28 @@ func show_desktop() -> void:
 			w.unminimize()
 	if not Host.self_foreground:
 		Host.go_home()
+
+
+func _open_shell_windows() -> Array[ShellWindow]:
+	var open: Array[ShellWindow] = []
+	for w in layer.windows():
+		if not w.minimized and w.visible:
+			open.append(w)
+	return open
+
+
+## Minimises Oazy's open windows (remembering them), or brings the
+## remembered ones back.
+func _peek_shell_windows(hide: bool) -> void:
+	if hide:
+		_peeked = _open_shell_windows()
+		for w in _peeked:
+			w.minimize()
+	else:
+		for w in _peeked:
+			if is_instance_valid(w):
+				w.unminimize()
+		_peeked.clear()
 
 
 func modal_open() -> bool:
@@ -989,9 +1014,15 @@ func _confirm_quit() -> void:
 
 
 func _process(_delta: float) -> void:
-	# The desktop never minimises (Win+D, Win+M).
+	# The desktop never minimises (Win+D, Win+M). The companion brings it back
+	# without activating it: Godot's own way restyles the window, which lifts
+	# it over every app until the companion pushes it back down.
 	if Shell.native and get_window().mode == Window.MODE_MINIMIZED:
-		get_window().mode = Window.MODE_WINDOWED
+		if not Host.available:
+			get_window().mode = Window.MODE_WINDOWED
+		elif Time.get_ticks_msec() - _unminimized_at > 500:
+			_unminimized_at = Time.get_ticks_msec()
+			Host.restore_quietly(Host.self_hwnd)
 
 
 # --- Oazy Browser ------------------------------------------------------------------------------

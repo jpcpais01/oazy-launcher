@@ -303,6 +303,8 @@ func launch(id: String) -> bool:
 	if e.is_empty():
 		return false
 	var ok := false
+	# Whatever window this opens comes up in front with focus.
+	Host.expect_window()
 	# Apps added from Start open the way Start opens them.
 	if str(e.get("app_id", "")) != "":
 		ok = Catalog.launch_app(str(e["app_id"]))
