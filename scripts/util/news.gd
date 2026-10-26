@@ -50,7 +50,7 @@ func _now() -> int:
 
 
 func refresh(force: bool = false) -> void:
-	if busy or App.smoke_test or (App.screenshot_dir != "" and not force):
+	if busy or (App.smoke_test and not force):
 		return
 	var t := topic()
 	var now := _now()

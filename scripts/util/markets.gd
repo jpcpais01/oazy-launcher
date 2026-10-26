@@ -68,7 +68,7 @@ func _now() -> int:
 
 ## Fetches whatever is stale. Cheap to call often: it does nothing in between.
 func refresh(force: bool = false) -> void:
-	if busy or App.smoke_test or (App.screenshot_dir != "" and not force):
+	if busy or (App.smoke_test and not force):
 		return
 	var syms := symbols()
 	var now := _now()
