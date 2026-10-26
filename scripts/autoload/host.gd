@@ -16,6 +16,8 @@ signal status_changed(available: bool)
 ## Alt+Tab while Oazy's switcher is on: "open", "open_back", "next", "prev",
 ## "left", "right", "up", "down", "close", "done" (Alt let go) or "cancel".
 signal switch_key(key: String)
+## Wi-Fi news from Windows: {"what": "scan"|"connecting"|"connected"|"failed"|"disconnected"|"radio"|"adapter", ...}.
+signal wifi_event(d: Dictionary)
 ## Another app went fullscreen (a game, a video) or came back out of it.
 signal fullscreen_changed(on: bool)
 
@@ -188,6 +190,8 @@ func _on_line(line: String) -> void:
 					# next Alt+Tab goes to Windows' own switcher.
 					request(["switcher_ack"])
 				switch_key.emit(key)
+			"wifi":
+				wifi_event.emit(d)
 			"ready":
 				hotkey_ok = bool(d.get("hotkey", false))
 		return
