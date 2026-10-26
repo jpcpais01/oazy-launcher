@@ -591,8 +591,31 @@ namespace Oazy
 					return "\"ok\":true";
 				case "ping":
 					return "\"ok\":true";
+				case "webview2":
+					return "\"ok\":true,\"version\":" + Json.Str(WebView2Version());
 			}
 			return "\"ok\":false,\"error\":\"unknown command\"";
+		}
+
+		// The Edge WebView2 runtime Oazy Browser runs on ("" when it isn't installed).
+		static string WebView2Version()
+		{
+			const string Client = @"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+			string[] keys = {
+				@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\" + Client,
+				@"HKEY_LOCAL_MACHINE\SOFTWARE\" + Client,
+				@"HKEY_CURRENT_USER\Software\" + Client,
+			};
+			foreach (string k in keys)
+			{
+				try
+				{
+					string v = Microsoft.Win32.Registry.GetValue(k, "pv", null) as string;
+					if (!string.IsNullOrEmpty(v) && v != "0.0.0.0") return v;
+				}
+				catch { }
+			}
+			return "";
 		}
 
 		// --- Mouse pointers ---------------------------------------------------------

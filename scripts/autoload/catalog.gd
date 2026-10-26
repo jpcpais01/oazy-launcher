@@ -17,6 +17,7 @@ const ICON_PX := 128
 const OAZY_APPS := {
 	"oazy:library": {"name": "Library", "glyph": "grid", "desc": "Your games and apps"},
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
+	"oazy:browser": {"name": "Browser", "glyph": "browser", "desc": "Oazy's web browser"},
 	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
 }
 ## Start menu clutter that ships next to real apps.
@@ -172,6 +173,9 @@ func item(ref: String) -> Dictionary:
 
 
 func launch(ref: String) -> bool:
+	if ref == Browser.REF:
+		note_recent(ref)
+		return Browser.open()
 	if OAZY_APPS.has(ref):
 		App.open_page.emit(StringName(ref.substr(5)))
 		return true
@@ -304,6 +308,8 @@ static func match_score(name: String, needle: String) -> int:
 
 ## Which item a running window belongs to (so it groups with its pin).
 func ref_for_window(w: Dictionary) -> String:
+	if Browser.owns_window(w):
+		return Browser.REF
 	var aumid := str(w.get("aumid", ""))
 	if aumid != "" and not find_app(aumid).is_empty():
 		return "app:" + str(find_app(aumid)["id"])
@@ -392,8 +398,18 @@ func reset_pins() -> void:
 
 func _ensure_default_pins() -> void:
 	if Settings.get_value("pins_initialized"):
+		# Oazy Browser joins the taskbar once, next to Library, for people who
+		# set up their pins before it existed.
+		if not Settings.get_value("browser_pinned") and App.is_windows():
+			var list: Array = Settings.get_value("pins").duplicate()
+			if not list.has(Browser.REF):
+				list.insert(mini(1, list.size()), Browser.REF)
+				Settings.set_value("pins", list)
+				pins_changed.emit()
+			Settings.set_value("browser_pinned", true)
 		return
-	var list: Array = ["oazy:library"]
+	var list: Array = ["oazy:library", Browser.REF]
+	Settings.set_value("browser_pinned", true)
 	for want in DEFAULT_PINS:
 		for a in apps:
 			if str(a["name"]).to_lower() == want:

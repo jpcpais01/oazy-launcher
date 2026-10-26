@@ -172,8 +172,19 @@ func _logic_tests() -> void:
 	Catalog.move_pin("app:Chrome", 2)
 	check(Catalog.pins().find("app:Chrome") == 2, "catalog: move pin")
 	Catalog.reset_pins()
-	check(Catalog.pins().slice(0, 2) == ["oazy:library", "app:Chrome"], "catalog: reset pins")
+	check(Catalog.pins().slice(0, 3) == ["oazy:library", "oazy:browser", "app:Chrome"], "catalog: reset pins")
 	check(Catalog.item("oazy:library")["name"] == "Library", "catalog: Oazy apps")
+
+	# Oazy Browser: an Oazy app whose windows are real ones.
+	check(Catalog.item(Browser.REF)["name"] == "Browser" and Catalog.item(Browser.REF)["kind"] == "oazy", "browser: in the catalog")
+	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe"}) == Browser.REF, "browser: windows group under the browser")
+	check(Catalog.ref_for_window({"exe": "C:\\Games\\OazyBrowser.exe"}) != Browser.REF, "browser: only our own build")
+	check(Catalog.search("brow").size() > 0 and Catalog.search("brow")[0]["ref"] == Browser.REF, "browser: found from Start")
+	for f in Browser.FILES:
+		check(FileAccess.file_exists(Browser.SRC.path_join(f)), "browser: packaged " + f)
+	if App.is_windows():
+		var built := Browser.build()
+		check(built.has("exe"), "browser: compiles on Windows (%s)" % str(built.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
 	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")

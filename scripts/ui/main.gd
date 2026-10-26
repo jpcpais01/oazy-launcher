@@ -123,6 +123,7 @@ func _ready() -> void:
 	Host.desktop_hotkey.connect(show_desktop)
 	Host.switch_key.connect(switcher.handle_key)
 	Host.status_changed.connect(_on_host_status)
+	Browser.runtime_missing.connect(_on_browser_runtime_missing)
 	Host.fullscreen_changed.connect(_on_fullscreen_app)
 	Settings.changed.connect(_on_setting)
 	get_window().files_dropped.connect(_on_files_dropped)
@@ -877,3 +878,15 @@ func _process(_delta: float) -> void:
 	# The desktop never minimises (Win+D, Win+M).
 	if Shell.native and get_window().mode == Window.MODE_MINIMIZED:
 		get_window().mode = Window.MODE_WINDOWED
+
+
+# --- Oazy Browser ------------------------------------------------------------------------------
+
+func _on_browser_runtime_missing() -> void:
+	var d := ConfirmDialog.new()
+	d.title = "Oazy Browser needs WebView2"
+	d.message = "It runs on Microsoft's Edge WebView2 Runtime, the same Chromium engine Windows 11 apps use, and this PC doesn't have it yet. It's a free, quick install from Microsoft."
+	d.confirm_text = "Get WebView2"
+	d.on_confirm = func() -> void:
+		OS.shell_open(Browser.RUNTIME_URL)
+	overlay_layer.add_child(d)
