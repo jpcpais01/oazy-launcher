@@ -7,7 +7,7 @@ signal progress(done: int, total: int, speed: float)
 
 const API := "https://api.github.com/repos/%s/releases?per_page=30"
 const UPDATE_DIR := "user://update"
-const RECHECK_SECONDS := 3 * 3600
+const RECHECK_SECONDS := 3600
 ## How long the restart animation plays before the exe is swapped and Oazy quits.
 const INSTALL_GRACE := 1.6
 
@@ -18,6 +18,9 @@ var newer: Array[Dictionary] = []
 var latest: Dictionary = {}
 var error_text := ""
 var last_checked := 0
+## The state a check started from, so a recheck that finds nothing newer can
+## go back to it (e.g. an update already downloaded and ready).
+var _before_check: StringName = &"idle"
 
 var _check_http: HTTPRequest
 var _dl_http: HTTPRequest
@@ -55,9 +58,12 @@ func can_install() -> bool:
 
 # --- Checking ----------------------------------------------------------------------
 
+## Safe to call at any time short of a download or install in progress: with
+## an update already found (or downloaded) it looks for an even newer one.
 func check() -> void:
-	if state in [&"checking", &"downloading", &"installing", &"ready"]:
+	if state in [&"checking", &"downloading", &"installing"]:
 		return
+	_before_check = state
 	_set_state(&"checking")
 	var err := _check_http.request(API % App.REPO, _headers("application/vnd.github+json"))
 	if err != OK:
@@ -77,7 +83,12 @@ func _on_check_completed(result: int, code: int, _headers_in: PackedStringArray,
 		_fail("GitHub answered with HTTP %d." % code)
 		return
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var had := str(latest.get("version", ""))
 	apply_releases(data, App.version)
+	if _before_check == &"ready" and str(latest.get("version", "")) == had:
+		# Nothing newer than what's already downloaded and verified.
+		_set_state(&"ready")
+		return
 	_set_state(&"available" if not newer.is_empty() else &"current")
 
 

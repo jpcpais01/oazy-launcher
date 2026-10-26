@@ -10,6 +10,8 @@ const GRIP := 6.0
 const APP_TITLES := {&"library": "Library", &"settings": "Settings", &"cleaner": "Cleaner"}
 const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(940, 800), &"cleaner": Vector2(1180, 800)}
 
+## The update version a toast already announced.
+var _announced_update := ""
 var wallpaper: Wallpaper
 var desktop: Desktop
 var layer: WindowLayer
@@ -498,6 +500,9 @@ func show_update() -> void:
 		App.toast("Checking for updates…")
 		return
 	overlay_layer.add_child(UpdateOverlay.new())
+	# Make sure what's offered is still the newest; the screen follows along.
+	if Updater.state in [&"available", &"ready"] and Time.get_unix_time_from_system() - Updater.last_checked > 120:
+		Updater.check()
 
 
 func show_patch_notes() -> void:
@@ -715,7 +720,9 @@ func _on_import_finished(added: int, found: int) -> void:
 
 
 func _on_update_state(state: StringName) -> void:
-	if state == &"available" and loaded:
+	# Rechecks find the same update again; only a new version is news.
+	if state == &"available" and loaded and str(Updater.latest.get("version", "")) != _announced_update:
+		_announced_update = str(Updater.latest.get("version", ""))
 		toasts.show_toast("Oazy %s is available. See what's new" % Updater.latest.get("version", ""), &"update", show_update)
 
 

@@ -645,6 +645,10 @@ func _tray_button(min_size: Vector2, tip: String) -> Button:
 
 
 func _on_update_state(state: StringName) -> void:
+	# A (re)check leaves the button as it was, so it never blinks away
+	# while Oazy looks for an even newer update.
+	if state == &"checking":
+		return
 	var show := state in [&"available", &"downloading", &"ready"]
 	_update_btn.visible = show
 	match state:
