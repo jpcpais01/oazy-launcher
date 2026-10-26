@@ -31,6 +31,7 @@ const DEFAULTS := {
 	"first_scan_done": false,
 	"claude_checked": false,
 	"seen_shell_intro": false,
+	"weather_unit": "auto",
 }
 
 var _values := {}

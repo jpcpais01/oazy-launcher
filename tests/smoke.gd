@@ -192,6 +192,23 @@ func _logic_tests() -> void:
 	check(not Catalog.is_favorite(lib_ref) and not Catalog.favorites().has(lib_ref), "favourites: follow the library's heart")
 	Catalog.set_favorite("app:Chrome", true)
 
+	# Weather: codes, units and reading the forecast offline.
+	check(Weather.kind_for(0) == "clear" and Weather.kind_for(2) == "partly" and Weather.kind_for(63) == "rain" and Weather.kind_for(81) == "rain", "weather: codes to icons")
+	check(Weather.kind_for(73) == "snow" and Weather.kind_for(96) == "storm" and Weather.kind_for(45) == "fog", "weather: more codes")
+	var ws: GDScript = load("res://tests/weather_sample.gd")
+	Weather.set_mock(ws.place(), ws.forecast())
+	check(Weather.temp(18.4) == "18°" and not Weather.fahrenheit(), "weather: celsius in Portugal")
+	Settings.set_value("weather_unit", "f")
+	check(Weather.temp(20.0) == "68°" and Weather.wind(16.09) == "10 mph", "weather: fahrenheit")
+	Settings.set_value("weather_unit", "auto")
+	check(int(Weather.current()["humidity"]) == 64, "weather: current conditions")
+	check(Weather.hours(7, 2).size() == 7 and Weather.days().size() >= 6, "weather: hours and days ahead")
+	Weather.updated -= 3 * 3600
+	var old := Weather.current()
+	check(not old.is_empty() and int(old["humidity"]) == -1, "weather: old data falls back to the hourly forecast")
+	Weather.updated += 3 * 3600
+	check(WeatherIcons.tex("storm", false, 32).get_width() == 32, "weather: icons render")
+
 	# Shell mode: a layer's window is cut to the union of what it shows.
 	check(not Shell.native, "shell: one window in tests")
 	var poly := Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(50, 50, 10, 10)] as Array[Rect2], 2.0)

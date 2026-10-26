@@ -23,7 +23,7 @@ const MARKDOWN := "### Anywhere
 
 ### Taskbar
 - **Scroll** over the sound icon to change the volume, **middle-click** it to mute. Click it for quick settings.
-- **Middle-click** an app to open another window of it. Click the clock for a calendar.
+- **Middle-click** an app to open another window of it. Click the clock for a calendar, or the weather for the forecast.
 
 ### Controller
 - **Start** or **Guide** opens Start, **B** closes it."

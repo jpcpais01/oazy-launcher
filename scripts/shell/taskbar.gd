@@ -2,8 +2,8 @@ class_name Taskbar
 extends Control
 ## The floating glass taskbar. Left: the Start orb and search. Middle: pinned
 ## and running apps, real Windows windows and Oazy's own side by side. Right:
-## updates, sound (quick settings), the clock (calendar) and a sliver that
-## shows the desktop.
+## updates, sound (quick settings), the weather (forecast), the clock
+## (calendar) and a sliver that shows the desktop.
 
 signal start_pressed
 signal search_pressed
@@ -16,6 +16,7 @@ var layer: WindowLayer
 var preview: TaskPreview
 var quick: QuickSettings
 var calendar: CalendarFlyout
+var weather: WeatherFlyout
 var orb: StartOrb
 var _glass: GlassPanel
 var _apps: HBoxContainer
@@ -26,6 +27,9 @@ var _update_btn: FxButton
 var _battery: Label
 var _sound: Button
 var _clock_btn: Button
+var _weather_btn: Button
+var _weather_icon: TextureRect
+var _weather_temp: Label
 var _hover_btn: TaskbarButton
 var _hover_timer: Timer
 var _leave_timer: Timer
@@ -89,15 +93,21 @@ func _ready() -> void:
 	_sound.pressed.connect(func() -> void:
 		if quick:
 			calendar.close()
+			if weather:
+				weather.close()
 			quick.toggle(_sound)
 	)
 	_sound.gui_input.connect(_on_sound_input)
 	row.add_child(_sound)
 
+	row.add_child(_weather_chip())
+
 	_clock_btn = _tray_button(Vector2(104, 50), "")
 	_clock_btn.pressed.connect(func() -> void:
 		if calendar:
 			quick.close()
+			if weather:
+				weather.close()
 			calendar.toggle(_clock_btn)
 	)
 	row.add_child(_clock_btn)
@@ -411,6 +421,7 @@ func _tick() -> void:
 	if int(t["minute"]) == _last_minute:
 		return
 	_last_minute = int(t["minute"])
+	_update_weather()
 	_clock.text = "%02d:%02d" % [t["hour"], t["minute"]]
 	_date.text = Fmt.short_date(t)
 
@@ -433,6 +444,62 @@ func attach_flyouts(q: QuickSettings, c: CalendarFlyout) -> void:
 	)
 	if Host.available:
 		quick.refresh()
+
+
+## The weather chip beside the clock: a colour icon and the temperature.
+func _weather_chip() -> Button:
+	_weather_btn = _tray_button(Vector2(0, 50), "")
+	_weather_btn.visible = false
+	_weather_btn.pressed.connect(func() -> void:
+		if weather:
+			quick.close()
+			calendar.close()
+			weather.toggle(_weather_btn)
+	)
+	var row := Kit.hbox(6)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 8
+	row.offset_right = -10
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_weather_btn.add_child(row)
+	_weather_icon = WeatherIcons.rect("partly", true, 30)
+	_weather_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_weather_icon)
+	_weather_temp = Kit.label("", 16, 700, App.TEXT)
+	_weather_temp.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_weather_temp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_weather_temp)
+	# Keep the button exactly as wide as what it shows.
+	row.minimum_size_changed.connect(func() -> void:
+		_weather_btn.custom_minimum_size.x = row.get_combined_minimum_size().x + 18.0
+	)
+	Weather.changed.connect(_update_weather)
+	return _weather_btn
+
+
+func _update_weather() -> void:
+	if _weather_btn == null:
+		return
+	var now := Weather.current()
+	_weather_btn.visible = not now.is_empty()
+	if now.is_empty():
+		return
+	var code := int(now["code"])
+	_weather_icon.texture = WeatherIcons.tex(Weather.kind_for(code), bool(now["day"]), 30)
+	_weather_temp.text = Weather.temp(now["temp"])
+	var tip := Weather.describe(code)
+	if Weather.city() != "":
+		tip += " in " + Weather.city()
+	if Weather.offline:
+		tip += " (offline)"
+	_weather_btn.tooltip_text = tip
+
+
+## The weather flyout lives in Start's layer with the others.
+func attach_weather(w: WeatherFlyout) -> void:
+	weather = w
+	_update_weather()
 
 
 func _on_volume(level: float, muted: bool) -> void:
