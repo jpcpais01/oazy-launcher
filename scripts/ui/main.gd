@@ -34,6 +34,7 @@ var _fg_at_start := 0
 var _menus: Control
 var quick: QuickSettings
 var calendar: CalendarFlyout
+var weather: WeatherFlyout
 
 
 func _ready() -> void:
@@ -72,6 +73,9 @@ func _ready() -> void:
 	calendar = CalendarFlyout.new()
 	start_layer.add_child(calendar)
 	taskbar.attach_flyouts(quick, calendar)
+	weather = WeatherFlyout.new()
+	start_layer.add_child(weather)
+	taskbar.attach_weather(weather)
 	taskbar.start_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
@@ -83,6 +87,7 @@ func _ready() -> void:
 			preview.hide_preview()
 			quick.close()
 			calendar.close()
+			weather.close()
 	)
 
 	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})

@@ -37,6 +37,8 @@ var self_foreground := true
 var self_hwnd := 0
 ## A fullscreen app is in front: Oazy's taskbar steps aside.
 var fullscreen_app := false
+## Set by set_mock_windows: the real window list stops replacing the mock one.
+var mocked := false
 
 var _pipe: FileAccess
 var _pid := 0
@@ -256,6 +258,8 @@ func refresh() -> void:
 
 
 func _apply_windows(d: Dictionary) -> void:
+	if mocked:
+		return
 	var list: Array[Dictionary] = []
 	var raw: Variant = d.get("windows", [])
 	if raw is Array:
@@ -277,6 +281,7 @@ func _apply_windows(d: Dictionary) -> void:
 
 ## Screenshot runs and non-Windows dev builds show these instead.
 func set_mock_windows(list: Array, fg: int = 0) -> void:
+	mocked = true
 	windows.clear()
 	for w in list:
 		var item: Dictionary = {"hwnd": 0, "title": "", "pid": 0, "exe": "", "name": "", "aumid": "", "class": "", "min": false, "max": false}

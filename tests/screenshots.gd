@@ -78,8 +78,15 @@ func _ready() -> void:
 		{"hwnd": 102, "title": "Claude Code", "exe": "C:/Windows/System32/cmd.exe", "name": "Windows Command Processor"},
 		{"hwnd": 103, "title": "#general - Discord", "exe": "C:/Users/joao/AppData/Local/Discord/app-1.0/Discord.exe", "aumid": "com.squirrel.Discord.Discord", "name": "Discord"},
 	], 0)
+	var ws: GDScript = load("res://tests/weather_sample.gd")
+	Weather.set_mock(ws.place(), ws.forecast())
 	await _wait(2.5)
 	await shot("01-desktop")
+	main.weather.open(main.taskbar._weather_btn)
+	await _wait(0.9)
+	await shot("01b-weather")
+	main.weather.close()
+	await _wait(0.3)
 	main.start.open()
 	await _wait(0.9)
 	await shot("02-start")
