@@ -9,7 +9,7 @@ const SHADER := preload("res://shaders/oasis.gdshader")
 const PALETTES := {
 	"night": [Color("05070d"), Color("1d2b5a"), Color("0d404d"), Color("281a3c"), Color("8fb4ff")],
 	"dawn": [Color("0a1020"), Color("2f3c72"), Color("1b5566"), Color("b5786a"), Color("ffd2b0")],
-	"day": [Color("1c68ad"), Color("3a98dc"), Color("2aa0cf"), Color("7cc3e6"), Color("ffffff")],
+	"day": [Color("1d6ca6"), Color("3c9fd2"), Color("27adbd"), Color("86d2dc"), Color("f4fffc")],
 	"dusk": [Color("0b0919"), Color("3f2a61"), Color("173d55"), Color("b0594f"), Color("ffc0a0")],
 }
 ## Settings id -> [name, wall_style], in the order Settings shows them.
