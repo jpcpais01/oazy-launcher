@@ -76,7 +76,8 @@ func _ready() -> void:
 		waited += 0.25
 	await _wait_for_hero(str(Library.recent()[0]["id"]))
 	main.desktop.refresh()
-	main.desktop.show_mock_stats(0.23, 0.58)
+	Settings.set_value("cpu_temp", true)
+	main.desktop.show_mock_stats(0.23, 0.58, {"cpu_mhz": 4712.0, "cpu_temp": 58.0, "gpu_name": "NVIDIA GeForce RTX 4070", "gpu_mhz": 2475.0, "gpu_temp": 61.0, "gpu_load": 34.0, "mem_total": 34359738368.0, "hz": 165})
 	Host.set_mock_windows([
 		{"hwnd": 101, "title": "Oazy – Google Chrome", "exe": "C:/Program Files/Google/Chrome/Application/chrome.exe", "aumid": "Chrome", "name": "Google Chrome"},
 		{"hwnd": 102, "title": "Claude Code", "exe": "C:/Windows/System32/cmd.exe", "name": "Windows Command Processor"},

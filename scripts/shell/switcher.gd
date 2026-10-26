@@ -14,6 +14,14 @@ extends Control
 ## Windows on top of the layer) are moved and faded along with their cards.
 
 const SCRIM := preload("res://shaders/scrim.gdshader")
+const CARD := preload("res://shaders/switcher_card.gdshader")
+## Card size n places from the selected one.
+const SCALES := [1.0, 0.66, 0.52, 0.44]
+const GAP := 28.0
+const PAD := 12.0
+const HEAD := 50.0
+## Room around a card's pane for its glow.
+const GLOW_PAD := 70.0
 
 ## How long Alt+Tab has to be held before the switcher shows.
 const DELAY := 0.1
@@ -99,6 +107,10 @@ func _ready() -> void:
 	_count = Kit.label("", 13, 600, App.TEXT_MUTE)
 	_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_info.add_child(_count)
+	_info.add_child(Kit.spacer(0, 6))
+	var hint := Kit.label("Tab to move   ·   Delete to close   ·   Esc to cancel", 13, 500, Color(App.TEXT_MUTE, 0.8))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_info.add_child(hint)
 
 
 ## The whole screen while it's showing: clicking anywhere else backs out.
@@ -298,38 +310,92 @@ func _retire(c: Dictionary) -> void:
 func _measure() -> void:
 	var vp := Shell.view_size()
 	var w := clampf(vp.x * 0.3, 340.0, 620.0)
-	w = minf(w, (vp.y * 0.5) / 0.625)
-	_base = Vector2(w, w * 0.625).round()
-	_center = Vector2(vp.x / 2.0, vp.y * 0.43)
+	w = minf(w, (vp.y * 0.52) / 0.66)
+	# The two cards either side of the selected one always fit on screen.
+	var k := (SCALES[0] + SCALES[1]) / 2.0 + (SCALES[1] + SCALES[2]) / 2.0 + SCALES[2] / 2.0
+	w = minf(w, (vp.x / 2.0 - 24.0 - GAP * 2.0) / k)
+	_base = Vector2(w, w * 0.66).round()
+	_center = Vector2(vp.x / 2.0, vp.y * 0.42)
 	_scrim_mat.set_shader_parameter("rect_size", vp)
 	_scrim_mat.set_shader_parameter("focus", _center)
-	_scrim_mat.set_shader_parameter("glow_size", _base * 1.25)
+	_scrim_mat.set_shader_parameter("glow_size", _base * 1.3)
 	_scrim_mat.set_shader_parameter("accent", App.accent)
 	_info.size = Vector2(minf(vp.x - 80.0, _base.x * 1.6), 0)
 	_info.position = Vector2((vp.x - _info.size.x) / 2.0, _center.y + _base.y / 2.0 + 34.0)
+
+
+func _slot() -> Rect2:
+	return Rect2(PAD, HEAD, _base.x - PAD * 2.0, _base.y - HEAD - PAD)
 
 
 func _make_card(i: int) -> Dictionary:
 	var e: Dictionary = _entries[i]
 	var node := Control.new()
 	node.mouse_filter = Control.MOUSE_FILTER_STOP
+	node.size = _base
 	_stage.add_child(node)
-	var frame := Panel.new()
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var style := Kit.box(Color(0.07, 0.09, 0.11, 0.97), 22, Color(1, 1, 1, 0.1), 1)
-	Kit.shadowed(style, Color(0, 0, 0, 0.4), 30, Vector2(0, 14))
-	frame.add_theme_stylebox_override("panel", style)
-	node.add_child(frame)
 	var live: bool = Host.available and e.get("shell") == null and not bool(e["min"])
+	var it: Dictionary = e["item"]
+	var tint := Catalog.icon_color(str(it.get("icon_key", "")))
+	var mat := ShaderMaterial.new()
+	mat.shader = CARD
+	var pane := ColorRect.new()
+	pane.color = Color.WHITE
+	pane.material = mat
+	pane.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pane.position = -Vector2(GLOW_PAD, GLOW_PAD)
+	pane.size = _base + Vector2(GLOW_PAD, GLOW_PAD) * 2.0
+	mat.set_shader_parameter("size", _base)
+	mat.set_shader_parameter("pad", GLOW_PAD)
+	mat.set_shader_parameter("radius", 24.0)
+	mat.set_shader_parameter("hole_radius", 12.0)
+	node.add_child(pane)
+
+	# Header: the app, the window's title and a close button.
+	var icon := AppIcon.new()
+	icon.size = Vector2(24, 24)
+	icon.position = Vector2(PAD + 4.0, (HEAD - 24.0) / 2.0 + 1.0)
+	icon.set_item(it)
+	node.add_child(icon)
+	var title := str(e["title"])
+	if title == "":
+		title = str(it.get("name", ""))
+	var t := Kit.label(title, 15, 600, App.TEXT)
+	t.clip_text = true
+	t.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	t.position = Vector2(PAD + 38.0, 1.0)
+	t.size = Vector2(_base.x - PAD * 2.0 - 38.0 - 40.0, HEAD)
+	node.add_child(t)
+	var x := FxButton.icon_only("close", "Close window", 14, 30)
+	x.focus_mode = Control.FOCUS_NONE
+	x.hover_scale = 1.0
+	x.add_theme_stylebox_override("hover", Kit.box(Color(1.0, 0.36, 0.42, 0.95), 999))
+	x.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.08), 999))
+	x.position = Vector2(_base.x - PAD - 30.0, (HEAD - 30.0) / 2.0 + 1.0)
+	x.size = Vector2(30, 30)
+	node.add_child(x)
+
 	if not live:
 		_fill_icon(node, e)
-	var c := {"node": node, "frame": frame, "style": style, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
-		"live": live, "hwnd": int(e.get("hwnd", 0)), "sent_rect": Rect2i(), "sent_op": -1}
+	var c := {"node": node, "mat": mat, "x_btn": x, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
+		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)), "tint": tint,
+		"src": Vector2.ZERO, "asked": false, "hole": Rect2(), "sent_rect": Rect2i(), "sent_op": -1}
+	x.pressed.connect(func() -> void:
+		var at := _cards.find(c)
+		if is_open and at >= 0:
+			selected = at
+			close_selected()
+	)
 	node.mouse_entered.connect(func() -> void:
+		c["over"] = true
 		var at := _cards.find(c)
 		if is_open and _mouse_moved and at >= 0 and at != selected:
 			_select(at)
+	)
+	node.mouse_exited.connect(func() -> void:
+		if not node.get_global_rect().has_point(node.get_global_mouse_position()):
+			c["over"] = false
 	)
 	node.gui_input.connect(func(ev: InputEvent) -> void:
 		if not (ev is InputEventMouseButton and ev.pressed):
@@ -352,46 +418,71 @@ func _make_card(i: int) -> Dictionary:
 	return c
 
 
-## Oazy's own windows and minimised apps have no live picture: the app's icon
-## on a soft wash of its colour instead.
+## Oazy's own windows and minimised apps have no live picture: the app's icon,
+## large, on a wash of its own colour.
 func _fill_icon(node: Control, e: Dictionary) -> void:
 	var it: Dictionary = e["item"]
+	var slot := _slot()
+	var wash := Panel.new()
+	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wash.position = slot.position
+	wash.size = slot.size
+	var tint := Catalog.icon_color(str(it.get("icon_key", "")))
+	if tint.a <= 0.0:
+		tint = App.accent
+	var box := Kit.box(Color(tint.darkened(0.55), 0.55), 14, Color(tint.lightened(0.2), 0.12), 1)
+	wash.add_theme_stylebox_override("panel", box)
+	node.add_child(wash)
 	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.position = slot.position
+	center.size = slot.size
 	node.add_child(center)
-	var col := Kit.vbox(12)
+	var col := Kit.vbox(14)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.add_child(col)
 	var ic := AppIcon.new()
-	ic.custom_minimum_size = Vector2(1, 1) * roundf(_base.y * 0.3)
+	ic.custom_minimum_size = Vector2(1, 1) * roundf(slot.size.y * 0.42)
 	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ic.set_item(it)
 	col.add_child(ic)
 	var note := "Minimised" if bool(e["min"]) else ("Oazy" if e.get("shell") != null else "")
 	if note != "":
-		var l := Kit.label(note, 14, 600, App.TEXT_MUTE)
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		col.add_child(l)
+		var pill := PanelContainer.new()
+		pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		pill.add_theme_stylebox_override("panel", Kit.box(Color(0, 0, 0, 0.32), 999, Color(1, 1, 1, 0.08), 1, 12, 4))
+		var l := Kit.label(note, 13, 600, App.TEXT_DIM)
+		pill.add_child(l)
+		col.add_child(pill)
+
+
+## How large a card is n places away from the selected one.
+func _scale_at(n: int) -> float:
+	return SCALES[mini(n, SCALES.size() - 1)]
+
+
+## How far a card's centre sits from the middle, n places away: each card
+## clears its neighbour by GAP, however large or small both are.
+func _offset_at(n: int) -> float:
+	var x := 0.0
+	for k in range(1, n + 1):
+		x += _base.x * (_scale_at(k - 1) + _scale_at(k)) / 2.0 + GAP
+	return x
 
 
 ## Where card i belongs: x offset from the middle, y, and scale in z.
 func _target(i: int) -> Vector3:
-	var d := float(i - selected)
-	var a := absf(d)
-	var near := _base.x * 0.5 + _base.x * 0.31 + 36.0
-	var x := a * near if a <= 1.0 else near + (a - 1.0) * (_base.x * 0.52 + 26.0)
-	var sc := lerpf(1.0, 0.62, a) if a <= 1.0 else maxf(0.42, 0.62 - (a - 1.0) * 0.1)
-	var y := 0.0 if a < 0.5 else _base.y * (1.0 - sc) * 0.08
-	return Vector3(signf(d) * x, y, sc)
+	var d := i - selected
+	var n := absi(d)
+	var sc := _scale_at(n)
+	return Vector3(signf(d) * _offset_at(n), _base.y * (1.0 - sc) * 0.06, sc)
 
 
 func _target_alpha(i: int) -> float:
-	var a := absf(i - selected)
-	if a <= 2.0:
-		return 1.0
-	return clampf(1.0 - (a - 2.0) * 0.9, 0.0, 1.0)
+	var n := absi(i - selected)
+	return 1.0 if n <= 2 else 0.0
 
 
 func _select(i: int, animate: bool = true) -> void:
@@ -489,9 +580,11 @@ func _layout(delta: float) -> void:
 		c["sc"] = lerpf(c["sc"], t.z, k)
 		c["al"] = lerpf(c["al"], ta, ka)
 		c["hot"] = lerpf(c["hot"], hot, k)
+		c["hover"] = lerpf(c["hover"], 1.0 if bool(c["over"]) else 0.0, k)
 		if absf(c["x"] - t.x) > 0.3 or absf(c["sc"] - t.z) > 0.002 or absf(c["al"] - ta) > 0.004 or absf(c["hot"] - hot) > 0.01:
 			settled = false
 		_place(c)
+	_sync_holes()
 	if _closing and _fade < 0.02 and settled:
 		_finish_close()
 
@@ -501,35 +594,66 @@ func _place(c: Dictionary) -> void:
 	var sc: float = c["sc"]
 	var al := clampf(c["al"], 0.0, 1.0)
 	var hot: float = c["hot"]
-	var sz := (_base * sc).round()
-	node.size = sz
-	node.position = (_center + Vector2(c["x"], c["y"]) - sz / 2.0).round()
-	# Cards stay solid; the ones off to the side sink into the dusk instead.
-	var v := lerpf(0.62, 1.0, hot)
-	node.modulate = Color(v, v, v, al)
+	node.scale = Vector2(sc, sc)
+	node.position = (_center + Vector2(c["x"], c["y"]) - _base * sc / 2.0).round()
 	node.visible = al > 0.01
-	var s: StyleBoxFlat = c["style"]
-	s.set_corner_radius_all(int(roundf(lerpf(16.0, 26.0, sc))))
-	s.border_color = Color(1, 1, 1, 0.1).lerp(Color(App.accent.lightened(0.3), 0.95), hot)
-	s.set_border_width_all(1 + int(roundf(hot)))
-	s.shadow_color = Color(0, 0.01, 0.02, 0.45).lerp(Color(App.accent, 0.42), hot)
-	s.shadow_size = int(lerpf(26.0, 46.0, hot) * sc)
-	s.shadow_offset = Vector2(0, lerpf(14.0, 0.0, hot) * sc)
-	s.bg_color = Color(0.07, 0.09, 0.11, 0.97).lerp(Color(App.accent.darkened(0.62), 0.97), hot * 0.55)
+	# Cards stay solid; the ones off to the side sink into the dusk instead.
+	var v := lerpf(0.6, 1.0, hot)
+	node.modulate = Color(v, v, v, al)
+	var x: Control = c["x_btn"]
+	x.modulate.a = maxf(hot, float(c["hover"]))
+	x.mouse_filter = Control.MOUSE_FILTER_STOP if x.modulate.a > 0.5 else Control.MOUSE_FILTER_IGNORE
+	var mat: ShaderMaterial = c["mat"]
+	var tint: Color = c["tint"]
+	var fill := Color(0.075, 0.09, 0.11, 0.98)
+	if tint.a > 0.0:
+		fill = fill.lerp(Color(tint.darkened(0.75), 0.98), 0.35)
+	mat.set_shader_parameter("fill", fill.lerp(Color(App.accent.darkened(0.66), 0.98), hot * 0.6))
+	mat.set_shader_parameter("rim", Color(1, 1, 1, 0.1).lerp(Color(App.accent.lightened(0.35), 0.95), hot))
+	mat.set_shader_parameter("rim_w", lerpf(1.0, 2.0, hot) / sc)
+	mat.set_shader_parameter("glow", Color(0, 0.01, 0.02, 0.5).lerp(Color(App.accent, 0.5), hot))
+	mat.set_shader_parameter("glow_size", lerpf(26.0, 44.0, hot))
+	mat.set_shader_parameter("glow_drop", lerpf(14.0, 0.0, hot))
 	if bool(c["live"]):
-		_place_thumb(c, al * lerpf(0.62, 1.0, hot))
+		_place_thumb(c, al)
 
 
+## The live preview: Windows draws it under this layer's pixels, so the card
+## and the backdrop leave a clear, rounded window exactly where it lands.
 func _place_thumb(c: Dictionary, opacity: float) -> void:
 	if not Host.available:
 		return
+	var dest := Shell.hwnd_of(self)
+	if Shell.native and dest == 0:
+		return
 	var node: Control = c["node"]
-	var inset := roundf(9.0 * float(c["sc"]))
+	var hwnd := int(c["hwnd"])
+	var slot := _slot()
 	var xf := get_viewport().get_final_transform() * node.get_global_transform_with_canvas()
-	var span := xf.basis_xform(node.size - Vector2(inset, inset) * 2.0)
-	var origin := xf * Vector2(inset, inset)
-	var r := Rect2i(Vector2i(origin.round()), Vector2i(span.round()).max(Vector2i.ONE))
-	var op := int(roundf(clampf(opacity, 0.0, 1.0) * 255.0))
+	if not bool(c["asked"]):
+		# Learn the window's shape first (hidden), then fit the preview to it.
+		c["asked"] = true
+		var r0 := Rect2i(Vector2i((xf * slot.position).round()), Vector2i(xf.basis_xform(slot.size).round()).max(Vector2i.ONE))
+		Host.thumb(hwnd, r0, func(d: Dictionary) -> void:
+			if not d.get("ok", false):
+				return
+			var src := Vector2(float(d.get("src_w", 0)), float(d.get("src_h", 0)))
+			if src.x <= 0.0 or src.y <= 0.0:
+				src = slot.size
+			var k := minf(slot.size.x / src.x, slot.size.y / src.y)
+			var fit := (src * k).floor()
+			c["hole"] = Rect2(slot.position + ((slot.size - fit) / 2.0).floor(), fit)
+			(c["mat"] as ShaderMaterial).set_shader_parameter("hole", Vector4(c["hole"].position.x, c["hole"].position.y, fit.x, fit.y))
+			c["sent_op"] = 0
+		, dest, 0)
+		return
+	var hole: Rect2 = c["hole"]
+	if not hole.has_area():
+		return
+	# A pixel larger than the clear window, so no seam shows at its edges.
+	var r := Rect2i(Vector2i((xf * hole.position).floor()), Vector2i(xf.basis_xform(hole.size).ceil()))
+	r = r.grow(1)
+	var op := int(roundf(clampf(opacity * 1.4 - 0.2, 0.0, 1.0) * 255.0))
 	if op < 4:
 		op = 0
 	if r == c["sent_rect"] and op == int(c["sent_op"]):
@@ -538,7 +662,29 @@ func _place_thumb(c: Dictionary, opacity: float) -> void:
 		return
 	c["sent_rect"] = r
 	c["sent_op"] = op
-	Host.thumb(int(c["hwnd"]), r, Callable(), Shell.hwnd_of(self), op)
+	Host.thumb(hwnd, r, Callable(), dest, op)
+
+
+## Clear spots in the backdrop under every visible preview.
+func _sync_holes() -> void:
+	var holes := PackedVector4Array()
+	var radii := PackedFloat32Array()
+	for c in _cards:
+		var hole: Rect2 = c["hole"]
+		var node: Control = c["node"]
+		if holes.size() >= 8 or not hole.has_area() or not node.visible:
+			continue
+		var sc: float = c["sc"]
+		var p := node.position + hole.position * sc
+		holes.append(Vector4(p.x, p.y, hole.size.x * sc, hole.size.y * sc))
+		radii.append(12.0 * sc)
+	var n := holes.size()
+	while holes.size() < 8:
+		holes.append(Vector4.ZERO)
+		radii.append(0.0)
+	_scrim_mat.set_shader_parameter("holes", holes)
+	_scrim_mat.set_shader_parameter("radii", radii)
+	_scrim_mat.set_shader_parameter("hole_count", n)
 
 
 func _clear_thumbs() -> void:

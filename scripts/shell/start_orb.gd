@@ -12,7 +12,6 @@ const STIRRED := {"swirl": -1.0, "waves": 0.9}
 
 var open := false: set = set_open
 var _halo: Panel
-var _icon: Control
 var _orb: UpdateOrb
 var _look: Tween
 var _hot := false
@@ -30,10 +29,9 @@ func _ready() -> void:
 	_halo.size = Vector2(SIZE - 8.0, SIZE - 8.0)
 	_halo.modulate.a = 0.0
 	add_child(_halo)
-	_icon = OazyMark.icon(SIZE, 0.9, CALM["swirl"])
-	_icon.size = Vector2(SIZE, SIZE)
-	add_child(_icon)
-	_orb = _icon.get_meta("orb")
+	_orb = UpdateOrb.icon(SIZE, 0.9, CALM["swirl"])
+	_orb.size = Vector2(SIZE, SIZE)
+	add_child(_orb)
 	mouse_entered.connect(_set_hot.bind(true))
 	mouse_exited.connect(_set_hot.bind(false))
 	App.accent_changed.connect(func(_c: Color) -> void: _restyle())

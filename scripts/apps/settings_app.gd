@@ -63,6 +63,7 @@ func _ready() -> void:
 	_hotkey_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hk.add_child(_hotkey_status)
 	_toggle_row(you, "Minimise Oazy when a game starts", "Off keeps your desktop right behind the game.", "minimize_for_games")
+	_toggle_row(you, "Show CPU temperature", "On the desktop's This PC card. Comes from HWiNFO or LibreHardwareMonitor while one is running, otherwise from your motherboard's sensor (less exact).", "cpu_temp")
 
 	var look := _section("Appearance", "palette")
 	_swatch_row(look)
@@ -131,7 +132,7 @@ func _build_updates() -> void:
 	_col.add_child(card)
 	var row := Kit.hbox(20)
 	card.add_child(row)
-	row.add_child(OazyMark.icon(64))
+	row.add_child(UpdateOrb.icon(64))
 	var text := Kit.vbox(4)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.alignment = BoxContainer.ALIGNMENT_CENTER

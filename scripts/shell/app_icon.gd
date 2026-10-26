@@ -12,6 +12,7 @@ var _tex: TextureRect
 var _glyph: TextureRect
 var _letter: Label
 var _cover: CoverArt
+var _globe: UpdateOrb
 var _key := ""
 
 
@@ -78,6 +79,8 @@ func refresh() -> void:
 	_plate.visible = false
 	if _cover:
 		_cover.visible = false
+	if _globe:
+		_globe.visible = false
 	var kind := str(item.get("kind", ""))
 	var name := str(item.get("name", "?"))
 	_key = str(item.get("icon_key", ""))
@@ -89,6 +92,15 @@ func refresh() -> void:
 			add_child(_cover)
 		_cover.visible = true
 		_cover.setup(str(item.get("entry_id", "")), _radius())
+		return
+	if str(item.get("ref", "")) == Browser.REF:
+		# The Browser is a little glass globe of sky-blue water.
+		if _globe == null:
+			_globe = UpdateOrb.icon(16.0, 0.92, 0.0, true)
+			_globe.custom_minimum_size = Vector2.ZERO
+			_globe.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			add_child(_globe)
+		_globe.visible = true
 		return
 	if kind == "oazy":
 		_show_plate(App.accent.lightened(0.05), App.accent.darkened(0.4))
