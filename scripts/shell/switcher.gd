@@ -1,9 +1,9 @@
 class_name Switcher
 extends Control
-## Oazy's Alt+Tab. The screen sinks into a dim dusk and your open windows
-## (Oazy's own and other apps') line up as a carousel of live previews: the
-## selected one large in the middle on a pool of accent light, its neighbours
-## smaller and fading towards the edges. Tab and Shift+Tab or the arrow keys
+## Oazy's Alt+Tab. The screen sinks into a quiet dusk and your open windows
+## (Oazy's own and other apps') line up as a carousel of pictures: the
+## selected one large in the middle with a thin ring, its neighbours smaller
+## and dimmer either side, and the window's name underneath. Tab and Shift+Tab or the arrow keys
 ## glide between them, Delete closes one, Esc backs out and letting go of Alt
 ## switches. The mouse works too: hover, click, scroll, or click away.
 ##
@@ -20,19 +20,22 @@ const ROUNDED := preload("res://shaders/rounded_tex.gdshader")
 ## How often the selected window's picture refreshes, in seconds.
 const REFRESH := 0.35
 ## Card size n places from the selected one.
-const SCALES := [1.0, 0.66, 0.52, 0.44]
-const GAP := 28.0
-const PAD := 12.0
-const HEAD := 50.0
-## Room around a card's pane for its glow.
-const GLOW_PAD := 70.0
+const SCALES := [1.0, 0.7, 0.56, 0.48]
+const GAP := 36.0
+## Inset of the picture inside its card.
+const PAD := 6.0
+const RADIUS := 18.0
+## The app's badge, sitting on each card's bottom edge.
+const BADGE := 36.0
+## Room around a card's pane for its shadow and ring.
+const SHADOW_PAD := 60.0
 
 ## How long Alt+Tab has to be held before the switcher shows.
 const DELAY := 0.1
 const MAX_WINDOWS := 40
 const MAX_DOTS := 14
 ## How quickly cards settle (higher is snappier).
-const SPEED := 15.0
+const SPEED := 18.0
 
 var main: Node
 var is_open := false
@@ -86,35 +89,28 @@ func _ready() -> void:
 	_stage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_stage)
 
-	_info = Kit.vbox(6)
+	_info = Kit.vbox(4)
 	_info.alignment = BoxContainer.ALIGNMENT_BEGIN
 	_info.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_info)
-	_title = Kit.label("", 28, 700, Color.WHITE, true)
+	_title = Kit.label("", 21, 600, App.TEXT)
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.clip_text = true
 	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
-	_title.add_theme_constant_override("shadow_offset_y", 2)
-	_title.add_theme_constant_override("shadow_outline_size", 8)
 	_info.add_child(_title)
-	_sub = Kit.label("", 15, 500, App.TEXT_DIM)
+	_sub = Kit.label("", 14, 500, App.TEXT_MUTE)
 	_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_info.add_child(_sub)
-	_info.add_child(Kit.spacer(0, 10))
+	_info.add_child(Kit.spacer(0, 12))
 	var dots_row := CenterContainer.new()
 	dots_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_info.add_child(dots_row)
-	_dots = Kit.hbox(7)
+	_dots = Kit.hbox(6)
 	_dots.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dots_row.add_child(_dots)
 	_count = Kit.label("", 13, 600, App.TEXT_MUTE)
 	_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_info.add_child(_count)
-	_info.add_child(Kit.spacer(0, 6))
-	var hint := Kit.label("Tab to move   ·   Delete to close   ·   Esc to cancel", 13, 500, Color(App.TEXT_MUTE, 0.8))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_info.add_child(hint)
 
 
 ## The whole screen while it's showing: clicking anywhere else backs out.
@@ -261,14 +257,14 @@ func _show() -> void:
 	for i in _entries.size():
 		_cards.append(_make_card(i))
 	_select(selected, false)
-	# Cards bloom out from the middle, the far ones a beat later.
+	# Cards settle in from slightly smaller and closer together.
 	for i in _cards.size():
 		var c: Dictionary = _cards[i]
 		var t := _target(i)
-		c["x"] = t.x * 0.55
-		c["y"] = 34.0
-		c["sc"] = t.z * 0.78
-		c["al"] = -0.14 * absf(i - selected)
+		c["x"] = t.x * 0.92
+		c["y"] = 10.0
+		c["sc"] = t.z * 0.95
+		c["al"] = -0.08 * absf(i - selected)
 	_fade = 0.0
 	visible = true
 	set_process(true)
@@ -309,7 +305,7 @@ func _retire(c: Dictionary) -> void:
 	var node: Control = c["node"]
 	var t := node.create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	node.pivot_offset = node.size / 2.0
-	t.tween_property(node, "scale", Vector2.ONE * 0.6, 0.25)
+	t.tween_property(node, "scale", node.scale * 0.85, 0.2)
 	t.tween_property(node, "modulate:a", 0.0, 0.2)
 	t.chain().tween_callback(node.queue_free)
 
@@ -318,23 +314,23 @@ func _retire(c: Dictionary) -> void:
 
 func _measure() -> void:
 	var vp := Shell.view_size()
-	var w := clampf(vp.x * 0.3, 340.0, 620.0)
-	w = minf(w, (vp.y * 0.52) / 0.66)
+	var w := clampf(vp.x * 0.3, 340.0, 640.0)
+	w = minf(w, (vp.y * 0.5) / 0.625)
 	# The two cards either side of the selected one always fit on screen.
 	var k := (SCALES[0] + SCALES[1]) / 2.0 + (SCALES[1] + SCALES[2]) / 2.0 + SCALES[2] / 2.0
-	w = minf(w, (vp.x / 2.0 - 24.0 - GAP * 2.0) / k)
-	_base = Vector2(w, w * 0.66).round()
-	_center = Vector2(vp.x / 2.0, vp.y * 0.42)
-	_scrim_mat.set_shader_parameter("rect_size", vp)
-	_scrim_mat.set_shader_parameter("focus", _center)
-	_scrim_mat.set_shader_parameter("glow_size", _base * 1.3)
-	_scrim_mat.set_shader_parameter("accent", App.accent)
-	_info.size = Vector2(minf(vp.x - 80.0, _base.x * 1.6), 0)
-	_info.position = Vector2((vp.x - _info.size.x) / 2.0, _center.y + _base.y / 2.0 + 34.0)
+	w = minf(w, (vp.x / 2.0 - 32.0 - GAP * 2.0) / k)
+	_base = Vector2(w, w * 0.625).round()
+	_center = Vector2(vp.x / 2.0, vp.y * 0.44)
+	_info.size = Vector2(minf(vp.x - 80.0, _base.x * 1.4), 0)
+	_info.position = Vector2((vp.x - _info.size.x) / 2.0, _info_y())
+
+
+func _info_y() -> float:
+	return _center.y + _base.y / 2.0 + BADGE / 2.0 + 22.0
 
 
 func _slot() -> Rect2:
-	return Rect2(PAD, HEAD, _base.x - PAD * 2.0, _base.y - HEAD - PAD)
+	return Rect2(PAD, PAD, _base.x - PAD * 2.0, _base.y - PAD * 2.0)
 
 
 func _make_card(i: int) -> Dictionary:
@@ -352,38 +348,16 @@ func _make_card(i: int) -> Dictionary:
 	pane.color = Color.WHITE
 	pane.material = mat
 	pane.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pane.position = -Vector2(GLOW_PAD, GLOW_PAD)
-	pane.size = _base + Vector2(GLOW_PAD, GLOW_PAD) * 2.0
+	pane.position = -Vector2(SHADOW_PAD, SHADOW_PAD)
+	pane.size = _base + Vector2(SHADOW_PAD, SHADOW_PAD) * 2.0
 	mat.set_shader_parameter("size", _base)
-	mat.set_shader_parameter("pad", GLOW_PAD)
-	mat.set_shader_parameter("radius", 24.0)
-	mat.set_shader_parameter("hole_radius", 12.0)
+	mat.set_shader_parameter("pad", SHADOW_PAD)
+	mat.set_shader_parameter("radius", RADIUS)
+	var fill := Color(0.075, 0.085, 0.1)
+	if tint.a > 0.0:
+		fill = fill.lerp(tint.darkened(0.7), 0.25)
+	mat.set_shader_parameter("fill", fill)
 	node.add_child(pane)
-
-	# Header: the app, the window's title and a close button.
-	var icon := AppIcon.new()
-	icon.size = Vector2(24, 24)
-	icon.position = Vector2(PAD + 4.0, (HEAD - 24.0) / 2.0 + 1.0)
-	icon.set_item(it)
-	node.add_child(icon)
-	var title := str(e["title"])
-	if title == "":
-		title = str(it.get("name", ""))
-	var t := Kit.label(title, 15, 600, App.TEXT)
-	t.clip_text = true
-	t.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	t.position = Vector2(PAD + 38.0, 1.0)
-	t.size = Vector2(_base.x - PAD * 2.0 - 38.0 - 40.0, HEAD)
-	node.add_child(t)
-	var x := FxButton.icon_only("close", "Close window", 14, 30)
-	x.focus_mode = Control.FOCUS_NONE
-	x.hover_scale = 1.0
-	x.add_theme_stylebox_override("hover", Kit.box(Color(1.0, 0.36, 0.42, 0.95), 999))
-	x.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.08), 999))
-	x.position = Vector2(_base.x - PAD - 30.0, (HEAD - 30.0) / 2.0 + 1.0)
-	x.size = Vector2(30, 30)
-	node.add_child(x)
 
 	var icon_box := _fill_icon(node, e)
 	var shot := TextureRect.new()
@@ -392,12 +366,38 @@ func _make_card(i: int) -> Dictionary:
 	shot.stretch_mode = TextureRect.STRETCH_SCALE
 	var shot_mat := ShaderMaterial.new()
 	shot_mat.shader = ROUNDED
+	shot_mat.set_shader_parameter("radius", RADIUS - PAD)
 	shot.material = shot_mat
 	shot.visible = false
 	node.add_child(shot)
+
+	# The app's icon, sitting on the card's bottom edge once there's a picture.
+	var badge := Panel.new()
+	badge.visible = false
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_theme_stylebox_override("panel", Kit.box(Color(0.06, 0.07, 0.085), 11, Color(1, 1, 1, 0.08), 1))
+	badge.size = Vector2(BADGE, BADGE)
+	badge.position = Vector2((_base.x - BADGE) / 2.0, _base.y - BADGE / 2.0)
+	node.add_child(badge)
+	var icon := AppIcon.new()
+	icon.size = Vector2(BADGE - 10.0, BADGE - 10.0)
+	icon.position = Vector2(5, 5)
+	icon.set_item(it)
+	badge.add_child(icon)
+
+	# A small close button in the corner, on the selected or hovered card.
+	var x := FxButton.icon_only("close", "Close window", 12, 26)
+	x.focus_mode = Control.FOCUS_NONE
+	x.hover_scale = 1.0
+	x.add_theme_stylebox_override("hover", Kit.box(Color(0.86, 0.3, 0.34, 0.95), 999))
+	x.add_theme_stylebox_override("normal", Kit.box(Color(0.04, 0.05, 0.06, 0.78), 999, Color(1, 1, 1, 0.1), 1))
+	x.position = Vector2(_base.x - 26.0 - 12.0, 12.0)
+	x.size = Vector2(26, 26)
+	node.add_child(x)
+
 	var c := {"node": node, "mat": mat, "x_btn": x, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
-		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)), "tint": tint,
-		"shot": shot, "icon_box": icon_box, "busy": false, "since": 0.0, "failed": false}
+		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)),
+		"shot": shot, "icon_box": icon_box, "badge": badge, "busy": false, "since": 0.0, "failed": false}
 	var cached: Texture2D = Host.captures.get(c["hwnd"]) if e.get("shell") == null else null
 	if cached:
 		_set_shot(c, cached, false)
@@ -439,43 +439,28 @@ func _make_card(i: int) -> Dictionary:
 
 
 ## Oazy's own windows and minimised apps have no live picture: the app's icon,
-## large, on a wash of its own colour.
+## large, on the card's own quiet colour.
 func _fill_icon(node: Control, e: Dictionary) -> Control:
 	var it: Dictionary = e["item"]
 	var slot := _slot()
-	var wash := Panel.new()
-	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wash.position = slot.position
-	wash.size = slot.size
-	var tint := Catalog.icon_color(str(it.get("icon_key", "")))
-	if tint.a <= 0.0:
-		tint = App.accent
-	var box := Kit.box(Color(tint.darkened(0.55), 0.55), 14, Color(tint.lightened(0.2), 0.12), 1)
-	wash.add_theme_stylebox_override("panel", box)
-	node.add_child(wash)
 	var center := CenterContainer.new()
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.position = slot.position
 	center.size = slot.size
 	node.add_child(center)
-	var col := Kit.vbox(14)
+	var col := Kit.vbox(12)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.add_child(col)
 	var ic := AppIcon.new()
-	ic.custom_minimum_size = Vector2(1, 1) * roundf(slot.size.y * 0.42)
+	ic.custom_minimum_size = Vector2(1, 1) * roundf(slot.size.y * 0.34)
 	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ic.set_item(it)
 	col.add_child(ic)
-	var note := "Minimised" if bool(e["min"]) else ("Oazy" if e.get("shell") != null else "")
-	if note != "":
-		var pill := PanelContainer.new()
-		pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		pill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		pill.add_theme_stylebox_override("panel", Kit.box(Color(0, 0, 0, 0.32), 999, Color(1, 1, 1, 0.08), 1, 12, 4))
-		var l := Kit.label(note, 13, 600, App.TEXT_DIM)
-		pill.add_child(l)
-		col.add_child(pill)
+	if bool(e["min"]):
+		var l := Kit.label("Minimised", 13, 500, App.TEXT_MUTE)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(l)
 	return center
 
 
@@ -498,7 +483,7 @@ func _target(i: int) -> Vector3:
 	var d := i - selected
 	var n := absi(d)
 	var sc := _scale_at(n)
-	return Vector3(signf(d) * _offset_at(n), _base.y * (1.0 - sc) * 0.06, sc)
+	return Vector3(signf(d) * _offset_at(n), 0.0, sc)
 
 
 func _target_alpha(i: int) -> float:
@@ -550,23 +535,23 @@ func _sync_info(animate: bool) -> void:
 		for k in n:
 			var dot: Panel = _dots.get_child(k)
 			var on := k == selected
-			var want := Vector2(22 if on else 6, 6)
-			var col := App.accent.lightened(0.2) if on else Color(1, 1, 1, 0.28)
+			var want := Vector2(16 if on else 5, 5)
+			var col := Color(1, 1, 1, 0.85) if on else Color(1, 1, 1, 0.22)
 			if animate:
-				var t := dot.create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-				t.tween_property(dot, "custom_minimum_size", want, 0.22)
-				t.tween_property(dot, "self_modulate", col, 0.22)
+				var t := dot.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+				t.tween_property(dot, "custom_minimum_size", want, 0.2)
+				t.tween_property(dot, "self_modulate", col, 0.2)
 			else:
 				dot.custom_minimum_size = want
 				dot.self_modulate = col
 	if animate:
 		if _info_tween and _info_tween.is_valid():
 			_info_tween.kill()
-		_title.modulate.a = 0.35
-		_sub.modulate.a = 0.35
-		_info_tween = create_tween().set_parallel(true)
-		_info_tween.tween_property(_title, "modulate:a", 1.0, 0.18)
-		_info_tween.tween_property(_sub, "modulate:a", 1.0, 0.22)
+		_title.modulate.a = 0.4
+		_sub.modulate.a = 0.4
+		_info_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		_info_tween.tween_property(_title, "modulate:a", 1.0, 0.16)
+		_info_tween.tween_property(_sub, "modulate:a", 1.0, 0.2)
 
 
 # --- Motion ------------------------------------------------------------------------------
@@ -586,7 +571,7 @@ func _layout(delta: float) -> void:
 	_fade = lerpf(_fade, 0.0 if _closing else 1.0, 1.0 - exp(-delta * (22.0 if _closing else 14.0)))
 	_scrim_mat.set_shader_parameter("amount", _fade)
 	_info.modulate.a = _fade
-	_info.position.y = _center.y + _base.y / 2.0 + 34.0 + (1.0 - _fade) * 14.0
+	_info.position.y = _info_y() + (1.0 - _fade) * 8.0
 	var settled := true
 	for i in _cards.size():
 		var c: Dictionary = _cards[i]
@@ -594,7 +579,7 @@ func _layout(delta: float) -> void:
 		var ta := _target_alpha(i)
 		var hot := 1.0 if i == selected else 0.0
 		if _closing:
-			t.z *= 1.05 if i == selected else 0.9
+			t.z *= 1.02 if i == selected else 0.95
 			ta = 0.0
 		c["x"] = lerpf(c["x"], t.x, k)
 		c["y"] = lerpf(c["y"], t.y, k)
@@ -619,22 +604,15 @@ func _place(c: Dictionary) -> void:
 	node.position = (_center + Vector2(c["x"], c["y"]) - _base * sc / 2.0).round()
 	node.visible = al > 0.01
 	# Cards stay solid; the ones off to the side sink into the dusk instead.
-	var v := lerpf(0.6, 1.0, hot)
+	var v := lerpf(0.5, 1.0, hot)
 	node.modulate = Color(v, v, v, al)
 	var x: Control = c["x_btn"]
 	x.modulate.a = maxf(hot, float(c["hover"]))
 	x.mouse_filter = Control.MOUSE_FILTER_STOP if x.modulate.a > 0.5 else Control.MOUSE_FILTER_IGNORE
 	var mat: ShaderMaterial = c["mat"]
-	var tint: Color = c["tint"]
-	var fill := Color(0.075, 0.09, 0.11, 0.98)
-	if tint.a > 0.0:
-		fill = fill.lerp(Color(tint.darkened(0.75), 0.98), 0.35)
-	mat.set_shader_parameter("fill", fill.lerp(Color(App.accent.darkened(0.66), 0.98), hot * 0.6))
-	mat.set_shader_parameter("rim", Color(1, 1, 1, 0.1).lerp(Color(App.accent.lightened(0.35), 0.95), hot))
-	mat.set_shader_parameter("rim_w", lerpf(1.0, 2.0, hot) / sc)
-	mat.set_shader_parameter("glow", Color(0, 0.01, 0.02, 0.5).lerp(Color(App.accent, 0.5), hot))
-	mat.set_shader_parameter("glow_size", lerpf(26.0, 44.0, hot))
-	mat.set_shader_parameter("glow_drop", lerpf(14.0, 0.0, hot))
+	mat.set_shader_parameter("ring", Color(1, 1, 1, 0.75 * hot))
+	mat.set_shader_parameter("ring_w", 1.5 / sc)
+	mat.set_shader_parameter("ring_gap", 5.0 / sc)
 	if bool(c["live"]) and not _closing and _shown:
 		# Everyone gets a picture once; the selected one keeps it fresh.
 		var shot: TextureRect = c["shot"]
@@ -673,6 +651,7 @@ func _set_shot(c: Dictionary, tex: Texture2D, animate: bool) -> void:
 	var first := not shot.visible
 	shot.texture = tex
 	shot.visible = true
+	(c["badge"] as Control).visible = true
 	var icon_box: Control = c["icon_box"]
 	if first and animate:
 		shot.modulate.a = 0.0
