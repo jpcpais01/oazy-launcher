@@ -49,6 +49,7 @@ var _lens_x := 0.0
 var _lens_v := 0.0
 var _docked := false
 var _dock_tween: Tween
+var _desk_hit: Button
 
 
 func _ready() -> void:
@@ -215,23 +216,52 @@ func _search_pill() -> Control:
 	return b
 
 
+## The pill at the far right that shows the desktop. What you see is a slim
+## pill at the end of the bar, but the button behind it runs out to the screen's
+## bottom-right corner, so throwing the mouse into the corner and clicking works.
 func _desktop_sliver() -> Control:
+	var pill := Panel.new()
+	pill.custom_minimum_size = Vector2(18, 34)
+	pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# A faint line, like the end of the bar, so it can be found.
+	var line := Kit.box(Color(0, 0, 0, 0), 9)
+	line.border_color = Color(1, 1, 1, 0.14)
+	line.border_width_left = 1
+	var hover := Kit.box(Color(1, 1, 1, 0.16), 9, Color(1, 1, 1, 0.2), 1)
+	var down := Kit.box(Color(1, 1, 1, 0.24), 9)
+	pill.add_theme_stylebox_override("panel", line)
+
 	var s := Button.new()
-	s.custom_minimum_size = Vector2(10, 32)
-	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	s.flat = true
 	s.focus_mode = Control.FOCUS_NONE
 	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	s.tooltip_text = "Show desktop (Ctrl + Alt + D)"
-	# A faint line, like the end of the bar, so it can be found.
-	var line := Kit.box(Color(0, 0, 0, 0), 6)
-	line.border_color = Color(1, 1, 1, 0.14)
-	line.border_width_left = 1
-	line.content_margin_left = 0
-	s.add_theme_stylebox_override("normal", line)
-	s.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.16), 6, Color(1, 1, 1, 0.2), 1))
-	s.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.24), 6))
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		s.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var restyle := func() -> void:
+		var box := line
+		if s.button_pressed or (s.is_hovered() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
+			box = down
+		elif s.is_hovered():
+			box = hover
+		pill.add_theme_stylebox_override("panel", box)
+	s.mouse_entered.connect(restyle)
+	s.mouse_exited.connect(func() -> void: pill.add_theme_stylebox_override("panel", line))
+	s.button_down.connect(func() -> void: pill.add_theme_stylebox_override("panel", down))
+	s.button_up.connect(restyle)
 	s.pressed.connect(func() -> void: main.show_desktop())
-	return s
+	add_child(s)
+	_desk_hit = s
+	# Wherever the pill lands, the button covers it and everything to the
+	# right of it and below the top of the bar, down to the screen's corner.
+	var place := func() -> void:
+		var x := pill.get_global_rect().position.x - get_global_rect().position.x - 4.0
+		s.position = Vector2(x, 0)
+		s.size = Vector2(size.x + MARGIN - x, size.y + MARGIN)
+	pill.item_rect_changed.connect(place)
+	resized.connect(place)
+	return pill
 
 
 # --- Groups -------------------------------------------------------------------------
@@ -402,7 +432,10 @@ func is_docked() -> bool:
 
 ## The part of the screen the taskbar's layer keeps (see Shell).
 func shell_shape() -> Array[Rect2]:
-	return [_glass.shadow_rect()]
+	var shape: Array[Rect2] = [_glass.shadow_rect()]
+	if _desk_hit:
+		shape.append(_desk_hit.get_global_rect())
+	return shape
 
 
 func button_for(ref: String) -> TaskbarButton:
