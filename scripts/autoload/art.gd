@@ -143,7 +143,7 @@ func _start(id: String, kind: StringName) -> void:
 	var custom := str(e.get(String(kind), ""))
 	if custom != "":
 		candidates.append(custom)
-	candidates.append_array(sidecar_art(str(e.get("path", "")), kind))
+	candidates.append_array(sidecar_art(str(e.get("path", "")), kind, str(e.get("name", ""))))
 	for ext in ["jpg", "png", "webp"]:
 		candidates.append(_cache_file(id, kind, ext))
 	var steam_id := str(e.get("steam_appid", ""))
@@ -597,15 +597,30 @@ static func epic_ids(e: Dictionary) -> Dictionary:
 	return out
 
 
-## Images dropped next to a game's exe (cover.png, banner.jpg, logo.png...).
-static func sidecar_art(path: String, kind: StringName) -> PackedStringArray:
+## Images dropped next to a game's exe: cover.png, banner.jpg, logo.png, or the
+## same with the game's name in front ("My Game_banner.png", "my-game-cover.jpg").
+static func sidecar_art(path: String, kind: StringName, name: String = "") -> PackedStringArray:
 	var out := PackedStringArray()
 	if path == "" or path.contains("://") or path.begins_with("shell:") or not path.to_lower().ends_with(".exe"):
 		return out
 	var dir := path.get_base_dir()
-	for n in SIDECAR_NAMES[kind]:
-		for ext in ["png", "jpg", "jpeg", "webp"]:
-			out.append(dir.path_join("%s.%s" % [n, ext]))
+	if not DirAccess.dir_exists_absolute(dir):
+		return out
+	var owners := [norm_title(path.get_file().get_basename()), norm_title(dir.get_file()), norm_title(name)]
+	var plain := PackedStringArray()
+	for f in DirAccess.get_files_at(dir):
+		var ext := f.get_extension().to_lower()
+		if not ext in ["png", "jpg", "jpeg", "webp"]:
+			continue
+		var base := f.get_basename().to_lower()
+		for role: String in SIDECAR_NAMES[kind]:
+			if base == role:
+				plain.append(dir.path_join(f))
+			elif base.ends_with(role):
+				var owner := norm_title(base.trim_suffix(role))
+				if owner != "" and owner in owners:
+					out.append(dir.path_join(f))
+	out.append_array(plain)
 	return out
 
 

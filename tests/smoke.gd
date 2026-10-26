@@ -122,7 +122,14 @@ func _logic_tests() -> void:
 	check(Library.is_godot_exe(gd_dir.path_join("my_game.exe")), "own games: godot export recognised")
 	var own := Library.scan_game_folders([{"path": "user://smoke/own_games", "any": false}])
 	check(own.size() == 1 and own[0]["name"] == "My Game" and own[0]["kind"] == "game", "own games: found in a folder")
-	check(Art.sidecar_art("D:/Games/X/x.exe", &"hero").has("D:/Games/X/banner.png"), "own games: banner.png next to the exe is art")
+	gd_dir = ProjectSettings.globalize_path(gd_dir)
+	for art_file in ["My_Game_banner.png", "cover.jpg", "other_logo.png"]:
+		var af := FileAccess.open(gd_dir.path_join(art_file), FileAccess.WRITE)
+		af.store_string("x")
+		af.close()
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"hero").has(gd_dir.path_join("My_Game_banner.png")), "own games: <name>_banner.png next to the exe is art")
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"cover").has(gd_dir.path_join("cover.jpg")), "own games: plain cover.jpg is art")
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"logo").is_empty(), "own games: another game's logo is ignored")
 
 	var deduped := Library.dedupe_found([{"name": "Apex Legends", "kind": "game", "source": "ea", "path": "a"}, {"name": "Apex Legends™", "kind": "game", "source": "steam", "path": "b"}])
 	check(deduped.size() == 1 and deduped[0]["source"] == "steam", "discovery: one tile per game, best store wins")
