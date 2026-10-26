@@ -69,6 +69,7 @@ func _ready() -> void:
 
 	var look := _section("Appearance", "palette")
 	_swatch_row(look)
+	_wallpaper_rows(look)
 	_light_row(look)
 	_effects_row(look)
 	_pointer_rows(look)
@@ -378,6 +379,27 @@ func _sync_swatches() -> void:
 		b.add_theme_stylebox_override("hover", h)
 		b.add_theme_stylebox_override("pressed", n)
 		b.add_theme_stylebox_override("focus", Kit.box(Color(0, 0, 0, 0), 999, Color(1, 1, 1, 0.9), 2))
+
+
+## Wallpaper styles, as live preview cards.
+func _wallpaper_rows(list: VBoxContainer) -> void:
+	_row(list, "Wallpaper", "Calm, slowly moving backgrounds, lit by the wallpaper light below.")
+	var grid := GridContainer.new()
+	grid.name = "Wallpapers"
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_bottom", 20)
+	pad.add_child(grid)
+	list.add_child(pad)
+	for id in Wallpaper.STYLES:
+		var card := WallpaperCard.make(id)
+		card.pressed.connect(func() -> void:
+			Sfx.play(&"toggle")
+			Settings.set_value("wallpaper", id)
+		)
+		grid.add_child(card)
 
 
 func _light_row(list: VBoxContainer) -> void:
