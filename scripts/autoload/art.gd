@@ -53,6 +53,13 @@ const GAMESDB := "https://gamesdb.gog.com/platforms/%s/external_releases/%s"
 const GOG_PRODUCT := "https://api.gog.com/products/%s"
 const WIKI_SEARCH := "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrlimit=5&prop=pageimages&piprop=thumbnail&pithumbsize=640&gsrsearch=%s"
 const LAZY := "lazy:"
+const BRAND_DIR := "res://assets/brand"
+## Other names the built-in app art answers to (normalised titles).
+const BRAND_ALIASES := {
+	"claudeai": "claude", "claudedesktop": "claude", "code": "visualstudiocode", "vscode": "visualstudiocode",
+	"obs": "obsstudio", "googlechrome": "chrome", "mozillafirefox": "firefox", "telegramdesktop": "telegram",
+	"epicgames": "epicgameslauncher", "higgsfieldai": "higgsfield", "steamclient": "steam",
+}
 ## File names (any image extension) that count as art when placed next to the exe.
 const SIDECAR_NAMES := {
 	&"cover": ["cover", "capsule", "boxart", "poster"],
@@ -144,6 +151,9 @@ func _start(id: String, kind: StringName) -> void:
 	if custom != "":
 		candidates.append(custom)
 	candidates.append_array(sidecar_art(str(e.get("path", "")), kind, str(e.get("name", ""))))
+	var brand := brand_art(str(e.get("name", "")), kind)
+	if brand != "":
+		candidates.append(brand)
 	for ext in ["jpg", "png", "webp"]:
 		candidates.append(_cache_file(id, kind, ext))
 	var steam_id := str(e.get("steam_appid", ""))
@@ -595,6 +605,14 @@ static func epic_ids(e: Dictionary) -> Dictionary:
 		if parts.size() >= 3:
 			out = {"ns": parts[0], "item": parts[1], "app": parts[2]}
 	return out
+
+
+## Oazy's own artwork for popular apps (tools/make_brand_art.py), by name.
+static func brand_art(name: String, kind: StringName) -> String:
+	var slug := norm_title(name)
+	slug = BRAND_ALIASES.get(slug, slug)
+	var path := "%s/%s_%s.webp.bin" % [BRAND_DIR, slug, kind]
+	return path if slug != "" and FileAccess.file_exists(path) else ""
 
 
 ## Images dropped next to a game's exe: cover.png, banner.jpg, logo.png, or the
