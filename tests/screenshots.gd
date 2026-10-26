@@ -48,6 +48,8 @@ func _ready() -> void:
 		{"name": "Claude", "id": "C:/Users/joao/AppData/Local/AnthropicClaude/claude.exe"},
 		{"name": "WhatsApp", "id": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"},
 	])
+	# Flow as João has it: a Library card with its own art.
+	Library.update_entry(Catalog.add_to_library("oazy:flow"), {"launches": 30, "last_played": now - 1800})
 	Catalog.set_favorite("app:Chrome", true)
 	Catalog.set_favorite("lib:" + str(Library.entries[0]["id"]), true)
 	for e in Library.entries:

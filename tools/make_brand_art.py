@@ -35,6 +35,7 @@ APPS = {
     "notion": ("Notion", "Your connected workspace", "#151515", ["#8a8a8a", "#e8e8e8", "#3a3a3a", "#c9b8a0"], "#ffffff"),
     "blender": ("Blender", "Make it in 3D", "#101b2a", ["#e87d0d", "#265787", "#f5a54a", "#5a8fc4"], "#fff7ee"),
     "slack": ("Slack", "Where work happens", "#2a0c2b", ["#36c5f0", "#2eb67d", "#ecb22e", "#e01e5a"], "#ffffff"),
+    "flow": ("Flow", "Make images and video", "#0b0a1f", ["#7c6cff", "#265cd6", "#c58bff", "#2fd3e6"], "#f4f2ff"),
     "epicgameslauncher": ("Epic Games", "Play, free every week", "#0e0e10", ["#5a5a66", "#d8d8e2", "#2a2a34", "#0078f2"], "#ffffff"),
 }
 

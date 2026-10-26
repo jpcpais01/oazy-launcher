@@ -99,7 +99,7 @@ func refresh() -> void:
 		_cover.visible = true
 		_cover.setup(str(item.get("entry_id", "")), _radius())
 		return
-	if str(item.get("ref", "")) == Browser.REF:
+	if _own_ref() == Browser.REF:
 		# The Browser is a little glass globe of sky-blue water.
 		if _globe == null:
 			_globe = UpdateOrb.icon(16.0, 0.92, 0.0, true)
@@ -108,13 +108,13 @@ func refresh() -> void:
 			add_child(_globe)
 		_globe.visible = true
 		return
-	if str(item.get("ref", "")) == ClaudeApp.REF:
+	if _own_ref() == ClaudeApp.REF:
 		# Oazy's Claude: Claude's coral rays on dark glass, so it never looks
 		# like the Claude app's coral tile next to it.
 		_show_plate(Color("3a3330"), Color("161415"))
 		_show_glyph("claude", Color("f2a27c"))
 		return
-	if str(item.get("ref", "")) == "oazy:flow":
+	if _own_ref() == "oazy:flow":
 		# Flow keeps its own colours: a violet-to-blue tile with a spark.
 		_show_plate(Color("7c6cff"), Color("265cd6"))
 		_show_glyph("sparkles")
@@ -225,6 +225,12 @@ static func custom_look(it: Dictionary) -> Array:
 	if key == "claude" and str(it.get("name", "")).to_lower().contains("code"):
 		glyph = "claude_code"
 	return [glyph, Color(str(c["a"])), Color(str(c["b"]))]
+
+
+## The Oazy app this icon stands for, also when it's in the Library.
+func _own_ref() -> String:
+	var own := str(item.get("oazy", ""))
+	return own if own != "" else str(item.get("ref", ""))
 
 
 func _show_plate(a: Color, b: Color) -> void:

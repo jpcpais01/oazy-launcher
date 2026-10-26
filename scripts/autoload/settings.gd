@@ -49,6 +49,7 @@ const DEFAULTS := {
 	"terminal_oazy": true,
 	"terminal_pinned": false,
 	"flow_pinned": false,
+	"flow_in_library": false,
 	"claude_app_pinned": false,
 	"files_oazy": true,
 	"cleaner_watch": true,

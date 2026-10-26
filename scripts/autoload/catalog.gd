@@ -32,6 +32,9 @@ const SKIP_EXES := ["unins000.exe", "uninstall.exe", "uninst.exe", "setup.exe", 
 const DEFAULT_PINS := ["google chrome", "file explorer", "claude", "steam", "discord", "spotify", "visual studio code"]
 const SHELLS := ["cmd.exe", "powershell.exe", "pwsh.exe", "wt.exe", "windowsterminal.exe", "conhost.exe", "openconsole.exe"]
 const MAX_RECENT := 10
+## Oazy's own apps that can sit in the Library as a card with cover art
+## (assets/brand, by name), like any app from Start.
+const LIBRARY_OAZY := ["oazy:flow", "oazy:claude"]
 
 var apps: Array[Dictionary] = []
 var apps_loaded := false
@@ -118,6 +121,7 @@ func _set_apps(raw: Array, save: bool) -> void:
 			f.store_string(JSON.stringify(apps))
 			f.close()
 	_ensure_default_pins()
+	_ensure_flow_in_library()
 	apps_changed.emit()
 
 
@@ -172,13 +176,26 @@ func canonical(ref: String) -> String:
 				id = library_entry_named(str(a["name"]))
 	elif ref.begins_with("win:"):
 		id = library_entry_for_exe(ref.substr(4))
+	elif LIBRARY_OAZY.has(ref):
+		id = library_entry_for_oazy(ref)
 	return "lib:" + id if id != "" else ref
+
+
+## The library entry one of Oazy's own apps became, or "".
+func library_entry_for_oazy(ref: String) -> String:
+	for e in Library.entries:
+		if str(e.get("oazy", "")) == ref:
+			return str(e["id"])
+	return ""
 
 
 ## The library entry called `name` (ignoring case, symbols and ™), or "".
 func library_entry_named(name: String) -> String:
 	if _lib_names.is_empty():
 		for e in Library.entries:
+			# Oazy's own apps go by their ref, never by name (Oazy's Claude isn't the Claude app).
+			if str(e.get("oazy", "")) != "":
+				continue
 			var key := Art.norm_title(str(e["name"]))
 			# Games win over apps, the first one found over later ones.
 			if key != "" and (not _lib_names.has(key) or (e["kind"] == "game" and Library.get_entry(_lib_names[key])["kind"] != "game")):
@@ -297,6 +314,8 @@ func item(ref: String) -> Dictionary:
 		it["kind"] = "game" if e.get("kind", "game") == "game" else "libapp"
 		it["sub"] = Library.source_label(e) if not e.is_empty() else ""
 		var path := str(e.get("path", ""))
+		# Oazy's own apps keep their own icons.
+		it["oazy"] = str(e.get("oazy", ""))
 		if it["kind"] == "libapp" and path != "" and not path.contains("://") and path.get_file().to_lower() not in SHELLS:
 			it["icon_key"] = path.replace("/", "\\")
 	elif ref.begins_with("win:"):
@@ -596,6 +615,15 @@ func move_pin(ref: String, to_index: int) -> void:
 	pins_changed.emit()
 
 
+## Flow joins the Library once, as a card with its art (its pins and
+## favourites move over with it).
+func _ensure_flow_in_library() -> void:
+	if Settings.get_value("flow_in_library") or not App.is_windows():
+		return
+	Settings.set_value("flow_in_library", true)
+	add_to_library("oazy:flow")
+
+
 ## Back to the suggested pins.
 func reset_pins() -> void:
 	Settings.set_value("pins_initialized", false)
@@ -716,7 +744,7 @@ func library_entry_for_app(id: String) -> String:
 func can_add_to_library(ref: String) -> bool:
 	if canonical(ref) != ref:
 		return false
-	if ref.begins_with("app:"):
+	if ref.begins_with("app:") or LIBRARY_OAZY.has(ref):
 		return true
 	if ref.begins_with("win:"):
 		var exe := ref.substr(4)
@@ -745,6 +773,8 @@ func add_to_library(ref: String) -> String:
 	var fav := is_favorite(ref)
 	if ref.begins_with("app:"):
 		fields = app_entry_fields(ref.substr(4))
+	elif LIBRARY_OAZY.has(ref):
+		fields = {"name": str(OAZY_APPS[ref]["name"]), "kind": "app", "source": "custom", "oazy": ref}
 	elif can_add_to_library(ref):
 		fields = Library.infer_from_path(ref.substr(4).replace("\\", "/"))
 	else:
@@ -761,8 +791,11 @@ func remove_from_library(id: String) -> void:
 	var from := "lib:" + id
 	var app := app_for_entry(id)
 	var fav := is_favorite(from)
+	var own := str(Library.get_entry(id).get("oazy", ""))
 	Library.remove_entry(id)
-	if not app.is_empty():
+	if own != "":
+		_move_ref(from, own, fav)
+	elif not app.is_empty():
 		_move_ref(from, "app:" + str(app["id"]), fav)
 
 
