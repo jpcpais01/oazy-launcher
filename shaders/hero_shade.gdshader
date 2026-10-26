@@ -17,5 +17,6 @@ void fragment() {
 	float left = 0.8 * pow(1.0 - smoothstep(0.0, 0.78, UV.x), 1.3);
 	float bottom = 0.6 * smoothstep(0.5, 1.0, UV.y);
 	float a = 1.0 - (1.0 - left) * (1.0 - bottom);
-	COLOR = vec4(0.01, 0.03, 0.05, a * mask);
+	// Times COLOR.a so the shade fades with the desktop instead of popping off.
+	COLOR = vec4(0.01, 0.03, 0.05, a * mask * COLOR.a);
 }
