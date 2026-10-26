@@ -37,6 +37,7 @@ Network="*res://scripts/autoload/network.gd"
 Browser="*res://scripts/autoload/browser.gd"
 Terminal="*res://scripts/autoload/terminal.gd"
 Files="*res://scripts/autoload/files.gd"
+ClaudeApp="*res://scripts/autoload/claude_app.gd"
 Cleaner="*res://scripts/autoload/cleaner.gd"
 Cursors="*res://scripts/autoload/cursors.gd"
 

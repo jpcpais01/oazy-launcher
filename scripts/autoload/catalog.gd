@@ -19,6 +19,7 @@ const OAZY_APPS := {
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
 	"oazy:browser": {"name": "Browser", "glyph": "browser", "desc": "Oazy's web browser"},
 	"oazy:terminal": {"name": "Terminal", "glyph": "terminal", "desc": "PowerShell, WSL and Claude Code in Oazy's glass"},
+	"oazy:claude": {"name": "Claude", "glyph": "claude", "desc": "Claude Code in Oazy's glass: chat, edits and commands in your folders"},
 	"oazy:flow": {"name": "Flow", "glyph": "sparkles", "desc": "Make images and videos with Google Flow, in Oazy's look"},
 	"oazy:files": {"name": "Files", "glyph": "folder", "desc": "Your folders in Oazy's glass"},
 	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
@@ -182,7 +183,7 @@ func item(ref: String) -> Dictionary:
 
 ## Oazy's apps that run as their own windows rather than inside the shell.
 static func is_own_window_app(ref: String) -> bool:
-	return ref == Browser.REF or ref == Terminal.REF or ref == Files.REF or Browser.APPS.has(ref)
+	return ref == Browser.REF or ref == Terminal.REF or ref == Files.REF or ref == ClaudeApp.REF or Browser.APPS.has(ref)
 
 
 func launch(ref: String) -> bool:
@@ -198,6 +199,9 @@ func launch(ref: String) -> bool:
 	if ref == Files.REF:
 		note_recent(ref)
 		return Files.open()
+	if ref == ClaudeApp.REF:
+		note_recent(ref)
+		return ClaudeApp.open()
 	if OAZY_APPS.has(ref):
 		App.open_page.emit(StringName(ref.substr(5)))
 		return true
@@ -358,6 +362,8 @@ func _window_ref(w: Dictionary) -> String:
 	if Browser.owns_window(w):
 		var app := Browser.app_for_window(w)
 		return app if app != "" else Browser.REF
+	if ClaudeApp.owns_window(w):
+		return ClaudeApp.REF
 	if Files.owns_window(w):
 		# Groups with the File Explorer pin it stands in for.
 		var fe := _file_explorer()
@@ -501,11 +507,14 @@ func _ensure_default_pins() -> void:
 			_pin_terminal()
 		if not Settings.get_value("flow_pinned") and App.is_windows():
 			_pin_flow()
+		if not Settings.get_value("claude_app_pinned") and App.is_windows():
+			_pin_claude()
 		return
 	var list: Array = ["oazy:library", Browser.REF]
 	Settings.set_value("browser_pinned", true)
 	Settings.set_value("terminal_pinned", true)
 	Settings.set_value("flow_pinned", true)
+	Settings.set_value("claude_app_pinned", true)
 	for want in DEFAULT_PINS:
 		for a in apps:
 			if str(a["name"]).to_lower() == want:
@@ -513,6 +522,7 @@ func _ensure_default_pins() -> void:
 				break
 	list.append(Terminal.REF)
 	if App.is_windows():
+		list.append(ClaudeApp.REF)
 		list.append("oazy:flow")
 	for e in Library.entries:
 		if str(e["name"]) == "Claude Code":
@@ -553,6 +563,27 @@ func _pin_flow() -> void:
 	if after < 0:
 		after = list.find(Browser.REF)
 	list.insert(clampi(after + 1, 0, list.size()) if after >= 0 else list.size(), "oazy:flow")
+	Settings.set_value("pins", list)
+	pins_changed.emit()
+
+
+## Oazy's Claude joins the taskbar once, just before the first Claude pin
+## (the Claude app or Claude Code) or else after the Terminal, for people who
+## set up their pins before it existed. Nothing else is unpinned.
+func _pin_claude() -> void:
+	Settings.set_value("claude_app_pinned", true)
+	var list: Array = Settings.get_value("pins").duplicate()
+	if list.has(ClaudeApp.REF):
+		return
+	var at := -1
+	for i in list.size():
+		var ref := str(list[i])
+		if (ref.begins_with("app:") or ref.begins_with("lib:")) and str(item(ref).get("name", "")).to_lower().contains("claude"):
+			at = i
+			break
+	if at < 0:
+		at = list.find(Terminal.REF) + 1 if list.has(Terminal.REF) else list.size()
+	list.insert(clampi(at, 0, list.size()), ClaudeApp.REF)
 	Settings.set_value("pins", list)
 	pins_changed.emit()
 
