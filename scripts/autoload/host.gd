@@ -272,6 +272,13 @@ func _apply_windows(d: Dictionary) -> void:
 				item["pid"] = int(item.get("pid", 0))
 				list.append(item)
 	windows = list
+	if not captures.is_empty():
+		var alive := {}
+		for w in list:
+			alive[int(w["hwnd"])] = true
+		for k in captures.keys():
+			if not alive.has(k):
+				captures.erase(k)
 	foreground = int(d.get("fg", 0))
 	self_foreground = bool(d.get("self_fg", false)) or not available
 	var fs := bool(d.get("fs", false))
@@ -337,6 +344,33 @@ func go_home() -> void:
 
 
 # --- Icons, apps, stats, thumbnails ---------------------------------------------------
+
+## The last picture taken of each window (hwnd -> ImageTexture), so a window
+## that has since been minimised still has one.
+var captures := {}
+
+
+## Takes a picture of `hwnd` (PrintWindow) at most `max_px` in size. `done`
+## gets the ImageTexture, or null when it couldn't (minimised, gone, blank).
+func capture(hwnd: int, max_px: Vector2i, done: Callable) -> void:
+	var dir := ProjectSettings.globalize_path("user://host/caps")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path := dir.path_join("%d.rgba" % hwnd)
+	request(["capture", hwnd, max_px.x, max_px.y, path.replace("/", "\\")], func(d: Dictionary) -> void:
+		var tex: ImageTexture = null
+		var w := int(d.get("w", 0))
+		var h := int(d.get("h", 0))
+		if d.get("ok", false) and w > 0 and h > 0 and float(d.get("dev", 0.0)) >= 1.0:
+			var bytes := FileAccess.get_file_as_bytes(path)
+			if bytes.size() == w * h * 4:
+				var img := Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, bytes)
+				img.generate_mipmaps()
+				tex = ImageTexture.create_from_image(img)
+				captures[hwnd] = tex
+		if done.is_valid():
+			done.call(tex)
+	)
+
 
 func render_icon(key: String, px: int, out_path: String, done: Callable) -> void:
 	request(["icon", key, px, ProjectSettings.globalize_path(out_path).replace("/", "\\")], done)
