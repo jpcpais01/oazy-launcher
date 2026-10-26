@@ -206,8 +206,19 @@ func _selftest(dir: String) -> void:
 		get_tree().quit(1)
 		return
 	print("BROWSER SELFTEST: built ", r["exe"])
-	var out := []
-	var code := OS.execute(str(r["exe"]), ["--selftest", dir], out, true)
-	print("\n".join(out))
+	# Don't block the main thread for the whole run: start it and poll.
+	var pid := OS.create_process(str(r["exe"]), ["--selftest", dir])
+	if pid <= 0:
+		print("BROWSER SELFTEST: FAIL couldn't start the browser")
+		get_tree().quit(1)
+		return
+	var started := Time.get_ticks_msec()
+	while OS.is_process_running(pid) and Time.get_ticks_msec() - started < 200000:
+		await get_tree().create_timer(0.25).timeout
+	var code := OS.get_process_exit_code(pid)
+	var f := FileAccess.open(dir.path_join("browser-exit.txt"), FileAccess.WRITE)
+	if f:
+		f.store_string(str(code))
+		f.close()
 	print("BROWSER SELFTEST: %s (exit %d)" % ["PASS" if code == 0 else "FAIL", code])
 	get_tree().quit(code)

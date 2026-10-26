@@ -194,7 +194,12 @@ jobs:
           $st = Join-Path $shots 'browser-selftest.log'
           if (Test-Path $st) { Get-Content $st }
           Get-ChildItem $shots
-          if ($p.ExitCode -ne 0) { throw "Browser self-test failed (exit $($p.ExitCode))" }
+          # The browser's own verdict decides; the launcher only hosts the run.
+          $ex = Join-Path $shots 'browser-exit.txt'
+          if (-not (Test-Path $ex)) { throw "Browser self-test didn't finish (launcher exit $($p.ExitCode))" }
+          $code = (Get-Content $ex -Raw).Trim()
+          if ($code -ne '0') { throw "Browser self-test failed (exit $code)" }
+          if ($p.ExitCode -ne 0) { Write-Host "::warning::Launcher exited with $($p.ExitCode) after the browser self-test passed" }
 
       - uses: actions/upload-artifact@v4
         if: always()

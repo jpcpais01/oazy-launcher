@@ -2220,7 +2220,8 @@ namespace OazyBrowser
 		public int ExitCode = 1;
 		BrowserWindow win;
 		bool chromeOk, ntpOk, pageOk, done;
-		int step;
+		int step, retries;
+		const string TestUrl = "https://en.wikipedia.org/wiki/Oasis";
 		System.Windows.Forms.Timer timeout;
 
 		public Selftest(string outDir)
@@ -2247,7 +2248,19 @@ namespace OazyBrowser
 
 		public void Navigated(BrowserWindow w, Tab t, bool ok)
 		{
-			if (step == 2 && !t.IsNtp) { pageOk = ok; Log("page loaded: " + ok + " " + t.Url); Next(); }
+			if (step != 2 || t.IsNtp) return;
+			Log("page loaded: " + ok + " " + t.Url);
+			// A navigation that gets cancelled or blips on the network reports
+			// failure straight away; give the page a couple more tries.
+			if (!ok && ++retries <= 2) { RetryLater(); return; }
+			pageOk = ok;
+			Next();
+		}
+
+		async void RetryLater()
+		{
+			await Task.Delay(1500);
+			win.TestNavigate(TestUrl);
 		}
 
 		public void FromChrome(BrowserWindow w, Dictionary<string, object> m) { Log("chrome says " + Json.Str(m, "what")); }
@@ -2260,7 +2273,7 @@ namespace OazyBrowser
 				await Task.Delay(1500);
 				Shot("browser-newtab.png");
 				step = 2;
-				win.TestNavigate("https://en.wikipedia.org/wiki/Oasis");
+				win.TestNavigate(TestUrl);
 			}
 			else if (step == 2)
 			{
