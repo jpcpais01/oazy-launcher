@@ -320,6 +320,17 @@ func _launch_path(e: Dictionary) -> bool:
 		return OS.shell_open(path) == OK
 	if path.begins_with("shell:"):
 		return OS.create_process("explorer.exe", [path]) > 0
+	# Claude Code and other shell commands (cmd.exe /k claude) get a tab in
+	# Oazy Terminal.
+	if Terminal.enabled() and Terminal.runs_shell(path) and path.get_file().to_lower() != "wt.exe":
+		var cmd := '"%s" %s' % [path.replace("/", "\\"), str(e["args"])]
+		var cwd := str(e.get("cwd", "")).replace("/", "\\")
+		return Terminal.open({"run": cmd.strip_edges(), "cwd": cwd, "title": str(e["name"])}, func() -> void: _launch_path_direct(e))
+	return _launch_path_direct(e)
+
+
+func _launch_path_direct(e: Dictionary) -> bool:
+	var path := str(e["path"]).strip_edges()
 	# Bare commands ("wt.exe", "code") are found on PATH by `start`.
 	var bare := not path.contains("/") and not path.contains("\\")
 	if not bare and not FileAccess.file_exists(path):

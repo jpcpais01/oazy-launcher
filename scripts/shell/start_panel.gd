@@ -363,7 +363,7 @@ func _fill_pinned() -> void:
 			break
 		if not refs.has(ref):
 			refs.append(ref)
-	for ref in ["oazy:library", Browser.REF, "oazy:settings", "oazy:cleaner"]:
+	for ref in ["oazy:library", Browser.REF, Terminal.REF, "oazy:settings", "oazy:cleaner"]:
 		if not refs.has(ref):
 			refs.append(ref)
 	refs = refs.slice(0, COLS * rows)
@@ -651,7 +651,7 @@ func _launch(ref: String) -> void:
 		Catalog.launch(ref)
 		if main and main.taskbar:
 			var btn: TaskbarButton = main.taskbar.button_for(ref)
-			if btn and btn.window_count() == 0 and (not ref.begins_with("oazy:") or ref == Browser.REF) and Catalog.item(ref)["kind"] != "game":
+			if btn and btn.window_count() == 0 and (not ref.begins_with("oazy:") or Catalog.is_own_window_app(ref)) and Catalog.item(ref)["kind"] != "game":
 				btn.start_launching()
 	Sfx.play(&"select")
 	close()

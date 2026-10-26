@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Oazy Terminal</title>
+<link rel="stylesheet" href="vendor/xterm.css">
+<link rel="stylesheet" href="term.css">
+</head>
+<body>
+<div id="strip">
+	<div id="tabs" role="tablist"></div>
+	<div id="newtab-group">
+		<button id="newtab" title="New tab (Ctrl+Shift+T)"></button>
+		<button id="profiles-btn" title="Open a profile"></button>
+	</div>
+	<div id="drag"></div>
+	<button id="settings-btn" class="icon-btn" title="Settings (Ctrl+,)"></button>
+	<div id="wincontrols">
+		<button id="win-min" title="Minimise"></button>
+		<button id="win-max" title="Maximise"></button>
+		<button id="win-close" title="Close"></button>
+	</div>
+</div>
+
+<div id="stage"></div>
+
+<div id="findbar" class="panel">
+	<span class="find-glyph"></span>
+	<input id="find-q" type="text" spellcheck="false" placeholder="Find">
+	<span id="find-count"></span>
+	<button id="find-case" class="icon-btn small toggle" title="Match case">Aa</button>
+	<button id="find-regex" class="icon-btn small toggle" title="Regular expression">.*</button>
+	<button id="find-prev" class="icon-btn small" title="Previous (Shift+Enter)"></button>
+	<button id="find-next" class="icon-btn small" title="Next (Enter)"></button>
+	<button id="find-close" class="icon-btn small" title="Close (Esc)"></button>
+</div>
+
+<div id="veil"></div>
+<div id="profiles" class="panel menu"></div>
+<div id="context" class="panel menu"></div>
+<div id="settings" class="panel"></div>
+<div id="confirm" class="panel">
+	<div class="confirm-title"></div>
+	<div class="confirm-text">Everything running in them stops.</div>
+	<div class="confirm-buttons">
+		<button id="confirm-no" class="btn">Cancel</button>
+		<button id="confirm-yes" class="btn danger">Close all</button>
+	</div>
+</div>
+<div id="toast"></div>
+
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script src="vendor/addon-search.js"></script>
+<script src="vendor/addon-unicode11.js"></script>
+<script src="vendor/addon-web-links.js"></script>
+<script src="icons.js"></script>
+<script src="term.js"></script>
+</body>
+</html>

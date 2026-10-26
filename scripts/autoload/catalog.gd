@@ -18,6 +18,7 @@ const OAZY_APPS := {
 	"oazy:library": {"name": "Library", "glyph": "grid", "desc": "Your games and apps"},
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
 	"oazy:browser": {"name": "Browser", "glyph": "browser", "desc": "Oazy's web browser"},
+	"oazy:terminal": {"name": "Terminal", "glyph": "terminal", "desc": "PowerShell, WSL and Claude Code in Oazy's glass"},
 	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
 }
 ## Start menu clutter that ships next to real apps.
@@ -25,7 +26,7 @@ const SKIP_WORDS := ["uninstall", "uninstaller", "readme", "read me", "help", "d
 ## Executables that are never what you meant to open.
 const SKIP_EXES := ["unins000.exe", "uninstall.exe", "uninst.exe", "setup.exe", "updater.exe", "update.exe", "crashreporter.exe", "crashpad_handler.exe", "vc_redist.x64.exe", "vc_redist.x86.exe", "dxsetup.exe"]
 ## First-run taskbar pins, in order, matched against installed app names.
-const DEFAULT_PINS := ["google chrome", "file explorer", "claude", "steam", "discord", "spotify", "visual studio code", "terminal"]
+const DEFAULT_PINS := ["google chrome", "file explorer", "claude", "steam", "discord", "spotify", "visual studio code"]
 const SHELLS := ["cmd.exe", "powershell.exe", "pwsh.exe", "wt.exe", "windowsterminal.exe", "conhost.exe", "openconsole.exe"]
 const MAX_RECENT := 10
 
@@ -172,10 +173,18 @@ func item(ref: String) -> Dictionary:
 	return it
 
 
+## Oazy's apps that run as their own windows rather than inside the shell.
+static func is_own_window_app(ref: String) -> bool:
+	return ref == Browser.REF or ref == Terminal.REF
+
+
 func launch(ref: String) -> bool:
 	if ref == Browser.REF:
 		note_recent(ref)
 		return Browser.open()
+	if ref == Terminal.REF:
+		note_recent(ref)
+		return Terminal.open()
 	if OAZY_APPS.has(ref):
 		App.open_page.emit(StringName(ref.substr(5)))
 		return true
@@ -187,7 +196,12 @@ func launch(ref: String) -> bool:
 		if not App.is_windows():
 			App.toast("Opening apps works on Windows")
 			return false
-		return OS.create_process("explorer.exe", ["shell:AppsFolder\\" + ref.substr(4)]) > 0
+		var run_app := func() -> bool: return OS.create_process("explorer.exe", ["shell:AppsFolder\\" + ref.substr(4)]) > 0
+		# Terminal, Command Prompt and PowerShell open in Oazy Terminal.
+		var profile := Terminal.profile_for(item(ref)) if Terminal.enabled() else "-"
+		if profile != "-":
+			return Terminal.open({"profile": profile}, run_app)
+		return run_app.call()
 	if ref.begins_with("win:"):
 		var exe := ref.substr(4)
 		if FileAccess.file_exists(exe):
@@ -310,6 +324,13 @@ static func match_score(name: String, needle: String) -> int:
 func ref_for_window(w: Dictionary) -> String:
 	if Browser.owns_window(w):
 		return Browser.REF
+	if Terminal.owns_window(w):
+		# A Claude Code tab groups with its pin; any other tab is the Terminal's.
+		var t := str(w.get("title", "")).to_lower()
+		for e in Library.entries:
+			if Terminal.runs_shell(str(e["path"])) and t.begins_with(str(e["name"]).to_lower() + " - "):
+				return "lib:" + str(e["id"])
+		return Terminal.REF
 	var aumid := str(w.get("aumid", ""))
 	if aumid != "" and not find_app(aumid).is_empty():
 		return "app:" + str(find_app(aumid)["id"])
@@ -440,19 +461,43 @@ func _ensure_default_pins() -> void:
 				Settings.set_value("pins", list)
 				pins_changed.emit()
 			Settings.set_value("browser_pinned", true)
+		if not Settings.get_value("terminal_pinned") and App.is_windows():
+			_pin_terminal()
 		return
 	var list: Array = ["oazy:library", Browser.REF]
 	Settings.set_value("browser_pinned", true)
+	Settings.set_value("terminal_pinned", true)
 	for want in DEFAULT_PINS:
 		for a in apps:
 			if str(a["name"]).to_lower() == want:
 				list.append("app:" + str(a["id"]))
 				break
+	list.append(Terminal.REF)
 	for e in Library.entries:
 		if str(e["name"]) == "Claude Code":
 			list.append("lib:" + str(e["id"]))
 	Settings.set_value("pins", list)
 	Settings.set_value("pins_initialized", true)
+	pins_changed.emit()
+
+
+## Oazy Terminal takes over the Windows Terminal pin once (or joins next to
+## the Browser), for people who set up their pins before it existed.
+func _pin_terminal() -> void:
+	Settings.set_value("terminal_pinned", true)
+	var list: Array = Settings.get_value("pins").duplicate()
+	if list.has(Terminal.REF):
+		return
+	var at := -1
+	for i in list.size():
+		if str(list[i]).begins_with("app:") and Terminal.profile_for(item(str(list[i]))) == "":
+			at = i
+			break
+	if at >= 0:
+		list[at] = Terminal.REF
+	else:
+		list.insert(mini(list.find(Browser.REF) + 1, list.size()), Terminal.REF)
+	Settings.set_value("pins", list)
 	pins_changed.emit()
 
 

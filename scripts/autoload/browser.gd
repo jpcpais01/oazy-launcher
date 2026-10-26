@@ -120,80 +120,15 @@ func _flush() -> void:
 ## Unpacks and compiles the browser if this version isn't there yet. Returns
 ## {"exe": path} or {"error": text}. Safe to call from a worker thread.
 static func build() -> Dictionary:
-	var hashes := PackedStringArray()
-	var blobs := {}
+	var files := {}
 	for f in FILES:
-		var bytes := FileAccess.get_file_as_bytes(SRC.path_join(f))
-		if bytes.is_empty():
-			return {"error": "%s is missing from the package" % f}
-		blobs[f] = bytes
-		hashes.append(f + ":" + _md5(bytes))
-	var key := "\n".join(hashes).md5_text().substr(0, 10)
-	var root := ProjectSettings.globalize_path("user://browser")
-	var dir := root.path_join("app-" + key)
-	var exe := dir.path_join(EXE)
-	if FileAccess.file_exists(exe):
-		return {"exe": exe}
-	for f in FILES:
-		var path := dir.path_join(f.trim_prefix("bin/"))
-		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
-		var out := FileAccess.open(path, FileAccess.WRITE)
-		if out == null:
-			return {"error": "Can't write to %s" % dir}
-		out.store_buffer(blobs[f])
-		out.close()
-	var log := ""
-	for csc in Host.CSC:
-		if not FileAccess.file_exists(csc):
-			continue
-		var out := []
-		var w := func(p: String) -> String: return dir.path_join(p).replace("/", "\\")
-		var args := ["/nologo", "/optimize+", "/target:winexe", "/platform:x64",
-			"/win32icon:" + w.call("oazy_browser.ico"),
-			"/r:System.dll", "/r:System.Core.dll", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll", "/r:System.Web.Extensions.dll",
-			"/r:" + w.call("Microsoft.Web.WebView2.Core.dll"),
-			"/out:" + w.call(EXE + ".tmp"), w.call("oazy_browser.cs")]
-		var code := OS.execute(csc, args, out, true)
-		if code == 0 and FileAccess.file_exists(dir.path_join(EXE + ".tmp")):
-			DirAccess.rename_absolute(dir.path_join(EXE + ".tmp"), exe)
-			_clean_old(root, "app-" + key)
-			return {"exe": exe}
-		log = "\n".join(out).strip_edges().substr(0, 600)
-	if log == "":
-		return {"error": "The .NET Framework C# compiler wasn't found"}
-	return {"error": "build failed: " + log}
-
-
-static func _md5(bytes: PackedByteArray) -> String:
-	var ctx := HashingContext.new()
-	ctx.start(HashingContext.HASH_MD5)
-	ctx.update(bytes)
-	return ctx.finish().hex_encode()
-
-
-## Older builds go, unless a browser from one is still running (its files are locked).
-static func _clean_old(root: String, keep: String) -> void:
-	for d in DirAccess.get_directories_at(root):
-		if not d.begins_with("app-") or d == keep:
-			continue
-		var path := root.path_join(d)
-		if DirAccess.remove_absolute(path.path_join(EXE)) != OK and FileAccess.file_exists(path.path_join(EXE)):
-			continue
-		_remove_tree(path)
-
-
-static func _remove_tree(path: String) -> void:
-	for f in DirAccess.get_files_at(path):
-		DirAccess.remove_absolute(path.path_join(f))
-	for d in DirAccess.get_directories_at(path):
-		_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
+		files[f.trim_prefix("bin/")] = SRC.path_join(f)
+	return WebApp.build("browser", EXE, "oazy_browser.cs", "oazy_browser.ico", files)
 
 
 ## Is this real window one of Oazy Browser's?
 static func owns_window(w: Dictionary) -> bool:
-	var exe := str(w.get("exe", "")).replace("\\", "/").to_lower()
-	return exe.get_file() == EXE.to_lower() and exe.contains("/browser/app-")
+	return WebApp.owns_window(w, "browser", EXE)
 
 
 ## CI: build the browser, run its self-test (real WebView2, screenshots into
