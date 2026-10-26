@@ -1077,10 +1077,20 @@ namespace OazyTerminal
 			base.WndProc(ref m);
 		}
 
+		// DWM paints its dark caption strip again after maximizing or restoring;
+		// recalculating the frame clears it (FrameFix off only to test that).
+		public static bool FrameFix = true;
+		FormWindowState shownState = FormWindowState.Normal;
+
 		protected override void OnResize(EventArgs e)
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			if (WindowState != shownState && IsHandleCreated)
+			{
+				shownState = WindowState;
+				if (!min && FrameFix) BeginInvoke((Action)RefreshFrame);
+			}
 			if (view != null) try { view.IsVisible = !min; } catch { }
 			if (!min) DoLayout();
 			Post(Json.Obj("t", "win", "max", Maximized));

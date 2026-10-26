@@ -1301,7 +1301,7 @@ namespace OazyFiles
 			using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) return Math.Max(1f, g.DpiX / 96f);
 		}
 
-		float Scale_ { get { try { return Native.GetDpiForWindow(Handle) / 96f; } catch { return 1f; } } }
+		public float Scale_ { get { try { return Native.GetDpiForWindow(Handle) / 96f; } catch { return 1f; } } }
 
 		// --- Window frame (the same frame as Oazy Terminal's) -------------------------------
 
@@ -1357,7 +1357,7 @@ namespace OazyFiles
 			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 		}
 
-		bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
+		public bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
 
 		int TopStrip { get { return Maximized ? 0 : Math.Max(1, (int)Math.Round(3 * Scale_)); } }
 
@@ -1434,10 +1434,20 @@ namespace OazyFiles
 			base.WndProc(ref m);
 		}
 
+		// DWM paints its dark caption strip again after maximizing or restoring;
+		// recalculating the frame clears it (FrameFix off only to test that).
+		public static bool FrameFix = true;
+		FormWindowState shownState = FormWindowState.Normal;
+
 		protected override void OnResize(EventArgs e)
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			if (WindowState != shownState && IsHandleCreated)
+			{
+				shownState = WindowState;
+				if (!min && FrameFix) BeginInvoke((Action)RefreshFrame);
+			}
 			if (view != null) try { view.IsVisible = !min; } catch { }
 			if (!min) DoLayout();
 			Post(Json.Obj("t", "win", "max", Maximized));
@@ -1965,7 +1975,7 @@ namespace OazyFiles
 		readonly List<string> log = new List<string>();
 		public int ExitCode = 1;
 		FilesWindow win;
-		bool pageOk, listOk, iconOk, opsOk, searchOk, done;
+		bool pageOk, listOk, iconOk, opsOk, searchOk, glassOk, done;
 		Dictionary<string, object> lastState;
 		string root;
 		System.Windows.Forms.Timer timeout;
@@ -2088,6 +2098,29 @@ namespace OazyFiles
 			win.Post(Json.Obj("t", "test", "action", "go", "path", ""));
 			await Task.Delay(2500);
 			Shot("files-home.png");
+
+			// Maximized, the top edge should be the same glass as the rest of the
+			// tab strip: once without the frame fix (to show the strip), once with it.
+			FilesWindow.FrameFix = false;
+			win.WindowState = FormWindowState.Maximized;
+			await Task.Delay(1500);
+			Shot("files-max-nofix.png");
+			Log("without the fix, top vs strip: " + TopDiff("files-max-nofix.png"));
+			win.WindowState = FormWindowState.Normal;
+			await Task.Delay(800);
+			FilesWindow.FrameFix = true;
+			win.WindowState = FormWindowState.Maximized;
+			await Task.Delay(1500);
+			Shot("files-max.png");
+			int diff = TopDiff("files-max.png");
+			glassOk = diff >= 0 && diff < 30;
+			Log("maximized, top vs strip: " + diff);
+			win.WindowState = FormWindowState.Normal;
+			await Task.Delay(1500);
+			Shot("files-restored.png");
+			int back = TopDiff("files-restored.png");
+			glassOk = glassOk && back >= 0 && back < 30;
+			Log("restored, top vs strip: " + back);
 			Finish();
 		}
 
@@ -2096,6 +2129,24 @@ namespace OazyFiles
 			Log("message loop ended, exiting with " + ExitCode);
 			try { File.WriteAllLines(Path.Combine(dir, "files-selftest.log"), log.ToArray()); } catch { }
 			try { Directory.Delete(root, true); } catch { }
+		}
+
+		// How far the very top of the tab strip is from its lower part, in the
+		// empty space right of the tabs (-1 if the shot can't be read).
+		int TopDiff(string name)
+		{
+			try
+			{
+				using (Bitmap bmp = new Bitmap(Path.Combine(dir, name)))
+				{
+					Rectangle wa = Screen.FromHandle(win.Handle).WorkingArea;
+					int x = bmp.Width * 6 / 10, dy = win.Maximized ? Math.Max(0, wa.Top - win.Bounds.Top) : 0;
+					float k = win.Scale_;
+					Color top = bmp.GetPixel(x, dy + (int)(8 * k)), low = bmp.GetPixel(x, dy + (int)(36 * k));
+					return Math.Abs(top.R - low.R) + Math.Abs(top.G - low.G) + Math.Abs(top.B - low.B);
+				}
+			}
+			catch (Exception e) { Log("glass check failed: " + e.Message); return -1; }
 		}
 
 		void Shot(string name)
@@ -2117,8 +2168,8 @@ namespace OazyFiles
 		{
 			if (done) return;
 			done = true;
-			ExitCode = pageOk && listOk && iconOk && opsOk && searchOk ? 0 : 1;
-			Log("page=" + pageOk + " list=" + listOk + " icons=" + iconOk + " ops=" + opsOk + " search=" + searchOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
+			ExitCode = pageOk && listOk && iconOk && opsOk && searchOk && glassOk ? 0 : 1;
+			Log("page=" + pageOk + " list=" + listOk + " icons=" + iconOk + " ops=" + opsOk + " search=" + searchOk + " glass=" + glassOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
 			try { File.WriteAllLines(Path.Combine(dir, "files-selftest.log"), log.ToArray()); } catch { }
 			App.Quit();
 		}
