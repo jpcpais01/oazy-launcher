@@ -18,6 +18,9 @@ const STYLES := {
 	"aurora": ["Aurora", 1],
 	"tide": ["Tide", 2],
 	"drift": ["Drift", 3],
+	"ripple": ["Ripple", 4],
+	"bloom": ["Bloom", 5],
+	"shallows": ["Shallows", 6],
 }
 const PARAMS := ["wall_base", "wall_a", "wall_b", "wall_c", "wall_glow"]
 ## Hour -> palette keyframes for "auto".
