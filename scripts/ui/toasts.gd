@@ -40,7 +40,7 @@ func show_toast(text: String, kind: StringName = &"info", action: Callable = Cal
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	var glass := GlassPanel.new(true, 18.0, GlassPanel.TINT_POPUP)
-	glass.set_shadow_strength(0.4, 24, 10.0)
+	glass.set_shadow_strength(0.28, 18, 6.0)
 	card.add_child(glass)
 	var pad := MarginContainer.new()
 	pad.add_theme_constant_override("margin_left", 16)
@@ -81,10 +81,10 @@ func show_toast(text: String, kind: StringName = &"info", action: Callable = Cal
 	if not is_instance_valid(card):
 		return
 	card.pivot_offset = card.size / 2.0
-	card.scale = Vector2.ONE * 0.92
-	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_property(card, "modulate:a", 1.0, 0.25)
-	t.tween_property(card, "scale", Vector2.ONE, 0.4)
+	card.scale = Vector2.ONE * 0.97
+	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	t.tween_property(card, "modulate:a", 1.0, 0.2)
+	t.tween_property(card, "scale", Vector2.ONE, 0.3)
 	await get_tree().create_timer(6.0 if action.is_valid() else 3.6).timeout
 	_dismiss(card)
 

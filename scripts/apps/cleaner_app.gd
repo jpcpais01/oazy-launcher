@@ -418,7 +418,7 @@ func _render_overview() -> void:
 			parts.append("%d startup app%s that can wait" % [st, "" if st == 1 else "s"])
 		sub = _sentence(parts) + "."
 	text.add_child(Kit.label(eyebrow, 13, 700, App.accent))
-	var tl := Kit.label(title, 40, 800, Color.WHITE, true)
+	var tl := Kit.label(title, 40, 700, Color.WHITE, true)
 	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.add_child(tl)
 	var sl := Kit.label(sub, 16, 500, App.TEXT_DIM)
@@ -546,7 +546,7 @@ func _tile(id: String, title: String, glyph: String) -> Control:
 			"history":
 				big = str(Cleaner.history.size())
 				cap = "cleanups you can undo" if Cleaner.history.size() != 1 else "cleanup you can undo"
-	var bl := Kit.label(big, 28, 800, Color.WHITE, true)
+	var bl := Kit.label(big, 28, 700, Color.WHITE, true)
 	col.add_child(bl)
 	var row := Kit.hbox(6)
 	col.add_child(row)
@@ -571,7 +571,7 @@ func _render_busy() -> void:
 	orb_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(orb_row)
 	orb_row.add_child(_orb(260.0, 0.55, true))
-	var t := Kit.label("Putting things back" if undoing else "Applying your picks", 34, 800, Color.WHITE, true)
+	var t := Kit.label("Putting things back" if undoing else "Applying your picks", 34, 700, Color.WHITE, true)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center.add_child(t)
 	_phase_label = Kit.label(Cleaner.phase, 16, 500, App.TEXT_DIM)
@@ -606,7 +606,7 @@ func _render_result() -> void:
 		title = "Put back" if bad == 0 else "Mostly put back"
 	else:
 		title = "All done" if bad == 0 else "Done, %d skipped" % bad
-	text.add_child(Kit.label(title, 40, 800, Color.WHITE, true))
+	text.add_child(Kit.label(title, 40, 700, Color.WHITE, true))
 	var parts := PackedStringArray()
 	parts.append("%d change%s %s" % [good, "" if good == 1 else "s", "undone" if undo else "made"])
 	var freed := int(_result.get("freed", 0))
@@ -841,7 +841,7 @@ func _heading(id: String, picks: bool = false) -> void:
 	var top := Kit.hbox(12)
 	text.add_child(top)
 	top.add_child(_glyph_tile(_glyph_of(id), TINTS[id], 40))
-	var tl := Kit.label(h[0], 30, 800, Color.WHITE, true)
+	var tl := Kit.label(h[0], 30, 700, Color.WHITE, true)
 	tl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(tl)
 	var d := Kit.label(h[1], 15, 500, App.TEXT_DIM)

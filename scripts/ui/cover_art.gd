@@ -1,7 +1,7 @@
 class_name CoverArt
 extends Control
 ## Rounded artwork for one library entry, with a procedural fallback cover,
-## focus ring, accent glow and a light sweep. Updates itself when art arrives.
+## hairline focus ring, soft hover shadow and a faint light sweep. Updates itself when art arrives.
 
 const SHADER := preload("res://shaders/cover.gdshader")
 
@@ -48,7 +48,7 @@ func _ready() -> void:
 	_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_rect)
 
-	_initials = Kit.label("", 40, 800, Color(1, 1, 1, 0.92), true)
+	_initials = Kit.label("", 40, 500, Color(1, 1, 1, 0.9), true)
 	_initials.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_initials.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_initials.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -121,7 +121,7 @@ func _sync_size() -> void:
 		return
 	_mat.set_shader_parameter("rect_size", size)
 	_mat.set_shader_parameter("radius", radius)
-	_initials.add_theme_font_size_override("font_size", int(clampf(minf(size.x, size.y) * 0.32, 16.0, 88.0)))
+	_initials.add_theme_font_size_override("font_size", int(clampf(minf(size.x, size.y) * 0.24, 14.0, 64.0)))
 	_update_glow_style()
 
 
@@ -129,7 +129,7 @@ func _update_glow_style() -> void:
 	if _glow == null:
 		return
 	var s := Kit.box(Color(0, 0, 0, 0), int(radius))
-	Kit.shadowed(s, Color(App.accent, 0.55), 26, Vector2(0, 8))
+	Kit.shadowed(s, Color(0, 0.02, 0.04, 0.4), 16, Vector2(0, 8))
 	_glow.add_theme_stylebox_override("panel", s)
 
 

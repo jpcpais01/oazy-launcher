@@ -118,8 +118,8 @@ func _style_hover() -> void:
 	var glow := Catalog.icon_color(str(item.get("icon_key", "")))
 	if glow.a <= 0.0:
 		glow = App.accent
-	var s := Kit.box(Color(glow, 0.16), SIZE / 2.0 - 4.0, Color(1, 1, 1, 0.14), 1)
-	Kit.shadowed(s, Color(glow, 0.32), 14, Vector2.ZERO)
+	var s := Kit.box(Color(glow, 0.13), SIZE / 2.0 - 4.0, Color(1, 1, 1, 0.1), 1)
+	Kit.shadowed(s, Color(glow, 0.16), 8, Vector2.ZERO)
 	_hover_bg.add_theme_stylebox_override("panel", s)
 
 
@@ -149,8 +149,8 @@ func _set_hot(on: bool) -> void:
 	if _tween and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_tween.tween_property(_hover_bg, "modulate:a", 1.0 if on else 0.0, 0.25)
-	_tween.tween_property(_icon, "scale", Vector2.ONE * (1.1 if on else 1.0), 0.3).set_trans(Tween.TRANS_BACK)
+	_tween.tween_property(_hover_bg, "modulate:a", 1.0 if on else 0.0, 0.18)
+	_tween.tween_property(_icon, "scale", Vector2.ONE * (1.05 if on else 1.0), 0.2).set_trans(Tween.TRANS_QUART)
 	if on:
 		Sfx.play(&"move", 1.25)
 
@@ -160,8 +160,8 @@ func _gui_input(event: InputEvent) -> void:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
 				var t := create_tween()
-				t.tween_property(_icon, "scale", Vector2.ONE * 0.88, 0.06)
-				t.tween_property(_icon, "scale", Vector2.ONE * (1.1 if _hot else 1.0), 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				t.tween_property(_icon, "scale", Vector2.ONE * 0.92, 0.06)
+				t.tween_property(_icon, "scale", Vector2.ONE * (1.05 if _hot else 1.0), 0.22).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 				clicked.emit(self)
 			MOUSE_BUTTON_MIDDLE:
 				middle_clicked.emit(self)

@@ -110,7 +110,7 @@ func _build_notes() -> Control:
 	var arrow := Kit.icon_rect("chevron_right", 20, App.accent.lightened(0.3))
 	arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	jump.add_child(arrow)
-	jump.add_child(Kit.label(latest, 34, 800, Color.WHITE, true))
+	jump.add_child(Kit.label(latest, 34, 700, Color.WHITE, true))
 	left.add_child(jump)
 	var meta := PackedStringArray()
 	if int(Updater.latest.get("size", 0)) > 0:
@@ -138,7 +138,7 @@ func _build_notes() -> Control:
 	view.add_child(right)
 	var head := Kit.hbox(10)
 	head.add_child(Kit.icon_rect("sparkles", 20, Color.WHITE))
-	head.add_child(Kit.label("What's new", 22, 800, Color.WHITE, true))
+	head.add_child(Kit.label("What's new", 22, 700, Color.WHITE, true))
 	right.add_child(head)
 	_cards = NotesCards.new(Updater.combined_notes())
 	right.add_child(_cards)
@@ -183,7 +183,7 @@ func _build_progress() -> Control:
 	_orb = UpdateOrb.new(340, 0.62)
 	_orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	orb_box.add_child(_orb)
-	_percent = Kit.label("0%", 54, 800, Color.WHITE, true)
+	_percent = Kit.label("0%", 54, 700, Color.WHITE, true)
 	_percent.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_percent.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_percent.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -198,7 +198,7 @@ func _build_progress() -> Control:
 	_check.visible = false
 	orb_box.add_child(_check)
 
-	_dl_title = Kit.label("", 26, 800, Color.WHITE, true)
+	_dl_title = Kit.label("", 26, 700, Color.WHITE, true)
 	_dl_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	view.add_child(_dl_title)
 	view.add_child(Kit.spacer(0, 6))

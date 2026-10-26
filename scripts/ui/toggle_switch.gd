@@ -36,8 +36,8 @@ func _on_toggled(on: bool) -> void:
 	Sfx.play(&"toggle", 1.1 if on else 0.9)
 	if _tween and _tween.is_valid():
 		_tween.kill()
-	_tween = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_tween.tween_method(_set_t, _t, 1.0 if on else 0.0, 0.32)
+	_tween = create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_tween.tween_method(_set_t, _t, 1.0 if on else 0.0, 0.22)
 
 
 func _set_t(v: float) -> void:

@@ -189,7 +189,7 @@ func _tick() -> void:
 
 func _build_hero() -> void:
 	_hero_glass = GlassPanel.new(false, 26.0, GlassPanel.TINT_WIDGET)
-	_hero_glass.set_shadow_strength(0.4, 40, 18.0)
+	_hero_glass.set_shadow_strength(0.28, 30, 12.0)
 	_hero_glass.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_hero_glass)
 	_hero_art = CoverArt.new()
@@ -231,7 +231,7 @@ func _build_hero() -> void:
 	_hero_logo.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_hero_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hero_box.add_child(_hero_logo)
-	_hero_title = Kit.label("", 36, 800, Color.WHITE, true)
+	_hero_title = Kit.label("", 36, 700, Color.WHITE, true)
 	_hero_title.custom_minimum_size.x = 440
 	_hero_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hero_title.max_lines_visible = 2
@@ -264,7 +264,7 @@ func _build_hero() -> void:
 	_empty_box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_empty_box.offset_left = 32
 	_hero_glass.add_child(_empty_box)
-	_empty_box.add_child(Kit.label("Bring your games in", 30, 800, Color.WHITE, true))
+	_empty_box.add_child(Kit.label("Bring your games in", 30, 700, Color.WHITE, true))
 	var sub := Kit.label("Oazy finds Steam, Epic Games and GOG installs in a second.\nOr drop any .exe or shortcut onto the desktop.", 15, 500, Color(1, 1, 1, 0.75))
 	_empty_box.add_child(sub)
 	var row := Kit.hbox(10)
@@ -391,11 +391,10 @@ func _recent_tile(id: String) -> Control:
 	cover.setup(id, 14.0)
 	holder.mouse_entered.connect(func() -> void:
 		holder.set_meta("hot", true)
-		cover.sweep()
 		cover.set_dim(0.0)
-		var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		t.tween_property(holder, "scale", Vector2.ONE * 1.07, 0.3)
-		t.tween_property(cover, "focus_amount", 1.0, 0.25)
+		var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		t.tween_property(holder, "scale", Vector2.ONE * 1.03, 0.22)
+		t.tween_property(cover, "focus_amount", 1.0, 0.18)
 		Sfx.play(&"move", 1.15)
 	)
 	holder.mouse_exited.connect(func() -> void:
@@ -489,8 +488,8 @@ func _fav_tile(it: Dictionary) -> Control:
 	_shadow(l, 3)
 	c.add_child(l)
 	b.mouse_entered.connect(func() -> void:
-		var t := b.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		t.tween_property(b, "scale", Vector2.ONE * 1.05, 0.25)
+		var t := b.create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		t.tween_property(b, "scale", Vector2.ONE * 1.03, 0.2)
 		Sfx.play(&"move", 1.2)
 	)
 	b.mouse_exited.connect(func() -> void:
