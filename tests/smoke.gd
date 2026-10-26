@@ -373,6 +373,19 @@ func _ui_tests() -> void:
 	check(chrome != null and chrome.window_count() == 2, "taskbar: groups windows under their pin")
 	check(chrome != null and chrome.active, "taskbar: foreground window is active")
 	check(main.taskbar.button_for("win:C:/Tools/mystery.exe") != null, "taskbar: unpinned windows get a button")
+	var mystery: TaskbarButton = main.taskbar.button_for("win:C:/Tools/mystery.exe")
+	if mystery:
+		var bar: Taskbar = main.taskbar
+		bar._on_drag_started(mystery)
+		mystery.position.x = bar._slot_x(0)
+		bar._order.erase(mystery)
+		bar._order.insert(bar._drag_slot(), mystery)
+		bar._on_drag_ended(mystery)
+		check(bar._order[0] == mystery and str(Settings.get_value("taskbar_order")[0]) == mystery.ref, "taskbar: dragging reorders and saves")
+		bar.rebuild()
+		check(bar._order[0] == mystery, "taskbar: dragged order survives a rebuild")
+		Settings.set_value("taskbar_order", [])
+		bar.rebuild()
 	if chrome:
 		main.preview.show_for(chrome)
 		await _wait(0.3)

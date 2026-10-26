@@ -7,9 +7,14 @@ signal clicked(button: TaskbarButton)
 signal middle_clicked(button: TaskbarButton)
 signal context(button: TaskbarButton, at: Vector2)
 signal hover_changed(button: TaskbarButton, on: bool)
+signal drag_started(button: TaskbarButton)
+signal drag_moved(button: TaskbarButton)
+signal drag_ended(button: TaskbarButton)
 
 const SIZE := 42.0
 const ICON := 28.0
+## How far the pointer moves with the button held before a click becomes a drag.
+const DRAG_THRESHOLD := 6.0
 
 var ref := ""
 var item: Dictionary = {}
@@ -20,6 +25,7 @@ var shell_window: ShellWindow
 var running := false
 var active := false
 var launching := false
+var dragging := false
 
 var _hover_bg: Panel
 var _icon: AppIcon
@@ -27,6 +33,8 @@ var _dots: Control
 var _hot := false
 var _tween: Tween
 var _launch_tween: Tween
+var _lift_tween: Tween
+var _press_at := Vector2.INF
 
 
 func setup(r: String, it: Dictionary) -> TaskbarButton:
@@ -37,6 +45,7 @@ func setup(r: String, it: Dictionary) -> TaskbarButton:
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(SIZE, SIZE)
+	size = Vector2(SIZE, SIZE)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	pivot_offset = Vector2(SIZE, SIZE) / 2.0
@@ -155,14 +164,51 @@ func _set_hot(on: bool) -> void:
 		Sfx.play(&"move", 1.25)
 
 
+## Lifted while dragged: a touch bigger and above its neighbours.
+func set_lifted(on: bool) -> void:
+	z_index = 1 if on else 0
+	if _lift_tween and _lift_tween.is_valid():
+		_lift_tween.kill()
+	_lift_tween = create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_lift_tween.tween_property(self, "scale", Vector2.ONE * (1.08 if on else 1.0), 0.2)
+
+
+## Lets go of a drag without a drop, e.g. when the button is removed.
+func cancel_drag() -> void:
+	_press_at = Vector2.INF
+	if dragging:
+		dragging = false
+		drag_ended.emit(self)
+
+
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		if _press_at != Vector2.INF and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			if not dragging and get_global_mouse_position().distance_to(_press_at) > DRAG_THRESHOLD:
+				dragging = true
+				drag_started.emit(self)
+			if dragging:
+				drag_moved.emit(self)
+				accept_event()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		# A click lands on release, so a press that turns into a drag never opens anything.
+		var was_press := _press_at != Vector2.INF
+		_press_at = Vector2.INF
+		if dragging:
+			dragging = false
+			drag_ended.emit(self)
+		elif was_press:
+			clicked.emit(self)
+		accept_event()
+		return
 	if event is InputEventMouseButton and event.pressed:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
+				_press_at = get_global_mouse_position()
 				var t := create_tween()
 				t.tween_property(_icon, "scale", Vector2.ONE * 0.92, 0.06)
 				t.tween_property(_icon, "scale", Vector2.ONE * (1.05 if _hot else 1.0), 0.22).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
-				clicked.emit(self)
 			MOUSE_BUTTON_MIDDLE:
 				middle_clicked.emit(self)
 			MOUSE_BUTTON_RIGHT:
