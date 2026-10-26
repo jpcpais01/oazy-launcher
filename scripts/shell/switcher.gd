@@ -398,7 +398,7 @@ func _make_card(i: int) -> Dictionary:
 	var c := {"node": node, "mat": mat, "x_btn": x, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
 		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)),
 		"shot": shot, "icon_box": icon_box, "badge": badge, "busy": false, "since": 0.0, "failed": false}
-	var cached: Texture2D = Host.captures.get(c["hwnd"]) if e.get("shell") == null else null
+	var cached: Texture2D = Host.picture_of(c["hwnd"]) if e.get("shell") == null else null
 	if cached:
 		_set_shot(c, cached, false)
 	x.pressed.connect(func() -> void:
