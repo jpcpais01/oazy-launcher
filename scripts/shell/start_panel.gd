@@ -676,6 +676,7 @@ func _show_menu(ref: String, at: Vector2) -> void:
 	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 1)
 	if ref.begins_with("lib:"):
 		_menu.add_icon_item(Icons.tex("info", 18), "Details", 2)
+	main.add_library_item(_menu, ref, 4)
 	_menu.reset_size()
 	_menu.position = Vector2i(at)
 	Shell.popup(_menu)
@@ -692,6 +693,10 @@ func _on_menu(id: int) -> void:
 			main.focus_entry(_menu_ref.substr(4))
 		3:
 			main.toggle_favorite(_menu_ref)
+		4:
+			if _menu_ref.begins_with("lib:"):
+				close()
+			main.toggle_library(_menu_ref)
 
 
 func _open_power(btn: Control) -> void:

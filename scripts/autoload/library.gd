@@ -94,6 +94,7 @@ func make_entry(fields: Dictionary = {}) -> Dictionary:
 		"steam_appid": "",
 		"epic_app": "",
 		"epic_uri": "",
+		"app_id": "",
 		"cover": "",
 		"hero": "",
 		"logo": "",
@@ -134,6 +135,12 @@ func update_entry(id: String, fields: Dictionary) -> void:
 	if e.is_empty():
 		return
 	var structural := fields.has("name") or fields.has("kind") or fields.has("favorite")
+	# Pointing an app from Start at something else makes it a plain entry.
+	var app_id := str(e.get("app_id", ""))
+	if app_id != "" and fields.has("path") and str(fields["path"]).replace("\\", "/") != ("shell:AppsFolder/" + app_id).replace("\\", "/"):
+		fields = fields.duplicate()
+		fields["app_id"] = ""
+		structural = true
 	e.merge(fields, true)
 	_queue_save()
 	entry_changed.emit(id)
@@ -295,6 +302,22 @@ func launch(id: String) -> bool:
 	if e.is_empty():
 		return false
 	var ok := false
+	# Apps added from Start open the way Start opens them.
+	if str(e.get("app_id", "")) != "":
+		ok = Catalog.launch_app(str(e["app_id"]))
+	else:
+		ok = _launch_source(e)
+	if ok:
+		update_entry(id, {
+			"last_played": int(Time.get_unix_time_from_system()),
+			"launches": int(e["launches"]) + 1,
+		})
+		launched.emit(id)
+	return ok
+
+
+func _launch_source(e: Dictionary) -> bool:
+	var ok := false
 	match str(e["source"]):
 		"steam":
 			ok = OS.shell_open("steam://rungameid/%s" % e["steam_appid"]) == OK
@@ -302,12 +325,6 @@ func launch(id: String) -> bool:
 			ok = OS.shell_open(str(e["epic_uri"])) == OK
 		_:
 			ok = _launch_path(e)
-	if ok:
-		update_entry(id, {
-			"last_played": int(Time.get_unix_time_from_system()),
-			"launches": int(e["launches"]) + 1,
-		})
-		launched.emit(id)
 	return ok
 
 

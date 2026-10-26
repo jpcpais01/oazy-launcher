@@ -206,23 +206,29 @@ func launch(ref: String) -> bool:
 		return true
 	if ref.begins_with("app:"):
 		note_recent(ref)
-		if not App.is_windows():
-			App.toast("Opening apps works on Windows")
-			return false
-		var run_app := func() -> bool: return OS.create_process("explorer.exe", ["shell:AppsFolder\\" + ref.substr(4)]) > 0
-		# Terminal, Command Prompt and PowerShell open in Oazy Terminal.
-		var profile := Terminal.profile_for(item(ref)) if Terminal.enabled() else "-"
-		if profile != "-":
-			return Terminal.open({"profile": profile}, run_app)
-		# File Explorer opens Oazy Files.
-		if Files.enabled() and Files.is_explorer(item(ref)):
-			return Files.open({}, run_app)
-		return run_app.call()
+		return launch_app(ref.substr(4))
 	if ref.begins_with("win:"):
 		var exe := ref.substr(4)
 		if FileAccess.file_exists(exe):
 			return OS.create_process(exe, []) > 0
 	return false
+
+
+## Opens an installed app by its Start id (also how library apps added from
+## Start open).
+func launch_app(id: String) -> bool:
+	if not App.is_windows():
+		App.toast("Opening apps works on Windows")
+		return false
+	var run_app := func() -> bool: return OS.create_process("explorer.exe", ["shell:AppsFolder\\" + id]) > 0
+	# Terminal, Command Prompt and PowerShell open in Oazy Terminal.
+	var profile := Terminal.profile_for(item("app:" + id)) if Terminal.enabled() else "-"
+	if profile != "-":
+		return Terminal.open({"profile": profile}, run_app)
+	# File Explorer opens Oazy Files.
+	if Files.enabled() and Files.is_explorer(item("app:" + id)):
+		return Files.open({}, run_app)
+	return run_app.call()
 
 
 func note_recent(ref: String) -> void:
@@ -261,9 +267,11 @@ func _build_items() -> void:
 	for e in Library.entries:
 		if e["kind"] == "game":
 			games[Art.norm_title(str(e["name"]))] = true
+	var in_library := library_app_ids()
 	for a in apps:
-		# A game's Start shortcut would duplicate its library tile.
-		if games.has(Art.norm_title(str(a["name"]))):
+		# A game's Start shortcut would duplicate its library tile, and an app
+		# in the library shows as its library entry.
+		if games.has(Art.norm_title(str(a["name"]))) or in_library.has(str(a["id"]).to_lower()):
 			continue
 		list.append(item("app:" + str(a["id"])))
 	for e in Library.entries:
@@ -338,6 +346,15 @@ static func match_score(name: String, needle: String) -> int:
 
 ## Which item a running window belongs to (so it groups with its pin).
 func ref_for_window(w: Dictionary) -> String:
+	var ref := _window_ref(w)
+	if ref.begins_with("app:"):
+		var entry := library_entry_for_app(ref.substr(4))
+		if entry != "":
+			return "lib:" + entry
+	return ref
+
+
+func _window_ref(w: Dictionary) -> String:
 	if Browser.owns_window(w):
 		var app := Browser.app_for_window(w)
 		return app if app != "" else Browser.REF
@@ -538,6 +555,106 @@ func _pin_flow() -> void:
 	list.insert(clampi(after + 1, 0, list.size()) if after >= 0 else list.size(), "oazy:flow")
 	Settings.set_value("pins", list)
 	pins_changed.emit()
+
+
+# --- Library apps -------------------------------------------------------------------------
+# Any installed app can join the Library, where it gets a cover and sits with
+# your games. It then shows as that entry everywhere (Start, search, the
+# taskbar), so its pins, favourites and recents move over with it, and back
+# again if it leaves.
+
+## Start ids of the apps already in the library, lowercase.
+func library_app_ids() -> Dictionary:
+	var out := {}
+	for e in Library.entries:
+		var id := str(e.get("app_id", ""))
+		if id != "":
+			out[id.to_lower()] = str(e["id"])
+	return out
+
+
+## The library entry an installed app became, or "".
+func library_entry_for_app(id: String) -> String:
+	var l := id.to_lower()
+	for e in Library.entries:
+		if str(e.get("app_id", "")).to_lower() == l:
+			return str(e["id"])
+	return ""
+
+
+func can_add_to_library(ref: String) -> bool:
+	if ref.begins_with("app:"):
+		return library_entry_for_app(ref.substr(4)) == ""
+	if ref.begins_with("win:"):
+		var exe := ref.substr(4)
+		return exe.to_lower().ends_with(".exe") and FileAccess.file_exists(exe)
+	return false
+
+
+## Library fields for an installed app.
+func app_entry_fields(id: String) -> Dictionary:
+	return {
+		"name": str(find_app(id).get("name", id.get_file().get_basename())),
+		"kind": "app",
+		"source": "custom",
+		"path": "shell:AppsFolder\\" + id,
+		"app_id": id,
+	}
+
+
+## Adds an installed app (or a running program) to the library and returns
+## the entry id ("" if it can't be added).
+func add_to_library(ref: String) -> String:
+	var fields := {}
+	if ref.begins_with("app:"):
+		var have := library_entry_for_app(ref.substr(4))
+		if have != "":
+			return have
+		fields = app_entry_fields(ref.substr(4))
+	elif can_add_to_library(ref):
+		fields = Library.infer_from_path(ref.substr(4).replace("\\", "/"))
+	else:
+		return ""
+	var id := Library.add_entry(fields)
+	_move_ref(ref, "lib:" + id)
+	return id
+
+
+## Call before an entry leaves the library: an installed app takes its pins
+## and favourites back, anything else just loses them.
+func forget_entry(id: String) -> void:
+	var app_id := str(Library.get_entry(id).get("app_id", ""))
+	if app_id != "" and not find_app(app_id).is_empty():
+		_move_ref("lib:" + id, "app:" + app_id)
+	else:
+		set_pinned("lib:" + id, false)
+
+
+func _move_ref(from: String, to: String) -> void:
+	var pins_list: Array = Settings.get_value("pins").duplicate()
+	var at := pins_list.find(from)
+	if at >= 0:
+		pins_list[at] = to
+		Settings.set_value("pins", pins_list)
+		pins_changed.emit()
+	var recent: Array = Settings.get_value("recent_apps").duplicate()
+	at = recent.find(from)
+	if at >= 0:
+		recent[at] = to
+		Settings.set_value("recent_apps", recent)
+	if is_favorite(from):
+		var favs: Array = Settings.get_value("favorites").duplicate()
+		at = favs.find(from)
+		if at >= 0:
+			favs[at] = to
+		else:
+			favs.append(to)
+		Settings.set_value("favorites", favs)
+		if to.begins_with("lib:"):
+			var eid := to.substr(4)
+			if not bool(Library.get_entry(eid).get("favorite", false)):
+				Library.toggle_favorite(eid)
+		favorites_changed.emit()
 
 
 # --- Favourites ---------------------------------------------------------------------------

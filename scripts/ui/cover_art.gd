@@ -15,6 +15,8 @@ var _rect: ColorRect
 var _mat: ShaderMaterial
 var _initials: Label
 var _glow: Panel
+## An app with no cover shows its own icon on a plate tinted to match.
+var _app_icon: AppIcon
 var _sweep_tween: Tween
 
 
@@ -57,6 +59,10 @@ func _ready() -> void:
 	resized.connect(_sync_size)
 	Art.art_ready.connect(_on_art_ready)
 	Library.entry_changed.connect(_on_entry_changed)
+	Catalog.icon_ready.connect(func(key: String) -> void:
+		if _app_icon and _app_icon.visible and key == str(_app_icon.item.get("icon_key", "")):
+			refresh()
+	)
 	App.accent_changed.connect(func(_c: Color) -> void: _update_glow_style())
 	_sync_size()
 	refresh()
@@ -77,15 +83,39 @@ func refresh() -> void:
 		_mat.set_shader_parameter("has_art", true)
 		_mat.set_shader_parameter("art_size", tex.get_size())
 		_initials.visible = false
+		if _app_icon:
+			_app_icon.visible = false
 	else:
 		var name := str(e.get("name", "?"))
-		var cols := Kit.cover_colors(name, str(e.get("color", "")))
+		var tint := str(e.get("color", ""))
+		var show_icon := kind == &"cover" and str(e.get("kind", "")) == "app"
+		if show_icon:
+			if _app_icon == null:
+				_app_icon = AppIcon.new()
+				add_child(_app_icon)
+			var it := Catalog.item("lib:" + entry_id)
+			_app_icon.set_item(it)
+			var c := Catalog.icon_color(str(it["icon_key"]))
+			if tint == "" and c.a > 0.0:
+				tint = c.to_html(false)
+			_layout_icon()
+		if _app_icon:
+			_app_icon.visible = show_icon
+		var cols := Kit.cover_colors(name, tint)
 		_mat.set_shader_parameter("has_art", false)
 		_mat.set_shader_parameter("color_a", cols[0])
 		_mat.set_shader_parameter("color_b", cols[1])
 		_mat.set_shader_parameter("seed", float(absi(name.hash()) % 1000) / 1000.0)
 		_initials.text = Fmt.initials(name)
-		_initials.visible = kind != &"hero"
+		_initials.visible = kind != &"hero" and not show_icon
+
+
+func _layout_icon() -> void:
+	if _app_icon == null:
+		return
+	var s := roundf(clampf(minf(size.x, size.y) * 0.36, 16.0, 96.0))
+	_app_icon.size = Vector2(s, s)
+	_app_icon.position = ((size - _app_icon.size) / 2.0 - Vector2(0, size.y * 0.04)).round()
 
 
 func sweep(delay: float = 0.0) -> void:
@@ -122,6 +152,7 @@ func _sync_size() -> void:
 	_mat.set_shader_parameter("rect_size", size)
 	_mat.set_shader_parameter("radius", radius)
 	_initials.add_theme_font_size_override("font_size", int(clampf(minf(size.x, size.y) * 0.24, 14.0, 64.0)))
+	_layout_icon()
 	_update_glow_style()
 
 
