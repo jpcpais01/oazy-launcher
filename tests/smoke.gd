@@ -221,6 +221,24 @@ func _logic_tests() -> void:
 	check(AppIcon.custom_look({"ref": "lib:x", "name": "Claude Code", "icon_key": "C:\\Windows\\System32\\cmd.exe"}).is_empty(), "icons: Claude Code keeps its own look")
 	check(AppIcon.custom_look({"ref": "app:Chrome", "name": "Google Chrome"}).is_empty(), "icons: other apps keep their icons")
 
+	# Mouse pointers: ten complete themes, unpacked into real Windows cursors.
+	check(Cursors.theme_ids().size() == 10, "pointers: ten themes")
+	check(Cursors.selected() == "oazy", "pointers: Oazy's own by default")
+	var missing := PackedStringArray()
+	for theme in Cursors.theme_ids():
+		for glyph in CursorSets.GLYPHS:
+			if Cursors.preview(theme, glyph) == null:
+				missing.append("%s/%s" % [theme, glyph])
+	check(missing.is_empty(), "pointers: every glyph has a preview %s" % str(missing))
+	var dir := Cursors._prepare("lagoon")
+	var files := DirAccess.get_files_at(dir) if dir != "" else PackedStringArray()
+	check(files.has("arrow.cur") and files.has("hand.cur") and files.has("busy.ani") and files.has("working.ani") and files.size() == CursorSets.GLYPHS.size() + 1, "pointers: theme unpacks to a full set (%s)" % str(files))
+	if files.has("busy.ani"):
+		var ani := FileAccess.get_file_as_bytes(dir.path_join("busy.ani"))
+		check(ani.slice(0, 4).get_string_from_ascii() == "RIFF" and ani.slice(8, 12).get_string_from_ascii() == "ACON" and ani.decode_u32(4) == ani.size() - 8, "pointers: busy spinner is a valid animated cursor")
+		var cur := FileAccess.get_file_as_bytes(dir.path_join("arrow.cur"))
+		check(cur.decode_u16(2) == 2 and cur.decode_u16(4) == CursorSets.SIZES.size(), "pointers: arrow has every size")
+
 
 func _mock_apps() -> Array:
 	return [

@@ -233,7 +233,9 @@ func shutdown() -> void:
 		return
 	_quitting = true
 	if available and _pipe != null:
-		# Let the companion put the Windows taskbar and work area back, then go.
+		# Let the companion put Windows' pointers, taskbar and work area back,
+		# then go.
+		_pipe.store_line("0\tcursors_off")
 		_pipe.store_line("0\tunshell")
 		_pipe.flush()
 		var waited := 0

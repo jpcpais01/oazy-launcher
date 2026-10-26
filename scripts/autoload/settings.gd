@@ -35,6 +35,7 @@ const DEFAULTS := {
 	"seen_shell_intro": false,
 	"weather_unit": "auto",
 	"cleaner_watch": true,
+	"pointer": "oazy",
 }
 
 var _values := {}
