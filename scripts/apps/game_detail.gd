@@ -79,28 +79,28 @@ func _ready() -> void:
 	_logo.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	info.add_child(_logo)
-	_title = Kit.label("", 44, 800, Color.WHITE, true)
-	_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.35))
-	_title.add_theme_constant_override("shadow_outline_size", 12)
+	_title = Kit.label("", 40, 700, Color.WHITE, true)
+	_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.22))
+	_title.add_theme_constant_override("shadow_outline_size", 8)
 	info.add_child(_title)
 	_meta = Kit.label("", 15, 500, Color(1, 1, 1, 0.8))
 	info.add_child(_meta)
 
 	var actions := Kit.hbox(12)
 	col.add_child(actions)
-	_play = FxButton.make("Play", "play", FxButton.Style.PRIMARY, 52)
-	_play.custom_minimum_size.x = 180
+	_play = FxButton.make("Play", "play", FxButton.Style.PRIMARY, 46)
+	_play.custom_minimum_size.x = 160
 	_play.pressed.connect(func() -> void: main.launch(entry_id))
 	actions.add_child(_play)
-	_fav = FxButton.icon_only("heart", "Favourite", 22, 52)
+	_fav = FxButton.icon_only("heart", "Favourite", 20, 46)
 	_fav.variant = FxButton.Style.GHOST
 	_fav._apply_style()
 	_fav.pressed.connect(func() -> void: Catalog.toggle_favorite("lib:" + entry_id))
 	actions.add_child(_fav)
-	var edit := FxButton.make("Edit", "edit", FxButton.Style.GHOST, 52)
+	var edit := FxButton.make("Edit", "edit", FxButton.Style.GHOST, 46)
 	edit.pressed.connect(func() -> void: main.open_edit(entry_id))
 	actions.add_child(edit)
-	var more := FxButton.icon_only("more", "More", 22, 52)
+	var more := FxButton.icon_only("more", "More", 20, 46)
 	more.variant = FxButton.Style.GHOST
 	more._apply_style()
 	more.pressed.connect(func() -> void: main.show_entry_menu(entry_id, more.global_position + Vector2(0, more.size.y + 8)))
@@ -164,7 +164,7 @@ func _apply_logo() -> void:
 func _stat(icon_name: String, label: String, value: String) -> Control:
 	var p := PanelContainer.new()
 	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	p.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.05), 16, Color(1, 1, 1, 0.07), 1, 18, 14))
+	p.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.035), 12, Color(1, 1, 1, 0.06), 1, 16, 12))
 	var row := Kit.hbox(12)
 	p.add_child(row)
 	var ic := Kit.icon_rect(icon_name, 18, App.accent.lightened(0.25))
@@ -173,5 +173,5 @@ func _stat(icon_name: String, label: String, value: String) -> Control:
 	var col := Kit.vbox(2)
 	row.add_child(col)
 	col.add_child(Kit.label(label, 12, 600, App.TEXT_MUTE))
-	col.add_child(Kit.label(value, 16, 700, App.TEXT))
+	col.add_child(Kit.label(value, 16, 600, App.TEXT))
 	return p

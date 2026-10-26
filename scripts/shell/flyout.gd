@@ -22,7 +22,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_glass = GlassPanel.new(true, 22.0, GlassPanel.TINT_POPUP)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_glass.set_shadow_strength(0.5, 40, 16.0)
+	_glass.set_shadow_strength(0.32, 28, 10.0)
 	add_child(_glass)
 	content = Kit.vbox(14)
 	content.position = Vector2(PAD, PAD)

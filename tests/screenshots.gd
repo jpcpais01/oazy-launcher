@@ -87,12 +87,30 @@ func _ready() -> void:
 	], 0)
 	var ws: GDScript = load("res://tests/weather_sample.gd")
 	Weather.set_mock(ws.place(), ws.forecast())
+	Network.set_mock({"ok": true, "wifi": true, "radio": true, "state": "connected", "internet": true,
+		"current": {"id": "4f617a79", "ssid": "Oazy Home", "signal": 92, "mbps": 1201, "ghz": "5"},
+		"ethernet": [{"name": "Ethernet", "device": "Intel(R) Ethernet I225-V", "up": true, "mbps": 1000}],
+		"networks": [
+			{"id": "4f617a79", "ssid": "Oazy Home", "signal": 92, "secure": true, "auth": "wpa2", "known": true, "connected": true, "connectable": true},
+			{"id": "4c6162", "ssid": "Lab 5G", "signal": 74, "secure": true, "auth": "wpa3", "known": false, "connected": false, "connectable": true},
+			{"id": "436166", "ssid": "Café Lisboa Guest", "signal": 51, "secure": false, "auth": "open", "known": false, "connected": false, "connectable": true},
+			{"id": "4e4f53", "ssid": "NOS-8A21", "signal": 38, "secure": true, "auth": "wpa2", "known": true, "connected": false, "connectable": true},
+			{"id": "4d454f", "ssid": "MEO-Office", "signal": 22, "secure": true, "auth": "enterprise", "known": false, "connected": false, "connectable": true},
+		]})
 	await _wait(2.5)
 	await shot("01-desktop")
 	main.weather.open(main.taskbar._weather_btn)
 	await _wait(0.9)
 	await shot("01b-weather")
 	main.weather.close()
+	await _wait(0.3)
+	main.network.open(main.taskbar._net)
+	await _wait(0.9)
+	await shot("01c-network")
+	main.network._toggle_row("4c6162")
+	await _wait(0.6)
+	await shot("01d-network-key")
+	main.network.close()
 	await _wait(0.3)
 	main.start.open()
 	await _wait(0.9)

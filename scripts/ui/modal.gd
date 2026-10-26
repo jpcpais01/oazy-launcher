@@ -35,7 +35,7 @@ func _ready() -> void:
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	center.add_child(card)
 	var glass := GlassPanel.new(true, 28.0, GlassPanel.TINT_WINDOW)
-	glass.set_shadow_strength(0.55, 50, 22.0)
+	glass.set_shadow_strength(0.36, 36, 14.0)
 	card.add_child(glass)
 	var pad := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
@@ -46,12 +46,12 @@ func _ready() -> void:
 	_build()
 	Sfx.play(&"open")
 	modulate.a = 0.0
-	card.scale = Vector2.ONE * 0.94
+	card.scale = Vector2.ONE * 0.97
 	await get_tree().process_frame
 	card.pivot_offset = card.size / 2.0
 	var t := create_tween().set_parallel(true)
-	t.tween_property(self, "modulate:a", 1.0, 0.22).set_trans(Tween.TRANS_SINE)
-	t.tween_property(card, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(self, "modulate:a", 1.0, 0.18).set_trans(Tween.TRANS_SINE)
+	t.tween_property(card, "scale", Vector2.ONE, 0.28).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 	_focus_first()
 
 
@@ -87,7 +87,7 @@ func title_block(title: String, subtitle: String = "", icon_name: String = "") -
 		row.add_child(bubble)
 	var col := Kit.vbox(2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_child(Kit.label(title, 28, 800, Color.WHITE, true))
+	col.add_child(Kit.label(title, 26, 700, Color.WHITE, true))
 	if subtitle != "":
 		var s := Kit.label(subtitle, 15, 500, App.TEXT_DIM)
 		s.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

@@ -41,19 +41,19 @@ void fragment() {
 		col = mix(color_a.rgb, color_b.rgb, smoothstep(0.0, 1.0, uv.y * 0.85 + uv.x * 0.25 + wave));
 		vec2 c1 = vec2(0.72 + 0.12 * sin(seed * 9.0), 0.22 + 0.08 * cos(seed * 5.0));
 		float blob = max(0.0, 1.0 - length((uv - c1) * vec2(rect_size.x / rect_size.y, 1.0)) * 2.2);
-		col += vec3(1.0) * blob * blob * 0.12;
+		col += vec3(1.0) * blob * blob * 0.07;
 		col *= 1.0 - smoothstep(0.55, 1.0, uv.y) * 0.35;
 	}
 
 	// Light sweep moving diagonally across.
 	float sw = 1.0 - smoothstep(0.0, 0.1, abs((uv.x + uv.y * 0.6) - sweep));
-	col += vec3(1.0) * sw * 0.22;
+	col += vec3(1.0) * sw * 0.08;
 
 	col *= 1.0 - dim;
 
 	// Focus ring hugging the rounded edge.
-	float ring = (1.0 - smoothstep(1.0, 2.6, abs(d + 2.2))) * focus;
-	col = mix(col, ring_color.rgb, ring);
+	float ring = (1.0 - smoothstep(0.4, 1.3, abs(d + 1.4))) * focus;
+	col = mix(col, ring_color.rgb, ring * 0.85);
 
 	COLOR = vec4(col * vcol.rgb, alpha * vcol.a);
 }

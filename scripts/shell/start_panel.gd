@@ -43,7 +43,7 @@ func _ready() -> void:
 	size = Vector2(W, H)
 	_glass = GlassPanel.new(true, 26.0, GlassPanel.TINT_POPUP)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_glass.set_shadow_strength(0.45, 38, 10.0)
+	_glass.set_shadow_strength(0.3, 28, 8.0)
 	add_child(_glass)
 
 	var root := Kit.vbox(18)
@@ -60,8 +60,8 @@ func _ready() -> void:
 	_search.custom_minimum_size.y = 52
 	_search.right_icon = Icons.tex("search", 20, Color(1, 1, 1, 0.6))
 	_search.add_theme_font_size_override("font_size", 17)
-	_search.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.08), 999, Color(1, 1, 1, 0.1), 1, 22, 12))
-	_search.add_theme_stylebox_override("focus", Kit.box(Color(1, 1, 1, 0.11), 999, Color(App.accent, 0.7), 1, 22, 12))
+	_search.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.05), 999, Color(1, 1, 1, 0.08), 1, 22, 12))
+	_search.add_theme_stylebox_override("focus", Kit.box(Color(1, 1, 1, 0.07), 999, Color(App.accent, 0.45), 1, 22, 12))
 	_search.text_changed.connect(_on_text)
 	_search.gui_input.connect(_on_search_key)
 	root.add_child(_search)
@@ -180,7 +180,7 @@ func _build_home() -> Control:
 	right.add_child(_place("Cleaner", "wand", func() -> void: _run(func() -> void: main.open_app(&"cleaner"))))
 	right.add_child(_place("What's new", "sparkles", func() -> void: _run(func() -> void: main.show_patch_notes())))
 	right.add_child(Kit.spacer(0, 0, true))
-	var power := FxButton.make("Power", "power", FxButton.Style.GHOST, 42)
+	var power := FxButton.make("Power", "power", FxButton.Style.GHOST, 40)
 	power.focus_mode = Control.FOCUS_NONE
 	power.pressed.connect(func() -> void: _open_power(power))
 	right.add_child(power)
@@ -226,7 +226,7 @@ func _build_results() -> Control:
 
 
 func _section_title(text: String) -> Label:
-	return Kit.label(text, 15, 700, App.TEXT_DIM)
+	return Kit.label(text, 14, 600, App.TEXT_DIM)
 
 
 func _place(text: String, icon_name: String, cb: Callable) -> Button:
@@ -257,7 +257,7 @@ func _tile(ref: String) -> Control:
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	b.tooltip_text = str(it["name"])
 	b.add_theme_stylebox_override("normal", Kit.empty())
-	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.09), 14, Color(1, 1, 1, 0.08), 1))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.07), 14, Color(1, 1, 1, 0.05), 1))
 	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.14), 14))
 	var col := Kit.vbox(8)
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -420,15 +420,14 @@ func _fill_recent() -> void:
 		cover.setup(id, 12.0)
 		holder.pivot_offset = Vector2(47, 70)
 		holder.mouse_entered.connect(func() -> void:
-			cover.sweep()
-			var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			t.tween_property(holder, "scale", Vector2.ONE * 1.06, 0.3)
-			t.tween_property(cover, "focus_amount", 1.0, 0.25)
+			var t := Kit.hover_tween(holder).set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+			t.tween_property(holder, "scale", Vector2.ONE * 1.025, 0.2)
+			t.tween_property(cover, "focus_amount", 1.0, 0.18)
 		)
 		holder.mouse_exited.connect(func() -> void:
-			var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-			t.tween_property(holder, "scale", Vector2.ONE, 0.3)
-			t.tween_property(cover, "focus_amount", 0.0, 0.25)
+			var t := Kit.hover_tween(holder).set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+			t.tween_property(holder, "scale", Vector2.ONE, 0.2)
+			t.tween_property(cover, "focus_amount", 0.0, 0.18)
 		)
 		holder.gui_input.connect(func(ev: InputEvent) -> void:
 			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -509,15 +508,15 @@ func open(text: String = "") -> void:
 	visible = true
 	pivot_offset = Vector2(0, size.y)
 	modulate.a = 0.0
-	scale = Vector2.ONE * 0.96
+	scale = Vector2.ONE * 0.98
 	var target_y := position.y
-	position.y += 26.0
+	position.y += 14.0
 	if _tween and _tween.is_valid():
 		_tween.kill()
-	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_tween.tween_property(self, "modulate:a", 1.0, 0.18)
-	_tween.tween_property(self, "scale", Vector2.ONE, 0.4)
-	_tween.tween_property(self, "position:y", target_y, 0.4)
+	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(self, "modulate:a", 1.0, 0.15)
+	_tween.tween_property(self, "scale", Vector2.ONE, 0.28)
+	_tween.tween_property(self, "position:y", target_y, 0.28)
 	Sfx.play(&"open")
 	Shell.focus(self)
 	_search.grab_focus()
@@ -592,7 +591,7 @@ func _highlight() -> void:
 	for i in _rows.size():
 		var r: Button = _rows[i]
 		if i == _sel:
-			r.add_theme_stylebox_override("normal", Kit.box(Color(App.accent, 0.2), 12, Color(App.accent, 0.45), 1))
+			r.add_theme_stylebox_override("normal", Kit.box(Color(App.accent, 0.16), 12, Color(App.accent, 0.3), 1))
 		else:
 			r.add_theme_stylebox_override("normal", Kit.empty())
 
@@ -663,14 +662,7 @@ func _run(cb: Callable) -> void:
 
 
 func _open_folder(path: String) -> void:
-	if not App.is_windows():
-		if path != "":
-			OS.shell_open(path)
-		return
-	if path == "":
-		OS.create_process("explorer.exe", [])
-	else:
-		OS.create_process("explorer.exe", [path.replace("/", "\\")])
+	Files.open_folder(path)
 
 
 func _show_menu(ref: String, at: Vector2) -> void:

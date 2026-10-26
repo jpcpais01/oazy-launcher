@@ -92,6 +92,13 @@ func set_shadow_strength(a: float, spread: int = 34, offset_y: float = 14.0) -> 
 	_shadow_off = offset_y
 
 
+## Fades the shadow on its own. Modulate isn't group opacity, so when a whole
+## card fades, a shadow left at full strength shows through it as a dark smudge.
+func set_shadow_fade(v: float) -> void:
+	if _shadow:
+		_shadow.modulate.a = v
+
+
 ## The panel and its shadow in global coordinates: what a shell layer keeps on
 ## screen so the shadow fades out instead of being cut off.
 func shadow_rect() -> Rect2:
@@ -127,7 +134,7 @@ func _sync() -> void:
 
 func _sync_shadow() -> void:
 	if _shadow and not _shadow.has_theme_stylebox_override("panel"):
-		set_shadow_strength(0.38)
+		set_shadow_strength(0.26, 24, 8.0)
 	elif _shadow:
 		var s: StyleBoxFlat = _shadow.get_theme_stylebox("panel")
 		s.set_corner_radius_all(int(radius))

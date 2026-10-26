@@ -37,6 +37,7 @@ var _menus: Control
 var quick: QuickSettings
 var calendar: CalendarFlyout
 var weather: WeatherFlyout
+var network: NetworkFlyout
 
 
 func _ready() -> void:
@@ -78,6 +79,9 @@ func _ready() -> void:
 	weather = WeatherFlyout.new()
 	start_layer.add_child(weather)
 	taskbar.attach_weather(weather)
+	network = NetworkFlyout.new()
+	start_layer.add_child(network)
+	taskbar.attach_network(network)
 	taskbar.start_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
@@ -90,6 +94,7 @@ func _ready() -> void:
 			quick.close()
 			calendar.close()
 			weather.close()
+			network.close()
 	)
 
 	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})

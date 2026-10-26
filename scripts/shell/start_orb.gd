@@ -47,7 +47,7 @@ func set_open(v: bool) -> void:
 func _restyle() -> void:
 	var a := App.accent
 	var s := Kit.box(Color(a, 0.0), 12)
-	Kit.shadowed(s, Color(a.lightened(0.2), 0.42), 14, Vector2.ZERO)
+	Kit.shadowed(s, Color(a.lightened(0.2), 0.26), 10, Vector2.ZERO)
 	_halo.add_theme_stylebox_override("panel", s)
 
 
@@ -55,7 +55,7 @@ func _set_hot(on: bool) -> void:
 	_hot = on
 	_fade_halo()
 	var t := create_tween()
-	t.tween_property(self, "scale", Vector2.ONE * (1.07 if on else 1.0), 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(self, "scale", Vector2.ONE * (1.04 if on else 1.0), 0.22).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	if on:
 		Sfx.play(&"move", 1.25)
 
@@ -72,8 +72,8 @@ func _fade_halo() -> void:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var t := create_tween()
-		t.tween_property(self, "scale", Vector2.ONE * 0.9, 0.06)
-		t.tween_property(self, "scale", Vector2.ONE * (1.07 if _hot else 1.0), 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		t.tween_property(self, "scale", Vector2.ONE * 0.93, 0.06)
+		t.tween_property(self, "scale", Vector2.ONE * (1.04 if _hot else 1.0), 0.24).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 		_orb.shockwave(0.6)
 		pressed.emit()
 		accept_event()

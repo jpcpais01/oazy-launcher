@@ -45,7 +45,7 @@ func _ready() -> void:
 	clip_contents = false
 	_glass = GlassPanel.new(true, 22.0, GlassPanel.TINT_WINDOW)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_glass.set_shadow_strength(0.5, 48, 22.0)
+	_glass.set_shadow_strength(0.34, 32, 12.0)
 	add_child(_glass)
 
 	_bar = Control.new()
@@ -112,13 +112,13 @@ func set_active(on: bool) -> void:
 	if _title_label:
 		_title_label.add_theme_color_override("font_color", App.TEXT if on else App.TEXT_MUTE)
 	if _glass:
-		_glass.glow = 0.35 if on else 0.0
+		_glass.glow = 0.18 if on else 0.0
 		if Shell.native:
 			# Tighter in shell mode: the shadow's ring is part of the layer's
 			# shape, so it would catch clicks meant for the apps around it.
-			_glass.set_shadow_strength(0.45 if on else 0.28, 26 if on else 18, 10.0 if on else 7.0)
+			_glass.set_shadow_strength(0.32 if on else 0.2, 20 if on else 14, 7.0 if on else 5.0)
 		else:
-			_glass.set_shadow_strength(0.55 if on else 0.32, 52 if on else 34, 24.0 if on else 14.0)
+			_glass.set_shadow_strength(0.36 if on else 0.22, 36 if on else 24, 14.0 if on else 8.0)
 
 
 ## The window and its shadow (what its layer keeps on screen in shell mode).
@@ -130,12 +130,12 @@ func shell_rect() -> Rect2:
 
 func play_open() -> void:
 	pivot_offset = size / 2.0
-	scale = Vector2.ONE * 0.92
+	scale = Vector2.ONE * 0.97
 	modulate.a = 0.0
 	_kill_anim()
-	_anim = create_tween().set_parallel(true)
-	_anim.tween_property(self, "scale", Vector2.ONE, 0.42).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_anim.tween_property(self, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
+	_anim = create_tween().set_parallel(true).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	_anim.tween_property(self, "scale", Vector2.ONE, 0.26)
+	_anim.tween_property(self, "modulate:a", 1.0, 0.16)
 
 
 func close() -> void:
@@ -147,8 +147,8 @@ func close() -> void:
 	pivot_offset = size / 2.0
 	_kill_anim()
 	_anim = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	_anim.tween_property(self, "scale", Vector2.ONE * 0.95, 0.16)
-	_anim.tween_property(self, "modulate:a", 0.0, 0.16)
+	_anim.tween_property(self, "scale", Vector2.ONE * 0.97, 0.12)
+	_anim.tween_property(self, "modulate:a", 0.0, 0.12)
 	_anim.chain().tween_callback(func() -> void:
 		closed.emit(self)
 		queue_free()
@@ -185,7 +185,7 @@ func unminimize() -> void:
 	_kill_anim()
 	_anim = create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	_anim.tween_property(self, "position", back, 0.34)
-	_anim.tween_property(self, "scale", Vector2.ONE, 0.36).set_trans(Tween.TRANS_BACK)
+	_anim.tween_property(self, "scale", Vector2.ONE, 0.32)
 	_anim.tween_property(self, "modulate:a", 1.0, 0.2)
 	Sfx.play(&"open", 1.1)
 	state_changed.emit(self)

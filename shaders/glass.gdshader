@@ -15,8 +15,8 @@ uniform vec2 rect_size = vec2(400.0, 300.0);
 uniform float radius = 22.0;
 uniform vec4 tint : source_color = vec4(0.06, 0.07, 0.09, 0.5);
 uniform float blur : hint_range(0.0, 6.0) = 4.0;
-uniform float refraction = 10.0;
-uniform float bevel = 16.0;
+uniform float refraction = 5.0;
+uniform float bevel = 8.0;
 uniform float rim : hint_range(0.0, 2.0) = 1.0;
 uniform float saturation = 1.25;
 uniform int source = 1;
@@ -66,14 +66,14 @@ void fragment() {
 	}
 
 	// Light gathered in the thick edge of the glass.
-	col += vec3(0.9, 0.96, 1.0) * lens * 0.05 * rim;
+	col += vec3(0.9, 0.96, 1.0) * lens * 0.02 * rim;
 	// Hairline rim, brightest where it faces the light (top-left) and its
 	// reflection (bottom-right), quiet along the sides in between.
 	float line = 1.0 - smoothstep(0.0, 1.3 * px, abs(d + 0.8 * px));
 	float facing = abs(dot(n, normalize(vec2(-0.55, -1.0))));
-	col += vec3(1.0) * line * mix(0.05, 0.42, facing * facing * facing) * rim;
+	col += vec3(1.0) * line * mix(0.06, 0.24, facing * facing * facing) * rim;
 	// Optional accent glow on the edge (focused windows, hot buttons).
-	col += glow_color.rgb * glow * (1.0 - smoothstep(0.0, 5.0 * px, abs(d + 1.5 * px))) * 0.5;
+	col += glow_color.rgb * glow * (1.0 - smoothstep(0.0, 2.5 * px, abs(d + 1.0 * px))) * 0.5;
 
 	COLOR = vec4(col, alpha * COLOR.a);
 }
