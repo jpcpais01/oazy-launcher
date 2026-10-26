@@ -8,6 +8,9 @@
 //   1 Aurora  silk ribbons of light drifting across a deep sky
 //   2 Tide    layered sheets of liquid glass, each with a lit crest
 //   3 Drift   a handful of large glass bubbles floating in soft light
+//   4 Ripple  slow rings spreading over still water
+//   5 Bloom   a flower of tinted glass petals turning very slowly
+//   6 Shallows sunlight falling in shafts through clear water onto sand
 //
 // Motion is built from whole cycles per hour. Godot's TIME wraps every hour,
 // and this way the wrap lands exactly where it started, so nothing ever jumps.
@@ -167,6 +170,94 @@ vec3 wall_drift(vec2 uv, float ph) {
 	return wall_vignette(col, uv);
 }
 
+// How many whole cycles an hour, at the current speed.
+float wall_cycles(float per_hour) {
+	return max(1.0, floor(per_hour * speed + 0.5));
+}
+
+vec3 wall_ripple(vec2 uv, float ph) {
+	vec2 p = vec2(uv.x * aspect, uv.y);
+	vec3 col = wall_base.rgb;
+	col = mix(col, wall_a.rgb, wall_pool(p, vec2(aspect * 0.3, 0.05), 0.9) * 0.75);
+	col = mix(col, wall_b.rgb, wall_pool(p, vec2(aspect * 0.75, 0.85), 0.75) * 0.7);
+	col = mix(col, wall_c.rgb, wall_pool(p, vec2(aspect * 0.2, 1.1), 0.5) * 0.3);
+	// Seen at a slant, so the rings are wide ellipses. Three at a time, each
+	// spreading and fading over a minute and a half.
+	vec2 c = vec2(aspect * (0.66 + 0.03 * wall_wave(ph, 7.0, 0.0)), 0.6 + 0.02 * wall_wave(ph, 9.0, 1.0));
+	float r = length((p - c) * vec2(1.0, 2.3));
+	float n = wall_cycles(40.0) / 6.2831853;
+	float rings = 0.0;
+	for (int k = 0; k < 3; k++) {
+		float age = fract(ph * n + float(k) / 3.0);
+		float d = r - age * 1.25;
+		float fade = pow(1.0 - age, 1.4) * smoothstep(0.0, 0.12, age);
+		// A lit crest with a soft trough behind it, like a lens in the water.
+		rings += (exp(-d * d * 700.0) - 0.6 * exp(-(d + 0.035) * (d + 0.035) * 700.0)) * fade;
+	}
+	vec3 sheen = mix(wall_glow.rgb, accent.rgb, 0.35);
+	col += sheen * rings * 0.11;
+	// The still surface catches a faint band of sky.
+	float band = (uv.y - 0.36 - 0.01 * wall_wave(ph, 23.0, p.x * 2.0)) * 7.0;
+	col += wall_glow.rgb * exp(-band * band) * 0.025;
+	return wall_vignette(col, uv);
+}
+
+// Long petals of tinted glass fanning out from just past the lower right
+// corner, turning very slowly, so only their sweep shows.
+vec3 wall_bloom(vec2 uv, float ph) {
+	vec2 p = vec2(uv.x * aspect, uv.y);
+	vec3 col = wall_base.rgb;
+	col = mix(col, wall_a.rgb, wall_pool(p, vec2(aspect * 0.25, 0.1), 0.9) * 0.75);
+	col = mix(col, wall_b.rgb * 0.85, wall_pool(p, vec2(aspect * 0.6, 0.95), 0.7) * 0.45);
+	vec2 c = vec2(aspect * 0.98, 1.12);
+	col += mix(wall_glow.rgb, accent.rgb, 0.4) * wall_pool(p, c, 0.7) * 0.06;
+	float turn = 0.35 * wall_wave(ph, 8.0, 0.0);
+	vec3 rim_col = mix(wall_glow.rgb, accent.rgb, 0.25);
+	for (int i = 0; i < 5; i++) {
+		float fi = float(i);
+		float a = 3.45 + turn + fi * 0.34 + 0.06 * wall_wave(ph, 22.0, fi * 1.9);
+		vec2 q = p - c;
+		q = vec2(cos(a) * q.x + sin(a) * q.y, -sin(a) * q.x + cos(a) * q.y);
+		float len = 0.62 + 0.09 * mod(fi * 3.0, 4.0);
+		vec2 e = (q - vec2(len * 0.92, 0.0)) / vec2(len, 0.17);
+		float d = length(e);
+		float inside = 1.0 - smoothstep(0.985, 1.0, d);
+		vec3 tint = mix(wall_b.rgb, mix(wall_a.rgb, accent.rgb, 0.45), mod(fi, 2.0));
+		// Tinted glass: what's behind shows through, a little deeper.
+		col = mix(col, col * 0.88 + tint * 0.22, inside * 0.45);
+		// Its rim catches the light on one side.
+		float lit = 0.3 + 0.7 * smoothstep(-0.6, 0.8, -e.y);
+		col += rim_col * smoothstep(0.86, 1.0, d) * inside * 0.08 * lit;
+	}
+	return wall_vignette(col, uv);
+}
+
+vec3 wall_shallows(vec2 uv, float ph) {
+	vec2 p = vec2(uv.x * aspect, uv.y);
+	vec3 col = mix(wall_a.rgb, wall_b.rgb, smoothstep(0.0, 0.85, uv.y));
+	col = mix(col, wall_base.rgb, 0.35 * (1.0 - wall_pool(p, vec2(aspect * 0.45, 0.35), 0.9)));
+	// Warm sand far below.
+	vec3 sand = mix(wall_c.rgb, wall_glow.rgb, 0.15);
+	col = mix(col, sand, smoothstep(0.62, 1.15, uv.y + 0.03 * wall_wave(ph, 11.0, p.x * 2.2)) * 0.4);
+	// Shafts of sun, slanting and drifting sideways.
+	float s = p.x + uv.y * 0.38;
+	float sh = pow(0.5 + 0.5 * wall_wave(ph, 30.0, s * 4.3), 16.0);
+	sh += 0.7 * pow(0.5 + 0.5 * wall_wave(ph, -22.0, s * 7.1 + 1.3), 22.0);
+	sh += 0.5 * pow(0.5 + 0.5 * wall_wave(ph, 41.0, s * 2.6 + 2.6), 12.0);
+	float fall = (1.0 - smoothstep(0.0, 0.95, uv.y)) * smoothstep(-0.05, 0.12, uv.y);
+	vec3 sun = mix(wall_glow.rgb, accent.rgb, 0.2);
+	col += sun * sh * fall * 0.13;
+	// Light from the surface, and a faint shimmer of it on the sand.
+	col += sun * exp(-uv.y * uv.y * 9.0) * 0.06;
+	// Caustics: a soft net of light where two warped waves cross.
+	vec2 q = p * vec2(7.0, 14.0);
+	float ca = wall_wave(ph, 37.0, q.x + wall_wave(ph, 23.0, q.y * 0.8) * 1.2);
+	float cb = wall_wave(ph, -29.0, q.y * 1.3 + wall_wave(ph, -17.0, q.x * 0.7) * 1.2);
+	float net = pow(1.0 - abs(ca + cb) * 0.5, 9.0);
+	col += sun * net * smoothstep(0.62, 1.0, uv.y) * 0.07;
+	return wall_vignette(col, uv);
+}
+
 vec3 wall_style_color(int style, vec2 uv, float ph) {
 	if (style == 1) {
 		return wall_aurora(uv, ph);
@@ -174,6 +265,12 @@ vec3 wall_style_color(int style, vec2 uv, float ph) {
 		return wall_tide(uv, ph);
 	} else if (style == 3) {
 		return wall_drift(uv, ph);
+	} else if (style == 4) {
+		return wall_ripple(uv, ph);
+	} else if (style == 5) {
+		return wall_bloom(uv, ph);
+	} else if (style == 6) {
+		return wall_shallows(uv, ph);
 	}
 	return wall_oasis(uv, ph);
 }
