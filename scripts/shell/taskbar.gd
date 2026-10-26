@@ -385,24 +385,40 @@ func _group(groups: Dictionary, order: Array[String], ref: String) -> Dictionary
 	return groups[ref]
 
 
-## Puts refs in the order the taskbar was dragged into. Refs never placed
-## by hand slot in after whatever comes before them naturally, so a new pin
-## lands after the other pins and a new window at the end.
+## Puts refs in left-to-right order. Buttons already on the bar keep their
+## place (on first build, the place they were dragged to). A new pin lands
+## after the pin before it; a newly opened app always joins the right end.
+## Unpinned apps that closed are forgotten, so reopening one adds it at the end.
 func _saved_order(natural: Array[String]) -> Array[String]:
-	var saved: Array = Settings.get_value("taskbar_order")
-	if saved.is_empty():
-		return natural
 	var present := {}
 	for r in natural:
 		present[r] = true
-	var out: Array[String] = []
+	var pinned := {}
+	for r in Catalog.pins():
+		pinned[r] = true
+	var saved: Array = Settings.get_value("taskbar_order")
+	var pruned: Array[String] = []
 	for r in saved:
+		if present.has(str(r)) or pinned.has(str(r)):
+			pruned.append(str(r))
+	if pruned.size() != saved.size():
+		Settings.set_value("taskbar_order", pruned)
+	var src: Array = []
+	for b in _order:
+		src.append(b.ref)
+	if src.is_empty():
+		src = pruned
+	var out: Array[String] = []
+	for r in src:
 		if present.has(str(r)) and not out.has(str(r)):
 			out.append(str(r))
 	var prev := ""
 	for r in natural:
 		if not out.has(r):
-			out.insert(out.find(prev) + 1 if prev != "" else 0, r)
+			if pinned.has(r):
+				out.insert(out.find(prev) + 1 if prev != "" else 0, r)
+			else:
+				out.append(r)
 		prev = r
 	return out
 
