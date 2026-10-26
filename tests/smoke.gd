@@ -534,7 +534,44 @@ func _host_tests() -> void:
 	check(got.has("apps") and got["apps"].get("apps", []).size() > 0, "host: lists installed apps")
 	check(got.has("stats") and got["stats"].has("cpu"), "host: system stats")
 	check(got.has("icon") and FileAccess.file_exists("user://smoke/explorer.png"), "host: renders icons (%s)" % str(got.get("icon", {}).get("error", "no reply")))
+	await _capture_test()
 	check(Host.available, "host: still running after the checks")
+
+
+## Opens a real Notepad and takes the picture the Alt+Tab switcher would show.
+func _capture_test() -> void:
+	var pid := OS.create_process("notepad.exe", [])
+	check(pid > 0, "capture: notepad starts")
+	if pid <= 0:
+		return
+	var hwnd := 0
+	var waited := 0.0
+	while hwnd == 0 and waited < 15.0:
+		await _wait(0.5)
+		waited += 0.5
+		var listed := {}
+		Host.request(["windows"], func(d: Dictionary) -> void: listed["d"] = d)
+		while not listed.has("d"):
+			await _wait(0.05)
+		for w in listed["d"].get("windows", []):
+			if str(w.get("exe", "")).to_lower().ends_with("notepad.exe") or str(w.get("title", "")).to_lower().contains("notepad"):
+				hwnd = int(w.get("hwnd", 0))
+	check(hwnd != 0, "capture: notepad's window is listed")
+	if hwnd != 0:
+		await _wait(1.0)
+		var got := {}
+		Host.capture(hwnd, Vector2i(640, 400), func(tex: ImageTexture) -> void: got["tex"] = tex)
+		waited = 0.0
+		while not got.has("tex") and waited < 15.0:
+			await _wait(0.1)
+			waited += 0.1
+		var tex: ImageTexture = got.get("tex")
+		check(tex != null and tex.get_width() > 32 and tex.get_height() > 32, "capture: takes a picture of a real window (not blank)")
+		check(Host.captures.has(hwnd), "capture: keeps the last picture")
+		Host.close_window(hwnd)
+	await _wait(0.5)
+	if OS.is_process_running(pid):
+		OS.kill(pid)
 
 
 func _window_checks(main: Node, win: ShellWindow, where: String) -> void:

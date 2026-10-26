@@ -255,6 +255,7 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr DispatchMessage(ref MSG msg);
 		[DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint pid, uint thread, uint flags);
 		[DllImport("user32.dll")] public static extern bool LockWorkStation();
+		[DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
 		[DllImport("user32.dll")] public static extern IntPtr SetWindowsHookEx(int id, KeyboardProc proc, IntPtr module, uint thread);
 		[DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
@@ -455,6 +456,20 @@ namespace Oazy
 			{
 				if (line.Length == 0) continue;
 				string[] p = line.Split('\t');
+				if (Arg(p, 1) == "capture")
+				{
+					// Pictures of windows take a while: answer from a worker so
+					// focus and the rest never wait behind one.
+					string[] job = p;
+					ThreadPool.QueueUserWorkItem(delegate(object state)
+					{
+						string r;
+						try { r = Capture(H(Arg(job, 2)), Int(Arg(job, 3), 640), Int(Arg(job, 4), 400), Arg(job, 5)); }
+						catch (Exception ex) { r = "\"ok\":false,\"error\":" + Json.Str(ex.Message); }
+						Write("{\"id\":" + Num(job[0]) + "," + r + "}");
+					});
+					continue;
+				}
 				string reply;
 				try { reply = Handle(p); }
 				catch (Exception ex) { reply = "\"ok\":false,\"error\":" + Json.Str(ex.Message); }
@@ -906,6 +921,86 @@ namespace Oazy
 			int hr = Native.DwmUpdateThumbnailProperties(thumb, ref props);
 			return "\"ok\":" + Json.Bool(hr == 0) + ",\"x\":" + props.rcDestination.Left + ",\"y\":" + props.rcDestination.Top
 				+ ",\"w\":" + dw + ",\"h\":" + dh + ",\"src_w\":" + s.cx + ",\"src_h\":" + s.cy;
+		}
+
+		// --- Window pictures ----------------------------------------------------------
+		// A still of a window as Windows itself would draw it (PrintWindow with
+		// PW_RENDERFULLCONTENT also gets Chrome, Electron and DirectX content),
+		// cropped to the visible frame, scaled to fit maxW x maxH and written to
+		// `path` as raw RGBA bytes. "dev" is how much the pixels vary: next to
+		// nothing means a blank picture.
+		[HandleProcessCorruptedStateExceptions, SecurityCritical]
+		static string Capture(IntPtr h, int maxW, int maxH, string path)
+		{
+			if (h == IntPtr.Zero || !Native.IsWindow(h)) return "\"ok\":false,\"error\":\"no window\"";
+			if (Native.IsIconic(h)) return "\"ok\":false,\"error\":\"minimised\"";
+			Native.RECT wr;
+			if (!Native.GetWindowRect(h, out wr)) return "\"ok\":false,\"error\":\"no rect\"";
+			int w = wr.Right - wr.Left, hh = wr.Bottom - wr.Top;
+			if (w <= 0 || hh <= 0 || w > 16384 || hh > 16384) return "\"ok\":false,\"error\":\"bad size\"";
+			Rectangle crop = new Rectangle(0, 0, w, hh);
+			Native.RECT fr;
+			if (Native.DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, out fr, Marshal.SizeOf(typeof(Native.RECT))) == 0)
+			{
+				Rectangle f = Rectangle.FromLTRB(fr.Left - wr.Left, fr.Top - wr.Top, fr.Right - wr.Left, fr.Bottom - wr.Top);
+				f.Intersect(crop);
+				if (f.Width > 8 && f.Height > 8) crop = f;
+			}
+			maxW = Math.Max(16, Math.Min(maxW, 2048));
+			maxH = Math.Max(16, Math.Min(maxH, 2048));
+			using (Bitmap full = new Bitmap(w, hh, PixelFormat.Format32bppArgb))
+			{
+				bool printed;
+				using (Graphics g = Graphics.FromImage(full))
+				{
+					IntPtr dc = g.GetHdc();
+					try { printed = Native.PrintWindow(h, dc, 2); }
+					finally { g.ReleaseHdc(dc); }
+				}
+				if (!printed) return "\"ok\":false,\"error\":\"PrintWindow failed\"";
+				double k = Math.Min(1.0, Math.Min((double)maxW / crop.Width, (double)maxH / crop.Height));
+				int ow = Math.Max(1, (int)Math.Round(crop.Width * k));
+				int oh = Math.Max(1, (int)Math.Round(crop.Height * k));
+				using (Bitmap pic = new Bitmap(ow, oh, PixelFormat.Format32bppArgb))
+				{
+					using (Graphics g = Graphics.FromImage(pic))
+					{
+						g.CompositingMode = CompositingMode.SourceCopy;
+						g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+						g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+						g.DrawImage(full, new Rectangle(0, 0, ow, oh), crop, GraphicsUnit.Pixel);
+					}
+					BitmapData bd = pic.LockBits(new Rectangle(0, 0, ow, oh), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+					byte[] px = new byte[ow * oh * 4];
+					try
+					{
+						for (int y = 0; y < oh; y++)
+							Marshal.Copy(new IntPtr(bd.Scan0.ToInt64() + (long)y * bd.Stride), px, y * ow * 4, ow * 4);
+					}
+					finally { pic.UnlockBits(bd); }
+					double sum = 0, sum2 = 0;
+					int n = 0;
+					for (int i = 0; i < px.Length; i += 4)
+					{
+						byte b = px[i];
+						px[i] = px[i + 2];
+						px[i + 2] = b;
+						px[i + 3] = 255;
+						if ((i / 4) % 7 == 0)
+						{
+							double l = 0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2];
+							sum += l;
+							sum2 += l * l;
+							n++;
+						}
+					}
+					double mean = n > 0 ? sum / n : 0;
+					double dev = n > 0 ? Math.Sqrt(Math.Max(0, sum2 / n - mean * mean)) : 0;
+					File.WriteAllBytes(path, px);
+					return "\"ok\":true,\"w\":" + ow + ",\"h\":" + oh
+						+ ",\"dev\":" + dev.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+				}
+			}
 		}
 
 		static void ClearThumbs()

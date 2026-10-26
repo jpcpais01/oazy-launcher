@@ -10,11 +10,15 @@ extends Control
 ## The companion catches the keys (see Host.switch_key), so this layer never
 ## needs focus. A quick tap switches straight to the last window without
 ## showing anything, like Windows does. Every card eases towards where it
-## should be each frame, and the live previews (DWM thumbnails, drawn by
-## Windows on top of the layer) are moved and faded along with their cards.
+## should be each frame. Each card shows a picture of its window, taken by the
+## companion (PrintWindow) when the switcher opens; the selected one keeps
+## refreshing a few times a second, and minimised windows keep their last.
 
 const SCRIM := preload("res://shaders/scrim.gdshader")
 const CARD := preload("res://shaders/switcher_card.gdshader")
+const ROUNDED := preload("res://shaders/rounded_tex.gdshader")
+## How often the selected window's picture refreshes, in seconds.
+const REFRESH := 0.35
 ## Card size n places from the selected one.
 const SCALES := [1.0, 0.66, 0.52, 0.44]
 const GAP := 28.0
@@ -285,7 +289,6 @@ func _finish_close() -> void:
 	visible = false
 	if not is_open:
 		App.switcher_open = false
-	_clear_thumbs()
 	for c in _cards:
 		(c["node"] as Node).queue_free()
 	_cards.clear()
@@ -296,8 +299,6 @@ func _finish_close() -> void:
 func _retire(c: Dictionary) -> void:
 	# A closed window's card shrinks away on its own.
 	var node: Control = c["node"]
-	if bool(c["live"]) and int(c["sent_op"]) > 0:
-		Host.thumb(int(c["hwnd"]), Rect2i(0, 0, 1, 1), Callable(), Shell.hwnd_of(self), 0)
 	var t := node.create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	node.pivot_offset = node.size / 2.0
 	t.tween_property(node, "scale", Vector2.ONE * 0.6, 0.25)
@@ -376,11 +377,22 @@ func _make_card(i: int) -> Dictionary:
 	x.size = Vector2(30, 30)
 	node.add_child(x)
 
-	if not live:
-		_fill_icon(node, e)
+	var icon_box := _fill_icon(node, e)
+	var shot := TextureRect.new()
+	shot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shot.stretch_mode = TextureRect.STRETCH_SCALE
+	var shot_mat := ShaderMaterial.new()
+	shot_mat.shader = ROUNDED
+	shot.material = shot_mat
+	shot.visible = false
+	node.add_child(shot)
 	var c := {"node": node, "mat": mat, "x_btn": x, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
 		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)), "tint": tint,
-		"src": Vector2.ZERO, "asked": false, "hole": Rect2(), "sent_rect": Rect2i(), "sent_op": -1}
+		"shot": shot, "icon_box": icon_box, "busy": false, "since": 0.0, "failed": false}
+	var cached: Texture2D = Host.captures.get(c["hwnd"]) if e.get("shell") == null else null
+	if cached:
+		_set_shot(c, cached, false)
 	x.pressed.connect(func() -> void:
 		var at := _cards.find(c)
 		if is_open and at >= 0:
@@ -420,7 +432,7 @@ func _make_card(i: int) -> Dictionary:
 
 ## Oazy's own windows and minimised apps have no live picture: the app's icon,
 ## large, on a wash of its own colour.
-func _fill_icon(node: Control, e: Dictionary) -> void:
+func _fill_icon(node: Control, e: Dictionary) -> Control:
 	var it: Dictionary = e["item"]
 	var slot := _slot()
 	var wash := Panel.new()
@@ -456,6 +468,7 @@ func _fill_icon(node: Control, e: Dictionary) -> void:
 		var l := Kit.label(note, 13, 600, App.TEXT_DIM)
 		pill.add_child(l)
 		col.add_child(pill)
+	return center
 
 
 ## How large a card is n places away from the selected one.
@@ -581,10 +594,10 @@ func _layout(delta: float) -> void:
 		c["al"] = lerpf(c["al"], ta, ka)
 		c["hot"] = lerpf(c["hot"], hot, k)
 		c["hover"] = lerpf(c["hover"], 1.0 if bool(c["over"]) else 0.0, k)
+		c["since"] = float(c["since"]) + delta
 		if absf(c["x"] - t.x) > 0.3 or absf(c["sc"] - t.z) > 0.002 or absf(c["al"] - ta) > 0.004 or absf(c["hot"] - hot) > 0.01:
 			settled = false
 		_place(c)
-	_sync_holes()
 	if _closing and _fade < 0.02 and settled:
 		_finish_close()
 
@@ -614,81 +627,49 @@ func _place(c: Dictionary) -> void:
 	mat.set_shader_parameter("glow", Color(0, 0.01, 0.02, 0.5).lerp(Color(App.accent, 0.5), hot))
 	mat.set_shader_parameter("glow_size", lerpf(26.0, 44.0, hot))
 	mat.set_shader_parameter("glow_drop", lerpf(14.0, 0.0, hot))
-	if bool(c["live"]):
-		_place_thumb(c, al)
+	if bool(c["live"]) and not _closing and _shown:
+		# Everyone gets a picture once; the selected one keeps it fresh.
+		var shot: TextureRect = c["shot"]
+		var due := float(c["since"]) >= (REFRESH * 4.0 if bool(c["failed"]) else REFRESH)
+		if (not shot.visible and not bool(c["failed"])) or (hot > 0.5 and due):
+			_request_shot(c)
 
 
-## The live preview: Windows draws it under this layer's pixels, so the card
-## and the backdrop leave a clear, rounded window exactly where it lands.
-func _place_thumb(c: Dictionary, opacity: float) -> void:
-	if not Host.available:
+## Asks the companion for a fresh picture of a card's window.
+func _request_shot(c: Dictionary) -> void:
+	if not bool(c["live"]) or bool(c["busy"]) or not Host.available:
 		return
-	var dest := Shell.hwnd_of(self)
-	if Shell.native and dest == 0:
-		return
-	var node: Control = c["node"]
-	var hwnd := int(c["hwnd"])
+	c["busy"] = true
+	c["since"] = 0.0
+	var px := Vector2i((_slot().size * Shell.scale * 1.1).round())
+	Host.capture(int(c["hwnd"]), px, func(tex: ImageTexture) -> void:
+		c["busy"] = false
+		c["failed"] = tex == null
+		if tex and _cards.has(c):
+			_set_shot(c, tex, true)
+	)
+
+
+## Shows a window's picture, fitted to the card, and fades the icon away.
+func _set_shot(c: Dictionary, tex: Texture2D, animate: bool) -> void:
+	var shot: TextureRect = c["shot"]
 	var slot := _slot()
-	var xf := get_viewport().get_final_transform() * node.get_global_transform_with_canvas()
-	if not bool(c["asked"]):
-		# Learn the window's shape first (hidden), then fit the preview to it.
-		c["asked"] = true
-		var r0 := Rect2i(Vector2i((xf * slot.position).round()), Vector2i(xf.basis_xform(slot.size).round()).max(Vector2i.ONE))
-		Host.thumb(hwnd, r0, func(d: Dictionary) -> void:
-			if not d.get("ok", false):
-				return
-			var src := Vector2(float(d.get("src_w", 0)), float(d.get("src_h", 0)))
-			if src.x <= 0.0 or src.y <= 0.0:
-				src = slot.size
-			var k := minf(slot.size.x / src.x, slot.size.y / src.y)
-			var fit := (src * k).floor()
-			c["hole"] = Rect2(slot.position + ((slot.size - fit) / 2.0).floor(), fit)
-			(c["mat"] as ShaderMaterial).set_shader_parameter("hole", Vector4(c["hole"].position.x, c["hole"].position.y, fit.x, fit.y))
-			c["sent_op"] = 0
-		, dest, 0)
+	var src := Vector2(tex.get_size())
+	if src.x <= 0.0 or src.y <= 0.0:
 		return
-	var hole: Rect2 = c["hole"]
-	if not hole.has_area():
-		return
-	# A pixel larger than the clear window, so no seam shows at its edges.
-	var r := Rect2i(Vector2i((xf * hole.position).floor()), Vector2i(xf.basis_xform(hole.size).ceil()))
-	r = r.grow(1)
-	var op := int(roundf(clampf(opacity * 1.4 - 0.2, 0.0, 1.0) * 255.0))
-	if op < 4:
-		op = 0
-	if r == c["sent_rect"] and op == int(c["sent_op"]):
-		return
-	if op == 0 and int(c["sent_op"]) <= 0:
-		return
-	c["sent_rect"] = r
-	c["sent_op"] = op
-	Host.thumb(hwnd, r, Callable(), dest, op)
-
-
-## Clear spots in the backdrop under every visible preview.
-func _sync_holes() -> void:
-	var holes := PackedVector4Array()
-	var radii := PackedFloat32Array()
-	for c in _cards:
-		var hole: Rect2 = c["hole"]
-		var node: Control = c["node"]
-		if holes.size() >= 8 or not hole.has_area() or not node.visible:
-			continue
-		var sc: float = c["sc"]
-		var p := node.position + hole.position * sc
-		holes.append(Vector4(p.x, p.y, hole.size.x * sc, hole.size.y * sc))
-		radii.append(12.0 * sc)
-	var n := holes.size()
-	while holes.size() < 8:
-		holes.append(Vector4.ZERO)
-		radii.append(0.0)
-	_scrim_mat.set_shader_parameter("holes", holes)
-	_scrim_mat.set_shader_parameter("radii", radii)
-	_scrim_mat.set_shader_parameter("hole_count", n)
-
-
-func _clear_thumbs() -> void:
-	for c in _cards:
-		c["sent_op"] = -1
-	if Host.available:
-		Host.thumb_clear()
+	var k := minf(slot.size.x / src.x, slot.size.y / src.y)
+	var fit := (src * k).floor()
+	shot.position = slot.position + ((slot.size - fit) / 2.0).floor()
+	shot.size = fit
+	(shot.material as ShaderMaterial).set_shader_parameter("size", fit)
+	var first := not shot.visible
+	shot.texture = tex
+	shot.visible = true
+	var icon_box: Control = c["icon_box"]
+	if first and animate:
+		shot.modulate.a = 0.0
+		var t := shot.create_tween().set_parallel(true)
+		t.tween_property(shot, "modulate:a", 1.0, 0.18)
+		t.tween_property(icon_box, "modulate:a", 0.0, 0.18)
+	else:
+		icon_box.modulate.a = 0.0
