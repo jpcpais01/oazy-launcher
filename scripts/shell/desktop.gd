@@ -498,7 +498,7 @@ func _layout() -> void:
 		_favs_glass.position = Vector2(LEFT, TOP + 236.0)
 		_favs_glass.size = Vector2(inner.x + 36.0, inner.y + 16.0 + 30.0 + 18.0)
 	_system.size = Vector2(340, 118)
-	_system.position = Vector2(LEFT, size.y - Taskbar.HEIGHT - Taskbar.MARGIN * 2.0 - 30.0 - _system.size.y)
+	_system.position = Vector2(LEFT, size.y - Taskbar.RESERVE - 30.0 - _system.size.y)
 
 
 func intro() -> void:

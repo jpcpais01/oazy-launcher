@@ -5,7 +5,7 @@ extends Control
 
 signal pressed
 
-const SIZE := 50.0
+const SIZE := 40.0
 const ICON := preload("res://assets/icon.png")
 
 var open := false: set = set_open

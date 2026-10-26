@@ -494,8 +494,8 @@ func _place_panel() -> void:
 	# Never narrower than what's inside (long names, big text), or the side
 	# column spills out of the glass.
 	var need := _root.get_combined_minimum_size() + Vector2(52.0, 46.0)
-	size = Vector2(minf(maxf(W, need.x), vp.x - 20.0), minf(maxf(H, need.y), vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 3.0))
-	position = Vector2(Taskbar.MARGIN, vp.y - Taskbar.HEIGHT - Taskbar.MARGIN * 2.0 - size.y)
+	size = Vector2(minf(maxf(W, need.x), vp.x - 20.0), minf(maxf(H, need.y), vp.y - Taskbar.RESERVE - Taskbar.MARGIN - 10.0))
+	position = Vector2(Taskbar.MARGIN, vp.y - Taskbar.RESERVE - 4.0 - size.y)
 
 
 func _show_view(v: Control) -> void:

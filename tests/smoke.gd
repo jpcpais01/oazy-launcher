@@ -424,7 +424,7 @@ func _layout_checks(main: Node, where: String) -> void:
 	check(main.size.distance_to(vp) < 1.0, "layout(%s): main fills the window" % where)
 	check(main.wallpaper.size.distance_to(vp) < 1.0, "layout(%s): wallpaper fills the window" % where)
 	var bar: Rect2 = main.taskbar.get_global_rect()
-	check(screen.encloses(bar) and bar.size.x > vp.x * 0.9 and bar.size.y >= 60.0, "layout(%s): taskbar spans the bottom" % where)
+	check(screen.encloses(bar) and bar.size.x > vp.x * 0.9 and bar.size.y >= 44.0, "layout(%s): taskbar spans the bottom" % where)
 	check(bar.end.y > vp.y - 20.0, "layout(%s): taskbar at the bottom" % where)
 	check(screen.encloses(main.taskbar.orb.get_global_rect()), "layout(%s): Start orb on screen" % where)
 	check(main.layer.work_rect().end.y <= bar.position.y + 1.0, "layout(%s): windows stay above the taskbar" % where)

@@ -105,6 +105,13 @@ func _ready() -> void:
 	var settings: ShellWindow = main.open_app(&"settings")
 	await _wait(1.2)
 	await shot("06-settings")
+	var icons := settings.find_child("CustomIcons", true, false) as Control
+	var scroller := settings.find_child("*ScrollContainer*", true, false) as ScrollContainer
+	if icons and scroller:
+		scroller.scroll_vertical = int(icons.global_position.y - scroller.global_position.y) - 160
+		await _wait(0.4)
+		await shot("06b-settings-icons")
+		scroller.scroll_vertical = 0
 	var work: Rect2 = main.layer.work_rect()
 	lib.set_rect(Rect2(work.position + Vector2(40, 30), Vector2(work.size.x * 0.56, work.size.y * 0.8)))
 	settings.set_rect(Rect2(work.position + Vector2(work.size.x * 0.48, work.size.y * 0.12), Vector2(work.size.x * 0.48, work.size.y * 0.84)))
@@ -119,6 +126,19 @@ func _ready() -> void:
 	await shot("07b-switcher")
 	main.switcher.handle_key("cancel")
 	await _wait(0.3)
+	# A maximised app: the taskbar melts into a full-width shelf.
+	var before: Array = Host.windows.duplicate(true)
+	var maxed: Array = Host.windows.duplicate(true)
+	maxed[0]["max"] = true
+	lib.minimize()
+	settings.minimize()
+	Host.set_mock_windows(maxed, int(maxed[0]["hwnd"]))
+	await _wait(1.0)
+	await shot("07c-docked")
+	Host.set_mock_windows(before, 0)
+	lib.unminimize()
+	settings.unminimize()
+	await _wait(0.6)
 	main.open_add({})
 	await _wait(0.9)
 	await shot("08-add")
