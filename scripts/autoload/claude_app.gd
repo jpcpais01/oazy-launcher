@@ -107,6 +107,7 @@ static func build() -> Dictionary:
 ## Everything it needs: {path in its folder: res:// path}.
 static func files() -> Dictionary:
 	var files := WebApp.WEBVIEW2.duplicate()
+	files.merge(WebApp.FONTS)
 	files["oazy_claude.cs"] = SRC.path_join("oazy_claude.cs")
 	files["oazy_claude.ico"] = SRC.path_join("oazy_claude.ico")
 	for f in UI:

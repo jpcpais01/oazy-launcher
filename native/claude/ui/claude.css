@@ -3,6 +3,7 @@
    is a tint. Claude keeps its warm coral (--claude) for its mark and the send
    button; everything else is Oazy's quiet glass: hairlines, soft shadows,
    short eased motion. */
+@font-face { font-family: "Geist"; font-weight: 100 900; font-style: normal; font-display: block; src: url(fonts/Geist-Variable.woff2) format("woff2"); }
 
 :root {
 	--claude: #e48a63;
@@ -34,7 +35,7 @@ html, body {
 	margin: 0;
 	height: 100%;
 	overflow: hidden;
-	font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+	font-family: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 	font-size: 14px;
 	color: var(--text);
 	-webkit-font-smoothing: antialiased;
@@ -75,7 +76,7 @@ input, textarea {
 .ic, .mark { display: block; flex: none; }
 
 kbd {
-	font: 10.5px/1 "Segoe UI Variable Text", "Segoe UI", sans-serif;
+	font: 10.5px/1 "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 	color: var(--mute);
 	padding: 3px 5px;
 	border-radius: 5px;
@@ -350,7 +351,7 @@ body.no-claude #term-btn { visibility: hidden; }
 }
 #home h1 {
 	margin: 22px 0 10px;
-	font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", sans-serif;
+	font-family: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 	font-weight: 600;
 	font-size: 28px;
 	letter-spacing: -0.01em;

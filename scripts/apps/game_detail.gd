@@ -80,8 +80,6 @@ func _ready() -> void:
 	_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	info.add_child(_logo)
 	_title = Kit.label("", 40, 700, Color.WHITE, true)
-	_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.22))
-	_title.add_theme_constant_override("shadow_outline_size", 8)
 	info.add_child(_title)
 	_meta = Kit.label("", 15, 500, Color(1, 1, 1, 0.8))
 	info.add_child(_meta)

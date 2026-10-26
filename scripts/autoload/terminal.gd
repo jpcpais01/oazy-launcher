@@ -122,6 +122,7 @@ static func build() -> Dictionary:
 ## Everything the terminal needs: {path in its folder: res:// path}.
 static func files() -> Dictionary:
 	var files := WebApp.WEBVIEW2.duplicate()
+	files.merge(WebApp.FONTS)
 	files["oazy_terminal.cs"] = SRC.path_join("oazy_terminal.cs")
 	files["oazy_terminal.ico"] = SRC.path_join("oazy_terminal.ico")
 	files["OFL-JetBrainsMono.txt"] = SRC.path_join("fonts/OFL-JetBrainsMono.txt")

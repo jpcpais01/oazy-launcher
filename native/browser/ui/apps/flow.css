@@ -58,7 +58,7 @@ html.oazy-deep body { background: transparent !important; }
 html.oazy-deep body,
 html.oazy-deep input,
 html.oazy-deep textarea {
-	font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+	font-family: "Oazy Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 /* Full-page layers that only painted the old dark backdrop let the glass through. */

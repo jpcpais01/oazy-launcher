@@ -1,6 +1,7 @@
 /* Oazy Files: tab strip, toolbar, sidebar, the folder views and the glass
    panels over them. The page sits on the window's acrylic, so the backdrop
    here is a tint whose strength is the "Glass" setting (--tint). */
+@font-face { font-family: "Geist"; font-weight: 100 900; font-style: normal; font-display: block; src: url(fonts/Geist-Variable.woff2) format("woff2"); }
 
 :root {
 	--accent: #38d6c4;
@@ -23,7 +24,7 @@ html, body {
 	margin: 0;
 	height: 100%;
 	overflow: hidden;
-	font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+	font-family: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 	font-size: 13px;
 	color: var(--text);
 	-webkit-font-smoothing: antialiased;

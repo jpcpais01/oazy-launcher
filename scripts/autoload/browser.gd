@@ -193,6 +193,7 @@ static func build() -> Dictionary:
 	var files := {}
 	for f in FILES:
 		files[f.trim_prefix("bin/")] = SRC.path_join(f)
+	files.merge(WebApp.FONTS)
 	return WebApp.build("browser", EXE, "oazy_browser.cs", "oazy_browser.ico", files)
 
 

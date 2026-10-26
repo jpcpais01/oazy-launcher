@@ -187,9 +187,6 @@ func _build_progress() -> Control:
 	_percent.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_percent.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_percent.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_percent.add_theme_color_override("font_shadow_color", Color(0, 0.05, 0.08, 0.45))
-	_percent.add_theme_constant_override("shadow_offset_y", 3)
-	_percent.add_theme_constant_override("shadow_outline_size", 14)
 	orb_box.add_child(_percent)
 	_check = Kit.icon_rect("check", 80, Color.WHITE)
 	_check.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

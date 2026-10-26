@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://c1pyqvp4cyk3s"
-path="res://.godot/imported/Outfit-500.woff2-4d85a3c009010da1fcd048e4e50724c9.fontdata"
+uid="uid://bp1w1y5yod34y"
+path="res://.godot/imported/Geist-600.woff2-f1b9d226f2c480b4d02c7a9c89203819.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/Outfit-500.woff2"
-dest_files=["res://.godot/imported/Outfit-500.woff2-4d85a3c009010da1fcd048e4e50724c9.fontdata"]
+source_file="res://assets/fonts/Geist-600.woff2"
+dest_files=["res://.godot/imported/Geist-600.woff2-f1b9d226f2c480b4d02c7a9c89203819.fontdata"]
 
 [params]
 
