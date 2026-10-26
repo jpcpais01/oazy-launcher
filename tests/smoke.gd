@@ -201,6 +201,10 @@ func _logic_tests() -> void:
 	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe"}) == Browser.REF, "browser: windows group under the browser")
 	check(Catalog.ref_for_window({"exe": "C:\\Games\\OazyBrowser.exe"}) != Browser.REF, "browser: only our own build")
 	check(Catalog.search("brow").size() > 0 and Catalog.search("brow")[0]["ref"] == Browser.REF, "browser: found from Start")
+	# On Windows Flow has already joined the Library by itself; start from the bare app.
+	if Catalog.library_entry_for_oazy("oazy:flow") != "":
+		check(App.is_windows(), "flow: joins the Library by itself only on Windows")
+		Catalog.remove_from_library(Catalog.library_entry_for_oazy("oazy:flow"))
 	check(Catalog.item("oazy:flow")["name"] == "Flow" and Catalog.is_own_window_app("oazy:flow"), "flow: a web app of the browser")
 	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe", "title": "Flow"}) == "oazy:flow", "flow: its window groups under Flow")
 	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe", "title": "Flow - Oazy Browser"}) == Browser.REF, "flow: a browser tab about Flow stays the browser's")
