@@ -36,10 +36,20 @@ var screenshot_dir := ""
 var game_running := false
 ## The pointer is over Oazy's taskbar (shell mode keeps it smooth then).
 var pointer_on_bar := false: set = set_pointer_on_bar
+## Frame cap used when vsync turns out not to pace the frame (0 = none).
+var _vsync_cap := 0
+var _probe_at := 0
+var _probe_frames := 0
+var _probed := false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Every scroll view in every window scrolls smoothly (see SmoothScroll).
+	get_tree().node_added.connect(func(n: Node) -> void:
+		if n is ScrollContainer or n is RichTextLabel:
+			_smooth.call_deferred(n)
+	)
 	version = str(ProjectSettings.get_setting("application/config/version", "0.0.0-dev"))
 	var args := OS.get_cmdline_user_args()
 	smoke_test = args.has("--smoke-test") or OS.get_cmdline_args().has("--smoke-test")
@@ -113,7 +123,35 @@ func _update_fps(focused: bool) -> void:
 		# Behind another app: keep the desktop alive but nearly free.
 		Engine.max_fps = 8 if game_running else 24
 	else:
-		Engine.max_fps = 60 if eco else 0
+		Engine.max_fps = 60 if eco else _vsync_cap
+
+
+func _smooth(n: Node) -> void:
+	if is_instance_valid(n) and n.is_inside_tree():
+		SmoothScroll.attach(n as Control)
+
+
+## Only Oazy's main window waits for the screen's refresh (its layers don't,
+## or each would cost a refresh of its own). Should a driver ignore that and
+## let frames run free, cap them at the refresh rate instead.
+func _process(_delta: float) -> void:
+	if _probed or smoke_test or Engine.max_fps != 0 or not Shell.native:
+		_probe_at = 0
+		return
+	var now := Time.get_ticks_msec()
+	if _probe_at == 0:
+		_probe_at = now
+		_probe_frames = 0
+		return
+	_probe_frames += 1
+	if now - _probe_at >= 2000:
+		_probed = true
+		var hz := DisplayServer.screen_get_refresh_rate()
+		if hz <= 0.0:
+			hz = 60.0
+		if _probe_frames * 1000.0 / float(now - _probe_at) > hz * 1.3:
+			_vsync_cap = int(round(hz))
+			refresh_fps()
 
 
 func refresh_fps() -> void:

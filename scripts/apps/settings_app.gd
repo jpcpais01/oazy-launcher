@@ -14,6 +14,8 @@ var _swatches: Array[Button] = []
 var _effects := {}
 var _lights := {}
 var _hotkey_status: Label
+var _pointer_status: Label
+var _pointer_cards: Array[PointerCard] = []
 var _first_row := true
 
 
@@ -66,6 +68,7 @@ func _ready() -> void:
 	_swatch_row(look)
 	_light_row(look)
 	_effects_row(look)
+	_pointer_rows(look)
 	_custom_icons_rows(look)
 	_toggle_row(look, "Interface sounds", "Soft clicks and chimes as you move around.", "ui_sounds")
 	_slider_row(look, "Sound volume", "volume")
@@ -93,8 +96,10 @@ func _ready() -> void:
 	Updater.state_changed.connect(func(_s: StringName) -> void: _sync_update())
 	Library.import_finished.connect(func(_a: int, _f: int) -> void: _sync_scan())
 	Host.status_changed.connect(func(_ok: bool) -> void: _sync_hotkey())
+	Cursors.applied.connect(func(_id: String, _wide: bool) -> void: _sync_pointer())
 	_sync_update()
 	_sync_hotkey()
+	_sync_pointer()
 
 
 func on_shown() -> void:
@@ -279,6 +284,52 @@ func _custom_icons_rows(list: VBoxContainer) -> void:
 		grid.add_child(chip)
 		chips.append(chip)
 	sync.call()
+
+
+## Mouse pointer themes: Off plus every theme, as preview cards.
+func _pointer_rows(list: VBoxContainer) -> void:
+	var desc := "Oazy's pointers follow you into every app while Oazy is running. Off keeps Windows' own." if App.is_windows() else "Oazy's own pointers, from the arrow to the busy spinner."
+	var row := _row(list, "Mouse pointer", desc)
+	_pointer_status = Kit.label("", 14, 600, App.TEXT_DIM)
+	_pointer_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_pointer_status)
+	var grid := GridContainer.new()
+	grid.name = "Pointers"
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_bottom", 20)
+	pad.add_child(grid)
+	list.add_child(pad)
+	var ids: Array[String] = [Cursors.OFF]
+	ids.append_array(Cursors.theme_ids())
+	for id in ids:
+		var card := PointerCard.make(id)
+		card.pressed.connect(func() -> void:
+			Sfx.play(&"toggle")
+			Settings.set_value("pointer", id)
+			_sync_pointer()
+		)
+		grid.add_child(card)
+		_pointer_cards.append(card)
+
+
+func _sync_pointer() -> void:
+	if _pointer_status == null:
+		return
+	var id := Cursors.selected()
+	for c in _pointer_cards:
+		c.chosen = c.theme_id == id
+	if id == Cursors.OFF:
+		_pointer_status.text = "Windows default" if App.is_windows() else "Off"
+		_pointer_status.add_theme_color_override("font_color", App.TEXT_MUTE)
+	elif Cursors.system_wide:
+		_pointer_status.text = "In every app"
+		_pointer_status.add_theme_color_override("font_color", App.SUCCESS)
+	else:
+		_pointer_status.text = "In Oazy"
+		_pointer_status.add_theme_color_override("font_color", App.TEXT_DIM)
 
 
 func _button_row(list: VBoxContainer, title: String, desc: String, label_text: String, icon_name: String, cb: Callable) -> FxButton:

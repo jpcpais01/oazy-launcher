@@ -12,6 +12,9 @@ var _unit: FxButton
 var _refresh: FxButton
 
 
+## What the body was last built from (see _on_open).
+var _filled := ""
+
 func _init() -> void:
 	width = 400.0
 
@@ -49,13 +52,24 @@ func _build() -> void:
 
 
 func _on_open() -> void:
-	_fill()
+	# Nothing new since it was last built: only the status line can change.
+	var sig := _sig()
+	if sig == _filled:
+		_status.text = _status_text()
+		_refresh.disabled = Weather.busy
+	else:
+		_fill()
 	# Opening it is a good moment to catch up if the data is getting old.
 	if Time.get_unix_time_from_system() - Weather.updated > 10 * 60 and not App.smoke_test and App.screenshot_dir == "":
 		Weather.refresh()
 
 
+func _sig() -> String:
+	return "%s|%s|%d" % [Weather.updated, Weather.fahrenheit(), int(Time.get_unix_time_from_system() / 3600.0)]
+
+
 func _fill() -> void:
+	_filled = _sig()
 	for c in _body.get_children():
 		_body.remove_child(c)
 		c.queue_free()

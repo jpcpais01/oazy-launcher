@@ -8,6 +8,8 @@ signal progress(done: int, total: int, speed: float)
 const API := "https://api.github.com/repos/%s/releases?per_page=30"
 const UPDATE_DIR := "user://update"
 const RECHECK_SECONDS := 3 * 3600
+## How long the restart animation plays before the exe is swapped and Oazy quits.
+const INSTALL_GRACE := 1.6
 
 ## idle, checking, current, available, downloading, ready, installing, error
 var state: StringName = &"idle"
@@ -229,7 +231,9 @@ func install() -> void:
 	_set_state(&"installing")
 	Settings.set_value("pending_update_version", str(latest["version"]))
 	Settings.set_value("pending_update_notes", combined_notes())
+	Settings.set_value("pending_update_from", App.version)
 	Settings.save()
+	await get_tree().create_timer(INSTALL_GRACE).timeout
 	var exe := OS.get_executable_path()
 	var fresh := ProjectSettings.globalize_path(UPDATE_DIR.path_join(App.EXE_NAME))
 	var old := exe + ".old"

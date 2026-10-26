@@ -110,6 +110,27 @@ func _logic_tests() -> void:
 	check(Library.uninstall_item({"_key": "Notepad++", "DisplayName": "Notepad++", "Publisher": "Notepad++ Team", "DisplayIcon": "C:\\Program Files\\Notepad++\\notepad++.exe"}).is_empty(), "discovery: ordinary programs are not games")
 	check(Art.gamesdb_ref({"source": "riot", "args": "--launch-product=league_of_legends --launch-patchline=live"}) == "riot/league_of_legends", "art: riot games use galaxy's riot ids")
 	check(Art.gamesdb_ref({"source": "ubisoft", "path": "uplay://launch/635/0"}) == "uplay/635", "art: ubisoft games use galaxy's uplay ids")
+	# Your own games: Godot exports and art dropped next to the exe.
+	var gd_dir := "user://smoke/own_games/My Game"
+	DirAccess.make_dir_recursive_absolute(gd_dir)
+	var gd_exe := FileAccess.open(gd_dir.path_join("my_game.exe"), FileAccess.WRITE)
+	var junk := PackedByteArray()
+	junk.resize(1024)
+	gd_exe.store_buffer(junk)
+	gd_exe.store_buffer("GDPC".to_ascii_buffer())
+	gd_exe.close()
+	check(Library.is_godot_exe(gd_dir.path_join("my_game.exe")), "own games: godot export recognised")
+	var own := Library.scan_game_folders([{"path": "user://smoke/own_games", "any": false}])
+	check(own.size() == 1 and own[0]["name"] == "My Game" and own[0]["kind"] == "game", "own games: found in a folder")
+	gd_dir = ProjectSettings.globalize_path(gd_dir)
+	for art_file in ["My_Game_banner.png", "cover.jpg", "other_logo.png"]:
+		var af := FileAccess.open(gd_dir.path_join(art_file), FileAccess.WRITE)
+		af.store_string("x")
+		af.close()
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"hero").has(gd_dir.path_join("My_Game_banner.png")), "own games: <name>_banner.png next to the exe is art")
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"cover").has(gd_dir.path_join("cover.jpg")), "own games: plain cover.jpg is art")
+	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"logo").is_empty(), "own games: another game's logo is ignored")
+
 	var deduped := Library.dedupe_found([{"name": "Apex Legends", "kind": "game", "source": "ea", "path": "a"}, {"name": "Apex Legends™", "kind": "game", "source": "steam", "path": "b"}])
 	check(deduped.size() == 1 and deduped[0]["source"] == "steam", "discovery: one tile per game, best store wins")
 	check(not Catalog.is_clutter("Debugger Pro", "x") and Catalog.is_clutter("Game Setup", "x") and Catalog.is_clutter("Thing", "C:/Thing/unins000.exe"), "catalog: clutter matches whole words and helper exes")
@@ -232,6 +253,24 @@ func _logic_tests() -> void:
 	check(AppIcon.custom_look({"ref": "lib:x", "name": "Claude Code", "icon_key": "C:\\Windows\\System32\\cmd.exe"}).is_empty(), "icons: Claude Code keeps its own look")
 	check(AppIcon.custom_look({"ref": "app:Chrome", "name": "Google Chrome"}).is_empty(), "icons: other apps keep their icons")
 
+	# Mouse pointers: ten complete themes, unpacked into real Windows cursors.
+	check(Cursors.theme_ids().size() == 10, "pointers: ten themes")
+	check(Cursors.selected() == "oazy", "pointers: Oazy's own by default")
+	var missing := PackedStringArray()
+	for theme in Cursors.theme_ids():
+		for glyph in CursorSets.GLYPHS:
+			if Cursors.preview(theme, glyph) == null:
+				missing.append("%s/%s" % [theme, glyph])
+	check(missing.is_empty(), "pointers: every glyph has a preview %s" % str(missing))
+	var dir := Cursors._prepare("lagoon")
+	var files := DirAccess.get_files_at(dir) if dir != "" else PackedStringArray()
+	check(files.has("arrow.cur") and files.has("hand.cur") and files.has("busy.ani") and files.has("working.ani") and files.size() == CursorSets.GLYPHS.size() + 1, "pointers: theme unpacks to a full set (%s)" % str(files))
+	if files.has("busy.ani"):
+		var ani := FileAccess.get_file_as_bytes(dir.path_join("busy.ani"))
+		check(ani.slice(0, 4).get_string_from_ascii() == "RIFF" and ani.slice(8, 12).get_string_from_ascii() == "ACON" and ani.decode_u32(4) == ani.size() - 8, "pointers: busy spinner is a valid animated cursor")
+		var cur := FileAccess.get_file_as_bytes(dir.path_join("arrow.cur"))
+		check(cur.decode_u16(2) == 2 and cur.decode_u16(4) == CursorSets.SIZES.size(), "pointers: arrow has every size")
+
 
 func _mock_apps() -> Array:
 	return [
@@ -335,6 +374,49 @@ func _ui_tests() -> void:
 	await _wait(0.5)
 	check(main.layer.find("oazy:settings") == null, "windows: close")
 
+	# Cleaner: scan, pick, apply and undo, against the mock PC.
+	var safe := true
+	for e in Cleaner.catalog.get("apps", []):
+		for pat in Cleaner.catalog.get("protected", []):
+			if str(e["id"]).matchn(str(pat)):
+				safe = false
+	for t in Cleaner.catalog.get("tweaks", []):
+		for op in t["ops"]:
+			var path := str(op.get("path", ""))
+			if path.contains("Defender") or path.contains("WindowsUpdate") or path.contains("\\Services\\") or (op["t"] == "service" and op["name"] != "DiagTrack"):
+				safe = false
+	check(safe and "Microsoft.WindowsStore" in Cleaner.catalog["protected"], "cleaner: catalog never touches protected parts of Windows")
+	var cl: ShellWindow = main.open_app(&"cleaner")
+	await _wait(0.4)
+	check(cl != null and cl.body.get_child(0) is CleanerApp, "cleaner: opens")
+	var cleaner: CleanerApp = cl.body.get_child(0)
+	Cleaner.start_scan()
+	await _cleaner_idle()
+	check(Cleaner.has_scan() and Cleaner.scan["apps"].size() > 0, "cleaner: scan finds bloat")
+	check(Cleaner.is_picked("app:Microsoft.BingNews") and not Cleaner.is_picked("app:SpotifyAB.SpotifyMusic"), "cleaner: only recommended picks are ticked")
+	check(not Cleaner.is_picked("tweak:game_mode") and Cleaner.is_picked("tweak:ads"), "cleaner: done settings aren't picked")
+	check(Cleaner.picks_in("startup") == 0, "cleaner: startup apps are left alone until you choose")
+	for page in ["apps", "startup", "junk", "perf", "privacy", "history", "overview"]:
+		cleaner._go(page)
+		await _wait(0.1)
+	var steam: Dictionary = Cleaner.scan["startup"][0]
+	Cleaner.want_startup(steam, false)
+	check(Cleaner.picks.get(Cleaner.startup_key(steam)) == false and not Cleaner.startup_wanted(steam), "cleaner: startup switch")
+	check(Cleaner.needs_admin(), "cleaner: a restore point asks Windows once")
+	Cleaner.apply_picks()
+	await _cleaner_idle()
+	check(Cleaner.history.size() == 1 and cleaner._page == "result", "cleaner: apply keeps a record")
+	var still := false
+	for a in Cleaner.scan["apps"]:
+		if a["pkg"] == "Microsoft.BingNews":
+			still = true
+	check(not still and Cleaner.picks.is_empty(), "cleaner: applied picks are done")
+	Cleaner.undo_run(str(Cleaner.history[0]["id"]))
+	await _cleaner_idle()
+	check(Cleaner.history[0].get("undone", false), "cleaner: undo")
+	cl.close()
+	await _wait(0.4)
+
 	# Start.
 	main.start.open()
 	await _wait(0.4)
@@ -348,6 +430,32 @@ func _ui_tests() -> void:
 	main.start.open("chro")
 	await _wait(0.3)
 	check(main.start._rows.size() > 1, "start: search shows results")
+	var first_row: Control = main.start._rows[0]
+	var row_count: int = main.start._result_list.get_child_count()
+	main.start._search.text = "steam"
+	main.start._on_text("steam")
+	check(main.start._result_list.get_child_count() == row_count and main.start._result_list.get_child(0) == first_row, "start: search reuses its rows")
+	check(str(main.start._rows[0].get_meta("ref")) != "", "start: reused rows point at the new results")
+	var tiles: Array = main.start._pinned.get_children()
+	main.start.close()
+	await _wait(0.4)
+	main.start.open()
+	await _wait(0.1)
+	check(main.start._pinned.get_children() == tiles, "start: reopening keeps its tiles")
+	main.start._show_view(main.start._all)
+	await _wait(0.2)
+	var all_scroll: ScrollContainer = main.start._all_list.get_parent()
+	check(all_scroll.has_meta("smooth_scroll"), "scroll: Start's lists scroll smoothly")
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
+	wheel.pressed = true
+	wheel.factor = 1.0
+	all_scroll.gui_input.emit(wheel)
+	await _wait(0.05)
+	var mid: float = all_scroll.get_v_scroll_bar().value
+	await _wait(0.6)
+	var end: float = all_scroll.get_v_scroll_bar().value
+	check(end > 0.0 and mid < end, "scroll: the wheel glides instead of jumping (%.0f -> %.0f)" % [mid, end])
 	main.start.close()
 	await _wait(0.4)
 	check(not main.start.is_open, "start: closes")
@@ -447,6 +555,14 @@ func _menu_has(menu: PopupMenu, text: String) -> bool:
 		if menu.get_item_text(i).contains(text):
 			return true
 	return false
+
+
+func _cleaner_idle() -> void:
+	var waited := 0.0
+	await _wait(0.1)
+	while (Cleaner.busy() or not Cleaner.has_scan()) and waited < 10.0:
+		await _wait(0.1)
+		waited += 0.1
 
 
 func _wait(seconds: float) -> void:

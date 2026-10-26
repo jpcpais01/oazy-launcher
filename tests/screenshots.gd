@@ -52,7 +52,7 @@ func _ready() -> void:
 		if str(e["name"]) == "Claude Code":
 			Catalog.set_favorite("lib:" + str(e["id"]), true)
 	Catalog.set_favorite("app:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)
-	await _wait(0.7)
+	await _wait(0.4)
 	await shot("00-loading")
 	var main := get_tree().current_scene
 	var waited := 0.0
@@ -112,6 +112,19 @@ func _ready() -> void:
 		await _wait(0.4)
 		await shot("06b-settings-icons")
 		scroller.scroll_vertical = 0
+	var pointers := settings.find_child("Pointers", true, false) as Control
+	if pointers:
+		var sc := pointers.get_parent()
+		while sc and not sc is ScrollContainer:
+			sc = sc.get_parent()
+		if sc:
+			var content := (sc as ScrollContainer).get_child(0) as Control
+			var y := (content.get_global_transform().affine_inverse() * pointers.global_position).y
+			(sc as ScrollContainer).scroll_vertical = int(y) - 260
+		await _wait(0.4)
+		await shot("06c-settings-pointers")
+		if sc:
+			(sc as ScrollContainer).scroll_vertical = 0
 	var work: Rect2 = main.layer.work_rect()
 	lib.set_rect(Rect2(work.position + Vector2(40, 30), Vector2(work.size.x * 0.56, work.size.y * 0.8)))
 	settings.set_rect(Rect2(work.position + Vector2(work.size.x * 0.48, work.size.y * 0.12), Vector2(work.size.x * 0.48, work.size.y * 0.84)))
@@ -159,12 +172,52 @@ func _ready() -> void:
 		await _wait(0.12)
 	await _wait(0.8)
 	await shot("10-download")
+	Updater.state = &"ready"
+	Updater.state_changed.emit(&"ready")
+	await _wait(0.5)
+	await shot("10b-ready")
+	Updater.state = &"installing"
+	Updater.state_changed.emit(&"installing")
+	await _wait(1.6)
+	await shot("10c-restarting")
 	Updater.state = &"available"
+	_close_modals()
+	await _wait(0.5)
+	var welcome := UpdateWelcome.new()
+	welcome.version = "2.1.40"
+	welcome.from_version = "2.1.31"
+	welcome.markdown = Updater.combined_notes()
+	welcome.show_all = main.show_patch_notes
+	main.overlay_layer.add_child(welcome)
+	await _wait(1.8)
+	await shot("10d-welcome")
 	_close_modals()
 	await _wait(0.5)
 	main.launch(str(Library.recent()[1]["id"]))
 	await _wait(1.4)
 	await shot("11-launch")
+	var cleaner_win: ShellWindow = main.open_app(&"cleaner")
+	var cleaner: CleanerApp = cleaner_win.body.get_child(0)
+	await _wait(0.8)
+	await shot("12-cleaner-scan")
+	while Cleaner.busy():
+		await _wait(0.2)
+	await _wait(1.6)
+	await shot("13-cleaner")
+	cleaner._go("startup")
+	Cleaner.want_startup(Cleaner.scan["startup"][0], false)
+	await _wait(0.8)
+	await shot("14-cleaner-startup")
+	cleaner._go("privacy")
+	await _wait(0.8)
+	await shot("15-cleaner-privacy")
+	Cleaner.apply_picks()
+	await _wait(0.6)
+	await shot("16-cleaner-applying")
+	while Cleaner.busy():
+		await _wait(0.2)
+	await _wait(1.6)
+	await shot("17-cleaner-done")
 	print("SCREENSHOTS: DONE")
 	get_tree().quit(0)
 

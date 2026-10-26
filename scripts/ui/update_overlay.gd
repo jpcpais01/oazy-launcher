@@ -1,40 +1,45 @@
 class_name UpdateOverlay
 extends Modal
-## The update experience: what's new -> download (live ring, speed, ETA) ->
-## verified -> restart. Follows Updater state, so it can be opened at any point.
+## The update experience: what's new -> download (a glass orb filling with
+## water, speed, ETA) -> verified (shockwave, check) -> restart (the water
+## swirls and the screen settles into the boot wallpaper, so the relaunch
+## picks up exactly where this leaves off). Follows Updater state, so it can
+## be opened at any point.
 
-const RING := preload("res://shaders/ring.gdshader")
 const TIPS := [
-	"Tip: drop any .exe or shortcut onto Oazy to add it.",
-	"Tip: press F on Home to favourite the selected game.",
-	"Tip: start typing on the Library page to search instantly.",
-	"Tip: F11 switches to fullscreen, perfect with a controller.",
-	"Tip: right-click any game for quick actions.",
+	"Tip: press Ctrl + Alt + O in any app to open Start.",
+	"Tip: right-click any app or game to add it to your favourites.",
+	"Tip: start typing on the desktop to search for anything.",
+	"Tip: Alt + Tab shows live previews of every open window.",
+	"Tip: Ctrl + Alt + D takes you straight back to your desktop.",
 	"Tip: Oazy picks its colours from the game you are looking at.",
 ]
+const STEPS := ["Download", "Verify", "Restart"]
 
 var _notes_view: Control
 var _progress_view: Control
-var _ring_mat: ShaderMaterial
+var _orb: UpdateOrb
 var _percent: Label
 var _check: TextureRect
+var _steps: Array[Dictionary] = []
 var _dl_title: Label
 var _dl_stats: Label
 var _tip: Label
 var _dl_buttons: HBoxContainer
 var _tip_index := 0
-var _shown_progress := 0.0
-var _target_progress := 0.0
 var _update_btn: FxButton
+var _cards: NotesCards
+var _veil: Control
+var _step_pulse := 0.0
 
 
 func _init() -> void:
-	width = 980.0
+	width = 1000.0
 
 
 func _build() -> void:
 	var stack := Control.new()
-	stack.custom_minimum_size = Vector2(0, 520)
+	stack.custom_minimum_size = Vector2(0, 580)
 	content.add_child(stack)
 	_notes_view = _build_notes()
 	stack.add_child(_notes_view)
@@ -48,6 +53,8 @@ func _build() -> void:
 	tip_timer.timeout.connect(_next_tip)
 	add_child(tip_timer)
 	_on_state(Updater.state)
+	if _notes_view.visible:
+		_cards.reveal.call_deferred(0.2)
 
 
 func _focus_first() -> void:
@@ -58,37 +65,42 @@ func _focus_first() -> void:
 func _build_notes() -> Control:
 	var view := Kit.hbox(36)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var left := Kit.vbox(14)
+	var left := Kit.vbox(12)
 	left.custom_minimum_size.x = 300
 	view.add_child(left)
 
+	# A little glass orb with the logo floating in it, already part full.
 	var art := Control.new()
-	art.custom_minimum_size = Vector2(120, 120)
+	art.custom_minimum_size = Vector2(170, 170)
 	art.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	left.add_child(art)
-	var halo := ColorRect.new()
-	var m := ShaderMaterial.new()
-	m.shader = RING
-	m.set_shader_parameter("progress", 1.0)
-	m.set_shader_parameter("color_a", App.accent)
-	m.set_shader_parameter("color_b", App.accent_pair(App.accent))
-	m.set_shader_parameter("thickness", 0.06)
-	halo.material = m
-	halo.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	art.add_child(halo)
+	var orb := UpdateOrb.new(170, 0.78)
+	orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	orb.snap(0.34)
+	orb.mat.set_shader_parameter("waves", 0.7)
+	orb.mat.set_shader_parameter("ripples", 0.6)
+	art.add_child(orb)
 	var logo := TextureRect.new()
 	logo.texture = load("res://assets/icon.png")
 	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.position = Vector2(26, 26)
-	logo.size = Vector2(68, 68)
+	logo.position = Vector2(55, 55)
+	logo.size = Vector2(60, 60)
+	logo.pivot_offset = Vector2(30, 30)
 	art.add_child(logo)
+	var bob := logo.create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	bob.tween_property(logo, "position:y", 49.0, 1.8)
+	bob.tween_property(logo, "position:y", 55.0, 1.8)
 
-	left.add_child(Kit.spacer(0, 4))
-	var kicker := Kit.label("UPDATE AVAILABLE", 13, 700, App.accent.lightened(0.35))
-	left.add_child(kicker)
+	left.add_child(Kit.spacer(0, 2))
+	left.add_child(Kit.label("UPDATE AVAILABLE", 13, 700, App.accent.lightened(0.35)))
 	var latest := str(Updater.latest.get("version", "?"))
-	var jump := Kit.label("%s  →  %s" % [App.version, latest], 32, 800, Color.WHITE, true)
+	var jump := Kit.hbox(10)
+	jump.add_child(Kit.label(App.version, 22, 700, App.TEXT_DIM, true))
+	var arrow := Kit.icon_rect("chevron_right", 20, App.accent.lightened(0.3))
+	arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	jump.add_child(arrow)
+	jump.add_child(Kit.label(latest, 34, 800, Color.WHITE, true))
 	left.add_child(jump)
 	var meta := PackedStringArray()
 	if int(Updater.latest.get("size", 0)) > 0:
@@ -98,10 +110,9 @@ func _build_notes() -> Control:
 	if Updater.newer.size() > 1:
 		meta.append("%d updates in one" % Updater.newer.size())
 	left.add_child(Kit.label("  ·  ".join(meta), 15, 500, App.TEXT_DIM))
-	var blurb := Kit.label("Your library and settings stay exactly as they are. Oazy restarts by itself when it's done.", 15, 500, App.TEXT_MUTE)
+	var blurb := Kit.label("Your apps, games and settings stay exactly as they are. Oazy restarts by itself when it's done.", 15, 500, App.TEXT_MUTE)
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	left.add_child(blurb)
-	left.add_child(Kit.spacer(0, 0, false))
 	var grow := Control.new()
 	grow.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(grow)
@@ -112,60 +123,69 @@ func _build_notes() -> Control:
 	later.pressed.connect(close)
 	left.add_child(later)
 
-	var right := Kit.vbox(12)
+	var right := Kit.vbox(14)
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	view.add_child(right)
 	var head := Kit.hbox(10)
 	head.add_child(Kit.icon_rect("sparkles", 20, Color.WHITE))
 	head.add_child(Kit.label("What's new", 22, 800, Color.WHITE, true))
 	right.add_child(head)
-	var frame := PanelContainer.new()
-	frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	frame.add_theme_stylebox_override("panel", Kit.box(Color(0, 0, 0, 0.22), 18, Color(1, 1, 1, 0.06), 1, 22, 18))
-	right.add_child(frame)
-	var text := RichTextLabel.new()
-	text.bbcode_enabled = true
-	text.scroll_active = true
-	text.selection_enabled = true
-	text.text = Markdown.to_bbcode(Updater.combined_notes(), App.accent.lightened(0.25))
-	text.meta_clicked.connect(func(meta_v: Variant) -> void: OS.shell_open(str(meta_v)))
-	frame.add_child(text)
+	_cards = NotesCards.new(Updater.combined_notes())
+	right.add_child(_cards)
 	return view
 
 
 func _build_progress() -> Control:
-	var view := Kit.vbox(16)
+	var view := Kit.vbox(10)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.alignment = BoxContainer.ALIGNMENT_CENTER
 	view.visible = false
 
-	var ring_holder := CenterContainer.new()
-	view.add_child(ring_holder)
-	var ring_box := Control.new()
-	ring_box.custom_minimum_size = Vector2(250, 250)
-	ring_holder.add_child(ring_box)
-	var ring := ColorRect.new()
-	_ring_mat = ShaderMaterial.new()
-	_ring_mat.shader = RING
-	_ring_mat.set_shader_parameter("color_a", App.accent)
-	_ring_mat.set_shader_parameter("color_b", App.accent_pair(App.accent))
-	_ring_mat.set_shader_parameter("thickness", 0.07)
-	ring.material = _ring_mat
-	ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	ring_box.add_child(ring)
-	_percent = Kit.label("0%", 54, 800, Color.WHITE, true)
+	var orb_holder := CenterContainer.new()
+	view.add_child(orb_holder)
+	var orb_box := Control.new()
+	orb_box.custom_minimum_size = Vector2(380, 380)
+	orb_holder.add_child(orb_box)
+	_orb = UpdateOrb.new(380, 0.6)
+	_orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	orb_box.add_child(_orb)
+	_percent = Kit.label("0%", 58, 800, Color.WHITE, true)
 	_percent.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_percent.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_percent.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	ring_box.add_child(_percent)
-	_check = Kit.icon_rect("check", 84, Color.WHITE)
+	_percent.add_theme_color_override("font_shadow_color", Color(0, 0.05, 0.08, 0.45))
+	_percent.add_theme_constant_override("shadow_offset_y", 3)
+	_percent.add_theme_constant_override("shadow_outline_size", 14)
+	orb_box.add_child(_percent)
+	_check = Kit.icon_rect("check", 88, Color.WHITE)
 	_check.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_check.pivot_offset = Vector2(125, 125)
+	_check.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	_check.pivot_offset = Vector2(190, 190)
 	_check.visible = false
-	ring_box.add_child(_check)
+	orb_box.add_child(_check)
 
-	view.add_child(Kit.spacer(0, 6))
-	_dl_title = Kit.label("", 26, 800, Color.WHITE, true)
+	var steps_holder := CenterContainer.new()
+	view.add_child(steps_holder)
+	var steps := Kit.hbox(14)
+	steps_holder.add_child(steps)
+	for i in STEPS.size():
+		if i > 0:
+			var line := ColorRect.new()
+			line.color = Color(1, 1, 1, 0.12)
+			line.custom_minimum_size = Vector2(46, 2)
+			line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			steps.add_child(line)
+		var item := Kit.hbox(8)
+		var dot := Kit.icon_rect("dot", 18, App.TEXT_MUTE)
+		dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		item.add_child(dot)
+		var label := Kit.label(STEPS[i], 15, 700, App.TEXT_MUTE)
+		item.add_child(label)
+		steps.add_child(item)
+		_steps.append({"item": item, "dot": dot, "label": label, "state": -1})
+
+	view.add_child(Kit.spacer(0, 8))
+	_dl_title = Kit.label("", 28, 800, Color.WHITE, true)
 	_dl_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	view.add_child(_dl_title)
 	_dl_stats = Kit.label("", 16, 500, App.TEXT_DIM)
@@ -175,11 +195,37 @@ func _build_progress() -> Control:
 	_tip = Kit.label(TIPS[0], 14, 500, App.TEXT_MUTE)
 	_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	view.add_child(_tip)
-	view.add_child(Kit.spacer(0, 6))
+	view.add_child(Kit.spacer(0, 8))
 	_dl_buttons = Kit.hbox(12)
 	_dl_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	view.add_child(_dl_buttons)
 	return view
+
+
+## 0 waiting, 1 active, 2 done.
+func _set_steps(active: int) -> void:
+	for i in _steps.size():
+		var s: Dictionary = _steps[i]
+		var st := 2 if i < active else (1 if i == active else 0)
+		if s["state"] == st:
+			continue
+		s["state"] = st
+		var dot: TextureRect = s["dot"]
+		var label: Label = s["label"]
+		match st:
+			2:
+				dot.texture = Icons.tex("check", 18, App.accent.lightened(0.45))
+				label.add_theme_color_override("font_color", App.TEXT)
+			1:
+				dot.texture = Icons.tex("dot", 18, App.accent.lightened(0.3))
+				label.add_theme_color_override("font_color", Color.WHITE)
+			_:
+				dot.texture = Icons.tex("dot", 18, App.TEXT_MUTE)
+				label.add_theme_color_override("font_color", App.TEXT_MUTE)
+		dot.pivot_offset = Vector2(9, 9)
+		dot.scale = Vector2.ONE * 0.4
+		dot.create_tween().tween_property(dot, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		dot.modulate.a = 1.0
 
 
 func _set_buttons(specs: Array) -> void:
@@ -201,9 +247,13 @@ func _show_progress_view() -> void:
 		return
 	_progress_view.visible = true
 	_progress_view.modulate.a = 0.0
+	_orb.snap(0.0)
+	_orb.pivot_offset = _orb.custom_minimum_size / 2.0
+	_orb.scale = Vector2.ONE * 0.85
 	var t := create_tween().set_parallel(true)
 	t.tween_property(_notes_view, "modulate:a", 0.0, 0.25)
-	t.tween_property(_progress_view, "modulate:a", 1.0, 0.4).set_delay(0.15)
+	t.tween_property(_progress_view, "modulate:a", 1.0, 0.45).set_delay(0.15)
+	t.tween_property(_orb, "scale", Vector2.ONE, 0.8).set_delay(0.1).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.chain().tween_callback(func() -> void: _notes_view.visible = false)
 
 
@@ -215,29 +265,41 @@ func _on_state(state: StringName) -> void:
 		&"available":
 			if _progress_view.visible:
 				_notes_view.visible = true
-				_notes_view.modulate.a = 1.0
-				_progress_view.visible = false
+				_notes_view.modulate.a = 0.0
+				var t := create_tween().set_parallel(true)
+				t.tween_property(_progress_view, "modulate:a", 0.0, 0.2)
+				t.tween_property(_notes_view, "modulate:a", 1.0, 0.35).set_delay(0.1)
+				t.chain().tween_callback(func() -> void: _progress_view.visible = false)
+				_update_btn.grab_focus.call_deferred()
 			dismissable = true
 		&"downloading":
 			_show_progress_view()
 			dismissable = true
 			_check.visible = false
 			_percent.visible = true
-			_ring_mat.set_shader_parameter("indeterminate", 0.0)
+			_percent.modulate.a = 1.0
+			_orb.set_look({"waves": 1.0, "error": 0.0, "ripples": 1.0, "swirl": 0.0}, 0.3)
+			_set_steps(0)
 			_dl_title.text = "Downloading Oazy %s" % v
 			_dl_stats.text = "Connecting…"
 			_tip.visible = true
 			_set_buttons([["Cancel", "", FxButton.Style.GHOST, func() -> void: Updater.cancel_download()], ["Hide", "", FxButton.Style.PLAIN, close]])
 		&"ready":
 			_show_progress_view()
-			_target_progress = 1.0
-			_percent.visible = false
+			_orb.target = 1.0
+			_orb.set_look({"waves": 0.35, "error": 0.0}, 1.2)
+			_orb.shockwave()
+			_set_steps(2)
+			var fade := create_tween()
+			fade.tween_property(_percent, "modulate:a", 0.0, 0.2)
+			fade.tween_callback(func() -> void: _percent.visible = false)
+			_check.texture = Icons.tex("check", 88, Color.WHITE)
 			_check.visible = true
 			_check.scale = Vector2.ONE * 0.3
 			_check.modulate.a = 0.0
 			var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			t.tween_property(_check, "scale", Vector2.ONE, 0.55)
-			t.tween_property(_check, "modulate:a", 1.0, 0.3)
+			t.tween_property(_check, "scale", Vector2.ONE, 0.6).set_delay(0.15)
+			t.tween_property(_check, "modulate:a", 1.0, 0.3).set_delay(0.15)
 			Sfx.play(&"notify")
 			_dl_title.text = "Oazy %s is ready" % v
 			_tip.visible = false
@@ -251,28 +313,73 @@ func _on_state(state: StringName) -> void:
 			_show_progress_view()
 			dismissable = false
 			_percent.visible = false
-			_check.visible = false
-			_ring_mat.set_shader_parameter("indeterminate", 1.0)
+			_orb.target = 1.0
+			_orb.set_look({"swirl": 1.0, "waves": 0.6}, 0.9)
+			_orb.shockwave(1.0)
+			_set_steps(2)
+			var spin := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+			spin.tween_property(_check, "scale", Vector2.ZERO, 0.35)
 			_dl_title.text = "Restarting into Oazy %s…" % v
 			_dl_stats.text = "See you in a second."
 			_tip.visible = false
 			_set_buttons([])
+			_show_veil(v)
 		&"error":
 			_show_progress_view()
 			dismissable = true
 			_percent.visible = false
 			_check.visible = true
-			_check.texture = Icons.tex("alert", 84, App.WARNING)
-			_ring_mat.set_shader_parameter("indeterminate", 0.0)
-			_target_progress = 0.0
+			_check.texture = Icons.tex("alert", 88, App.WARNING)
+			_check.scale = Vector2.ONE
+			_check.modulate.a = 1.0
+			_orb.set_look({"error": 1.0, "waves": 0.25, "ripples": 0.15, "swirl": 0.0}, 0.8)
+			_set_steps(-1)
 			_dl_title.text = "That didn't work"
 			_dl_stats.text = Updater.error_text
 			_tip.visible = false
 			_set_buttons([["Try again", "refresh", FxButton.Style.PRIMARY, _retry], ["Close", "", FxButton.Style.GHOST, close]])
 
 
+## The screen settles into the same wallpaper and logo the boot screen opens
+## with, so the restart reads as one continuous move.
+func _show_veil(version: String) -> void:
+	if _veil:
+		return
+	_veil = Control.new()
+	_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_veil.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_veil)
+	var wall := Wallpaper.new()
+	_veil.add_child(wall)
+	wall.mat.set_shader_parameter("focus_center", 1.0)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_veil.add_child(center)
+	var col := Kit.vbox(18)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(col)
+	var orb_box := CenterContainer.new()
+	col.add_child(orb_box)
+	var orb := UpdateOrb.new(260, 0.5)
+	orb.snap(1.0)
+	orb.mat.set_shader_parameter("swirl", 1.0)
+	orb.mat.set_shader_parameter("waves", 0.4)
+	orb_box.add_child(orb)
+	var word := Kit.label("Oazy %s" % version, 30, 800, Color.WHITE, true)
+	word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(word)
+	var sub := Kit.label("Restarting", 15, 600, App.TEXT_DIM)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(sub)
+	_veil.modulate.a = 0.0
+	var t := create_tween()
+	t.tween_interval(0.5)
+	t.tween_property(_veil, "modulate:a", 1.0, 0.8).set_trans(Tween.TRANS_SINE)
+
+
 func _retry() -> void:
-	_check.texture = Icons.tex("check", 84, Color.WHITE)
+	_check.texture = Icons.tex("check", 88, Color.WHITE)
+	_orb.snap(0.0)
 	if Updater.latest.is_empty():
 		Updater.check()
 	else:
@@ -281,8 +388,8 @@ func _retry() -> void:
 
 
 func _on_progress(done: int, total: int, speed: float) -> void:
-	if total > 0:
-		_target_progress = clampf(float(done) / float(total), 0.0, 1.0)
+	if total > 0 and Updater.state == &"downloading":
+		_orb.target = clampf(float(done) / float(total), 0.0, 1.0)
 	var parts := PackedStringArray()
 	parts.append("%s of %s" % [Fmt.bytes(done), Fmt.bytes(total)] if total > 0 else Fmt.bytes(done))
 	if speed > 0.0:
@@ -294,12 +401,15 @@ func _on_progress(done: int, total: int, speed: float) -> void:
 
 
 func _process(delta: float) -> void:
-	if _ring_mat == null:
+	if _orb == null:
 		return
-	_shown_progress = lerpf(_shown_progress, _target_progress, 1.0 - exp(-delta * 8.0))
-	_ring_mat.set_shader_parameter("progress", _shown_progress)
 	if _percent.visible:
-		_percent.text = "%d%%" % int(round(_shown_progress * 100.0))
+		_percent.text = "%d%%" % int(round(_orb.shown * 100.0))
+	# The active step breathes.
+	_step_pulse += delta
+	for s in _steps:
+		if s["state"] == 1:
+			(s["dot"] as TextureRect).modulate.a = 0.55 + 0.45 * (0.5 + 0.5 * sin(_step_pulse * 4.0))
 
 
 func _next_tip() -> void:

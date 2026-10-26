@@ -7,8 +7,8 @@ extends Control
 ## (see Shell), which are separate OS windows when Oazy is your desktop.
 
 const GRIP := 6.0
-const APP_TITLES := {&"library": "Library", &"settings": "Settings"}
-const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(940, 800)}
+const APP_TITLES := {&"library": "Library", &"settings": "Settings", &"cleaner": "Cleaner"}
+const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(940, 800), &"cleaner": Vector2(1180, 800)}
 
 var wallpaper: Wallpaper
 var desktop: Desktop
@@ -146,6 +146,8 @@ func _ready() -> void:
 		if not Host.available:
 			Host.self_foreground = true
 		taskbar.queue_rebuild()
+		if loaded:
+			Shell.precreate_layers()
 	)
 
 	if not App.smoke_test or App.is_windows():
@@ -319,6 +321,10 @@ func open_app(name: StringName) -> ShellWindow:
 			var st := SettingsApp.new()
 			st.main = self
 			content = st
+		&"cleaner":
+			var cl := CleanerApp.new()
+			cl.main = self
+			content = cl
 	win.body.add_child(content)
 	_bring_windows_forward()
 	return win
@@ -669,20 +675,24 @@ func _on_loaded() -> void:
 	desktop.intro()
 	taskbar.intro()
 	Sfx.play(&"open", 0.8)
+	Shell.precreate_layers()
 	_post_update_welcome()
+	Warmup.run(self)
 
 
 func _post_update_welcome() -> void:
 	var pending := str(Settings.get_value("pending_update_version"))
 	var last := str(Settings.get_value("last_seen_version"))
 	if pending != "" and Semver.compare(pending, App.version) == 0:
-		var d := NotesDialog.new()
-		d.title = "Welcome to Oazy %s" % App.version
-		d.subtitle = "The update went smoothly. Here's what's new."
+		var d := UpdateWelcome.new()
+		d.version = App.version
+		d.from_version = str(Settings.get_value("pending_update_from"))
 		d.markdown = str(Settings.get_value("pending_update_notes"))
+		d.show_all = show_patch_notes
 		overlay_layer.add_child(d)
 		Settings.set_value("pending_update_version", "")
 		Settings.set_value("pending_update_notes", "")
+		Settings.set_value("pending_update_from", "")
 	elif not Settings.get_value("seen_shell_intro") and not App.smoke_test:
 		var d2 := NotesDialog.new()
 		d2.title = "Welcome home"
@@ -720,6 +730,8 @@ func _on_hotkey(was_foreground: bool) -> void:
 func _on_host_status(ok: bool) -> void:
 	if ok and Shell.native:
 		_enter_shell()
+		if loaded:
+			Shell.precreate_layers()
 	if not ok and Host.failed and loaded and App.is_windows():
 		App.toast("Oazy couldn't connect to Windows, so open apps won't show on the taskbar", &"error")
 

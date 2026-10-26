@@ -3,8 +3,8 @@
 // Godot has no FFI, so everything that needs Win32 lives here: listing the
 // real application windows (like Alt+Tab does), focusing / minimising /
 // closing them, live DWM thumbnails drawn into Oazy's window, app icons,
-// the list of installed apps, system stats, speaker volume, media keys and
-// the global "home" hotkey.
+// the list of installed apps, system stats, speaker volume, media keys,
+// Oazy's mouse pointers and the global "home" hotkey.
 //
 // Oazy compiles this file on first run with the C# compiler that ships with
 // every Windows 10/11 (.NET Framework 4.x csc.exe), so it must stay C# 5.
@@ -259,6 +259,7 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
 		[DllImport("user32.dll", EntryPoint = "SetWindowLongW")] public static extern int SetWindowLong(IntPtr h, int index, int value);
+		[DllImport("user32.dll")] public static extern int GetWindowRgnBox(IntPtr h, out RECT r);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
 		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
@@ -290,6 +291,12 @@ namespace Oazy
 		[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern int SHCreateItemFromParsingName(string path, IntPtr bindCtx, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
 		[DllImport("ole32.dll")] public static extern int PropVariantClear(ref PROPVARIANT pv);
 		[DllImport("powrprof.dll")] public static extern bool SetSuspendState(bool hibernate, bool force, bool disableWake);
+		[DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] public static extern bool SystemParametersInfoPtr(uint action, uint param, IntPtr value, uint winIni);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr LoadImage(IntPtr inst, string name, uint type, int cx, int cy, uint flags);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr LoadCursorFromFile(string name);
+		[DllImport("user32.dll")] public static extern bool SetSystemCursor(IntPtr cursor, uint id);
+		[DllImport("user32.dll")] public static extern bool DestroyCursor(IntPtr cursor);
+		[DllImport("user32.dll")] public static extern uint GetDpiForSystem();
 	}
 
 	static class Json
@@ -397,6 +404,10 @@ namespace Oazy
 		static int ThemeBorder, ThemeCaption, ThemeText;
 		static readonly Dictionary<long, int> Themed = new Dictionary<long, int>();
 		static string RestorePath = "";
+		// Set while Oazy's pointers replace the system ones (see Cursors).
+		static string CursorMarker = "";
+		static bool CursorsOn;
+		static readonly object CursorLock = new object();
 		// Alt+Tab: Oazy asked for it, it is open right now, Oazy answered the last one.
 		static volatile bool SwitchWanted;
 		static volatile bool Switching;
@@ -422,7 +433,9 @@ namespace Oazy
 
 			try { RestorePath = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), "shell-restore.txt"); }
 			catch (Exception) { RestorePath = ""; }
+			if (RestorePath != "") CursorMarker = Path.Combine(Path.GetDirectoryName(RestorePath), "cursor-restore.txt");
 			RecoverStale();
+			if (CursorMarker != "" && File.Exists(CursorMarker)) RestoreCursors();
 
 			Out = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
 			Out.AutoFlush = true;
@@ -447,6 +460,7 @@ namespace Oazy
 				catch (Exception ex) { reply = "\"ok\":false,\"error\":" + Json.Str(ex.Message); }
 				Write("{\"id\":" + Num(p[0]) + "," + reply + "}");
 			}
+			RestoreCursors();
 			ClearThumbs();
 			ExitShell();
 			return 0;
@@ -494,6 +508,10 @@ namespace Oazy
 					return "\"ok\":true," + WindowsJson();
 				case "focus":
 					return "\"ok\":" + Json.Bool(Focus(H(Arg(p, 2))));
+				case "release":
+					return "\"ok\":" + Json.Bool(Release(H(Arg(p, 2))));
+				case "raise":
+					return "\"ok\":" + Json.Bool(Native.SetWindowPos(H(Arg(p, 2)), IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER));
 				case "toggle":
 				{
 					IntPtr h = H(Arg(p, 2));
@@ -565,6 +583,11 @@ namespace Oazy
 				case "switcher_ack":
 					SwitchAcked = true;
 					return "\"ok\":true";
+				case "cursors":
+					return Cursors(Arg(p, 2));
+				case "cursors_off":
+					RestoreCursors();
+					return "\"ok\":true";
 				case "ping":
 					return "\"ok\":true";
 				case "webview2":
@@ -592,6 +615,82 @@ namespace Oazy
 				catch { }
 			}
 			return "";
+		}
+
+		// --- Mouse pointers ---------------------------------------------------------
+
+		// Oazy's pointer files (one per glyph) for each system cursor id.
+		static readonly string[] CursorFiles = {
+			"32512:arrow.cur", "32513:text.cur", "32514:busy.ani", "32515:cross.cur", "32516:up.cur",
+			"32642:nwse.cur", "32643:nesw.cur", "32644:we.cur", "32645:ns.cur", "32646:move.cur",
+			"32648:no.cur", "32649:hand.cur", "32650:working.ani", "32651:help.cur",
+		};
+		const uint IMAGE_CURSOR = 2, LR_LOADFROMFILE = 0x10, SPI_SETCURSORS = 0x57;
+
+		// Swaps the system cursors for the files in `dir`. Nothing is written to
+		// the user's cursor scheme: SetSystemCursor only lasts until the scheme is
+		// reloaded (RestoreCursors) or the user signs out, and a marker file makes
+		// the next start put Windows' own back if this process dies first.
+		static string Cursors(string dir)
+		{
+			if (dir == "" || !Directory.Exists(dir)) return "\"ok\":false,\"error\":\"no cursor folder\"";
+			int px = CursorPixels();
+			int done = 0;
+			lock (CursorLock)
+			{
+				if (CursorMarker != "")
+				{
+					try { File.WriteAllText(CursorMarker, dir); }
+					catch (Exception) { }
+				}
+				CursorsOn = true;
+				foreach (string pair in CursorFiles)
+				{
+					int colon = pair.IndexOf(':');
+					uint id = uint.Parse(pair.Substring(0, colon));
+					string file = Path.Combine(dir, pair.Substring(colon + 1));
+					if (!File.Exists(file)) continue;
+					IntPtr h = Native.LoadImage(IntPtr.Zero, file, IMAGE_CURSOR, px, px, LR_LOADFROMFILE);
+					if (h == IntPtr.Zero) h = Native.LoadCursorFromFile(file);
+					if (h == IntPtr.Zero) continue;
+					// The system takes ownership of h when this succeeds.
+					if (Native.SetSystemCursor(h, id)) done++;
+					else Native.DestroyCursor(h);
+				}
+			}
+			return "\"ok\":" + Json.Bool(done > 0) + ",\"set\":" + done + ",\"px\":" + px;
+		}
+
+		// Reloads the user's own cursor scheme from the registry.
+		static void RestoreCursors()
+		{
+			lock (CursorLock)
+			{
+				bool stale = CursorMarker != "" && File.Exists(CursorMarker);
+				if (!CursorsOn && !stale) return;
+				Native.SystemParametersInfoPtr(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+				CursorsOn = false;
+				try { if (stale) File.Delete(CursorMarker); }
+				catch (Exception) { }
+			}
+		}
+
+		// The pointer size Windows itself would use: the accessibility size
+		// (Settings > Mouse pointer size) at the screen's scale.
+		static int CursorPixels()
+		{
+			int baseSize = 32;
+			try
+			{
+				object v = Microsoft.Win32.Registry.GetValue("HKEY_CURRENT_USER\\Control Panel\\Cursors", "CursorBaseSize", null);
+				if (v is int && (int)v >= 32 && (int)v <= 256) baseSize = (int)v;
+			}
+			catch (Exception) { }
+			uint dpi = 96;
+			try { dpi = Native.GetDpiForSystem(); }
+			catch (Exception) { }
+			if (dpi < 96) dpi = 96;
+			return Math.Min(256, (int)Math.Round(baseSize * dpi / 96.0));
 		}
 
 		// --- Windows -------------------------------------------------------------
@@ -750,6 +849,20 @@ namespace Oazy
 			Native.SetForegroundWindow(h);
 			if (attached) Native.AttachThreadInput(me, fgThread, false);
 			return Native.GetForegroundWindow() == h;
+		}
+
+		// One of Oazy's layers emptied while active (it stays up, cut to nothing,
+		// so it can come back instantly). Hiding it for a moment makes Windows
+		// activate the next window in line, exactly as when it used to close.
+		// Skipped if the layer already has a shape again (opened straight back).
+		static bool Release(IntPtr h)
+		{
+			if (h == IntPtr.Zero || !Native.IsWindow(h) || Native.GetForegroundWindow() != h) return false;
+			Native.RECT box;
+			if (Native.GetWindowRgnBox(h, out box) == 0 || box.Right > 0 || box.Bottom > 0) return false;
+			Native.ShowWindow(h, SW_HIDE);
+			Native.ShowWindow(h, SW_SHOWNA);
+			return true;
 		}
 
 		// --- Live thumbnails -------------------------------------------------------
@@ -1675,9 +1788,9 @@ namespace Oazy
 				try
 				{
 					Process p = Process.GetProcessById(ParentPid);
-					if (p.HasExited) { ExitShell(); Environment.Exit(0); }
+					if (p.HasExited) { RestoreCursors(); ExitShell(); Environment.Exit(0); }
 				}
-				catch (ArgumentException) { ClearThumbs(); ExitShell(); Environment.Exit(0); }
+				catch (ArgumentException) { RestoreCursors(); ClearThumbs(); ExitShell(); Environment.Exit(0); }
 				catch (Exception) { }
 			}
 		}

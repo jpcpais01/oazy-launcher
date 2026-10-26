@@ -144,6 +144,11 @@ func update_entry(id: String, fields: Dictionary) -> void:
 func remove_entry(id: String) -> void:
 	for i in entries.size():
 		if entries[i]["id"] == id:
+			# Found automatically? Then don't bring it back on the next scan.
+			if entries[i]["source"] != "custom" or bool(entries[i].get("auto", false)):
+				var removed: Array = Settings.get_value("removed_imports").duplicate()
+				removed.append(import_key(entries[i]))
+				Settings.set_value("removed_imports", removed.slice(-200))
 			entries.remove_at(i)
 			_sessions.erase(id)
 			_queue_save()
@@ -467,6 +472,7 @@ func _import_worker() -> void:
 	if App.is_windows():
 		found.append_array(scan_uninstall_entries(read_uninstall_registry()))
 		found.append_array(scan_xbox(xbox_roots()))
+		found.append_array(scan_game_folders(game_folders()))
 	_import_apply.call_deferred(dedupe_found(found), root)
 
 
@@ -494,6 +500,8 @@ func _import_apply(found: Array, root: String) -> void:
 
 
 func _already_imported(item: Dictionary) -> bool:
+	if Settings.get_value("removed_imports").has(import_key(item)):
+		return true
 	var norm := Art.norm_title(str(item.get("name", "")))
 	for e in entries:
 		# The same game from a second store (or added by hand) stays one tile.
@@ -924,3 +932,91 @@ func _resolve_xbox_launch(item: Dictionary) -> void:
 		if id.to_lower().begins_with(pkg + "_") and id.contains("!"):
 			item["path"] = "shell:AppsFolder\\" + id
 			return
+
+
+
+static func import_key(item: Dictionary) -> String:
+	return ("%s|%s|%s|%s" % [item.get("source", ""), item.get("steam_appid", ""), item.get("path", ""), item.get("args", "")]).to_lower()
+
+
+# --- Your own games (Games folders, Godot exports) ------------------------------
+
+## Folders worth looking in: any drive's Games folder and ~/Games hold games;
+## Desktop, Documents and Downloads only count for Godot exports.
+static func game_folders() -> Array:
+	var out: Array = []
+	for i in range(67, 91):
+		var dir := "%s:/Games" % char(i)
+		if DirAccess.dir_exists_absolute(dir):
+			out.append({"path": dir, "any": true})
+	var home := OS.get_environment("USERPROFILE").replace("\\", "/")
+	if home != "":
+		if DirAccess.dir_exists_absolute(home.path_join("Games")):
+			out.append({"path": home.path_join("Games"), "any": true})
+		for sub in ["Desktop", "Documents", "Downloads", "OneDrive/Desktop", "OneDrive/Documents"]:
+			if DirAccess.dir_exists_absolute(home.path_join(sub)):
+				out.append({"path": home.path_join(sub), "any": false})
+	return out
+
+
+static func scan_game_folders(folders: Array) -> Array:
+	var found: Array = []
+	for f in folders:
+		var root := str(f["path"])
+		var any := bool(f["any"])
+		# Loose exes right in the folder.
+		for file in DirAccess.get_files_at(root):
+			var p := root.path_join(file)
+			if file.to_lower().ends_with(".exe") and (is_godot_exe(p) or (any and not Catalog.is_clutter(file.get_basename(), file))):
+				found.append(_own_game(Fmt.pretty_name(p), p))
+		# One folder per game.
+		for sub in DirAccess.get_directories_at(root):
+			var dir := root.path_join(sub)
+			var exe := _godot_exe_in(dir)
+			if exe == "" and any:
+				exe = _guess_exe(dir)
+			if exe != "":
+				found.append(_own_game(sub, exe))
+	return found
+
+
+static func _own_game(name: String, exe: String) -> Dictionary:
+	return {"name": name, "source": "custom", "kind": "game", "path": exe, "auto": true}
+
+
+static func _godot_exe_in(dir: String) -> String:
+	for file in DirAccess.get_files_at(dir):
+		if file.to_lower().ends_with(".exe") and is_godot_exe(dir.path_join(file)):
+			return dir.path_join(file)
+	return ""
+
+
+## A Godot export: the game data is embedded (the exe ends with "GDPC") or sits
+## next to it as <name>.pck.
+static func is_godot_exe(path: String) -> bool:
+	if path.get_file().to_lower().begins_with("oazylauncher"):
+		return false
+	if FileAccess.file_exists(path.get_basename() + ".pck"):
+		return true
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_length() < 512:
+		return false
+	f.seek_end(-4)
+	var godot := f.get_buffer(4).get_string_from_ascii() == "GDPC"
+	if not godot:
+		# Signed exports carry the data in a PE section named "pck" instead.
+		f.seek(0x3C)
+		var pe := f.get_32()
+		if pe > 0 and pe < 4096:
+			f.seek(pe + 6)
+			var sections := f.get_16()
+			f.seek(pe + 20)
+			var opt := f.get_16()
+			var table := pe + 24 + opt
+			for i in mini(sections, 32):
+				f.seek(table + i * 40)
+				if f.get_buffer(8).get_string_from_ascii() == "pck":
+					godot = true
+					break
+	f.close()
+	return godot

@@ -2,8 +2,13 @@ class_name ShellSurface
 extends Window
 ## One of Oazy's layers as its own OS window, in shell mode (see Shell). It
 ## covers the screen, is transparent, and is cut to the shape of whatever it
-## shows right now, so clicks everywhere else go to the apps underneath. It
-## hides itself while it has nothing to show.
+## shows right now, so clicks everywhere else go to the apps underneath.
+##
+## While it has nothing to show it is parked rather than hidden: the OS window
+## stays, cut down to nothing and no longer drawn. Hiding a Godot window
+## destroys it, and making a new window (and its GL surface) every time Start
+## or a menu opened was what made them hitch. Showing a parked layer is just a
+## new shape and one more viewport to draw.
 
 ## Kept hidden while true (the taskbar while a game is fullscreen).
 var suppressed := false
@@ -12,8 +17,16 @@ var work_area := false
 ## Passed to the companion to style the window ("taskbar", "start", ...).
 var kind := ""
 var root: Root
+## A shape entirely outside the window: nothing drawn, nothing clickable.
+## (An empty polygon would mean the opposite, the whole window.)
+const PARKED := [Vector2(-8, -8), Vector2(-2, -8), Vector2(-2, -2), Vector2(-8, -2)]
+## Up as an OS window but showing nothing (see the class notes).
+var parked := false
 var _poly := PackedVector2Array([Vector2(-1, -1)])
-var _styled := false
+var _styled_id := DisplayServer.INVALID_WINDOW_ID
+## Frames left to draw after parking, so the buffer that comes back on screen
+## next time is a clear one.
+var _park_frames := 0
 var _shown_at := 0
 ## True between the OS telling us this window got focus and lost it.
 ## (Window.has_focus() turns true as soon as focus is asked for.)
@@ -48,12 +61,49 @@ func _ready() -> void:
 	visibility_changed.connect(func() -> void:
 		if not visible:
 			os_focused = false
+			parked = false
 		if visible:
 			_shown_at = Time.get_ticks_msec()
-			if not _styled:
-				_styled = true
-				_style.call_deferred()
+			_on_new_window()
 	)
+
+
+## Every new OS window (first show, or after being really hidden) needs the
+## companion's styling again, and must not wait for vsync on its own: the
+## main window already paces the frame, and each extra window waiting for the
+## next refresh in turn would divide the frame rate.
+func _on_new_window() -> void:
+	var id := get_window_id()
+	if id == DisplayServer.INVALID_WINDOW_ID or id == _styled_id:
+		return
+	_styled_id = id
+	if App.is_windows():
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED, id)
+	_style.call_deferred()
+
+
+## Parking needs the companion to hand focus back when a focused layer empties
+## (Windows would otherwise keep typing going to an invisible window). Without
+## it, layers are hidden the old way.
+static func can_park() -> bool:
+	return App.is_windows() and Host.available
+
+
+## Makes the OS window now, parked, so the first time it is needed costs no
+## more than any other time. Returns true if a window was made.
+func precreate() -> bool:
+	if visible or suppressed:
+		return false
+	parked = true
+	_park_frames = 2
+	_poly = PackedVector2Array(PARKED)
+	mouse_passthrough_polygon = _poly
+	visible = true
+	return true
+
+
+func is_up() -> bool:
+	return visible and not parked
 
 
 func fit() -> void:
@@ -114,6 +164,19 @@ func _update_shape(force_show: bool) -> void:
 	elif _hold > 0:
 		_hold -= 1
 	var want := not suppressed and (full or not rects.is_empty() or _hold > 0 or _pins > 0)
+	if not want and visible and not parked and not suppressed and can_park():
+		_park()
+		return
+	if parked:
+		if _park_frames > 0:
+			_park_frames -= 1
+			if _park_frames == 0:
+				RenderingServer.viewport_set_active(get_viewport_rid(), false)
+		if not want:
+			if suppressed:
+				visible = false
+			return
+		_unpark()
 	var poly := PackedVector2Array() if full else Shell.union_polygon(rects, Shell.scale)
 	if not full and poly.is_empty():
 		# Up but empty (held for a menu): an empty polygon would mean "the
@@ -124,6 +187,29 @@ func _update_shape(force_show: bool) -> void:
 		mouse_passthrough_polygon = poly
 	if want != visible:
 		visible = want
+
+
+func _park() -> void:
+	parked = true
+	# Draw a couple more (now empty) frames before stopping.
+	_park_frames = 2
+	_poly = PackedVector2Array(PARKED)
+	mouse_passthrough_polygon = _poly
+	if os_focused or has_focus():
+		# Let Windows activate whatever is next in line, as it did when the
+		# window closed.
+		Host.release_focus(hwnd())
+
+
+func _unpark() -> void:
+	parked = false
+	_park_frames = 0
+	RenderingServer.viewport_set_active(get_viewport_rid(), true)
+	_shown_at = Time.get_ticks_msec()
+	if unfocusable:
+		# Newly made windows used to come up above the other layers; a parked
+		# one keeps its old place, so lift it (without taking focus).
+		Host.raise_window(hwnd())
 
 
 func pin(on: bool) -> void:

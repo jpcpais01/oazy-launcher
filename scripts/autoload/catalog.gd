@@ -1,6 +1,6 @@
 extends Node
 ## Everything Oazy can open, behind one "ref" string:
-##   oazy:<app>  Oazy's own apps (Library, Settings)
+##   oazy:<app>  Oazy's own apps (Library, Settings, Cleaner)
 ##   app:<id>    an installed Windows app (Start menu's All apps; id = AppsFolder id)
 ##   lib:<id>    a game or app from the library
 ##   win:<exe>   a running program that matches nothing above
@@ -18,6 +18,7 @@ const OAZY_APPS := {
 	"oazy:library": {"name": "Library", "glyph": "grid", "desc": "Your games and apps"},
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
 	"oazy:browser": {"name": "Browser", "glyph": "browser", "desc": "Oazy's web browser"},
+	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
 }
 ## Start menu clutter that ships next to real apps.
 const SKIP_WORDS := ["uninstall", "uninstaller", "readme", "read me", "help", "documentation", "release notes", "website", "license", "manual", "changelog", "what's new", "support", "faq", "eula", "recovery", "debug", "setup", "installer", "updater", "crash reporter", "bug reporter", "repair", "safe mode", "migration assistant"]
@@ -35,6 +36,11 @@ var _icons := {}
 var _colors := {}
 var _icon_pending := {}
 var _by_id := {}
+## all_items() and search's candidates, kept until apps or the library change
+## (search runs on every key press).
+var _items: Array[Dictionary] = []
+var _candidates: Array = []
+var _items_dirty := true
 
 
 func _ready() -> void:
@@ -42,6 +48,13 @@ func _ready() -> void:
 	if not App.smoke_test:
 		_load_cache()
 	Host.status_changed.connect(_on_host_status)
+	apps_changed.connect(_forget_items)
+	Library.changed.connect(_forget_items)
+	Library.entry_changed.connect(func(_id: String) -> void: _forget_items())
+
+
+func _forget_items() -> void:
+	_items_dirty = true
 
 
 # --- Installed apps -------------------------------------------------------------------
@@ -203,6 +216,14 @@ func recent_apps() -> Array[String]:
 ## Every launchable thing for Start's "All apps": installed apps, library apps
 ## and Oazy's own, by name.
 func all_items() -> Array[Dictionary]:
+	_build_items()
+	return _items.duplicate()
+
+
+func _build_items() -> void:
+	if not _items_dirty:
+		return
+	_items_dirty = false
 	var list: Array[Dictionary] = []
 	for ref in OAZY_APPS.keys():
 		list.append(item(ref))
@@ -221,7 +242,13 @@ func all_items() -> Array[Dictionary]:
 	list.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
 		return str(x["name"]).naturalnocasecmp_to(str(y["name"])) < 0
 	)
-	return list
+	_items = list
+	_candidates.clear()
+	for it in list:
+		_candidates.append(it)
+	for e in Library.entries:
+		if e["kind"] == "game":
+			_candidates.append(item("lib:" + str(e["id"])))
 
 
 ## Ranked matches across apps, games and Oazy apps.
@@ -230,10 +257,8 @@ func search(text: String, limit: int = 24) -> Array[Dictionary]:
 	var scored: Array = []
 	if needle == "":
 		return []
-	var candidates: Array[Dictionary] = all_items()
-	for e in Library.entries:
-		if e["kind"] == "game":
-			candidates.append(item("lib:" + str(e["id"])))
+	_build_items()
+	var candidates := _candidates
 	# What you open often floats up among equally good matches.
 	var recent: Array = Settings.get_value("recent_apps")
 	for it in candidates:
