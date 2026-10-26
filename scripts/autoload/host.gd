@@ -49,7 +49,9 @@ var _next_id := 1
 var _pending := {}
 var _quitting := false
 var _starting := false
+## Restarts in a row: one that ran for a while doesn't count against the next.
 var _restarts := 0
+var _launched_at := 0
 
 
 func _ready() -> void:
@@ -117,6 +119,7 @@ func _launch(result: Dictionary) -> void:
 	_pid = int(info.get("pid", 0))
 	_reader = Thread.new()
 	_reader.start(_read_loop)
+	_launched_at = Time.get_ticks_msec()
 	available = true
 	failed = false
 	request(["hello", str(self_hwnd)])
@@ -222,6 +225,13 @@ func _on_dead() -> void:
 		_reader = null
 	_pipe = null
 	_pid = 0
+	# Nothing is known about other apps until it's back: don't keep the
+	# taskbar out of the way of a fullscreen app that may be long gone.
+	if fullscreen_app:
+		fullscreen_app = false
+		fullscreen_changed.emit(false)
+	if Time.get_ticks_msec() - _launched_at > 60000:
+		_restarts = 0
 	if _restarts >= 3:
 		_fail("The companion stopped")
 		return
@@ -516,10 +526,19 @@ func exit_shell() -> void:
 	request(["unshell"])
 
 
-## Window looks for one of Oazy's native windows: "surface", "overlay" or
-## "window". `done` gets {backdrop: bool}.
-func style_window(hwnd: int, kind: String, done: Callable = Callable()) -> void:
-	request(["style", hwnd, kind], done)
+## Styles one of Oazy's layer windows (`kind` is the layer's name): no
+## Alt+Tab entry, no frame. A `topmost` one is kept above other apps: the
+## companion puts it back there if it ever drops out.
+func style_window(hwnd: int, kind: String, topmost: bool = false, done: Callable = Callable()) -> void:
+	request(["style", hwnd, kind, 1 if topmost else 0], done)
+
+
+## Puts one of Oazy's windows back over the whole screen Oazy's desktop is on,
+## `inset_px` short of the bottom. Godot won't move or resize a window it
+## counts as fullscreen, which a screen-sized one is.
+func fit_window(hwnd: int, inset_px: int = 0) -> void:
+	if hwnd != 0:
+		request(["fit", hwnd, inset_px])
 
 
 ## Gives other apps' window borders Oazy's accent. (The companion ignores

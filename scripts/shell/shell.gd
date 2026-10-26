@@ -44,7 +44,8 @@ static func layer(name: String, opts: Dictionary = {}) -> Control:
 	if native:
 		var s := ShellSurface.new()
 		s.name = name.to_pascal_case() + "Surface"
-		s.always_on_top = bool(opts.get("top", false))
+		s.on_top = bool(opts.get("top", false))
+		s.always_on_top = s.on_top
 		s.unfocusable = not bool(opts.get("focus", false))
 		s.work_area = bool(opts.get("work", false))
 		s.kind = name
@@ -126,6 +127,14 @@ static func set_layer_visible(name: String, on: bool) -> void:
 		s.suppressed = not on
 	else:
 		holder.visible = on
+
+
+## Puts every layer's OS window right again (see ShellSurface.heal).
+static func heal_layers() -> void:
+	for holder in _layers.values():
+		var s := surface_of(holder)
+		if s:
+			s.heal()
 
 
 static func layer_hwnd(name: String) -> int:

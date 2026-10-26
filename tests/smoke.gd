@@ -538,6 +538,18 @@ func _ui_tests() -> void:
 	main.taskbar.rebuild()
 	check(main.taskbar.button_for("win:C:/Tools/mystery.exe") == null, "taskbar: closed windows disappear")
 
+	# A fullscreen game or video hides the taskbar, and it comes back by
+	# itself once there isn't one (worked out again every second).
+	var was_available := Host.available
+	Host.available = true
+	Host.fullscreen_app = true
+	main._sync_layers()
+	check(not main.taskbar.is_visible_in_tree(), "taskbar: steps aside for a fullscreen app")
+	Host.fullscreen_app = false
+	main._heal()
+	check(main.taskbar.is_visible_in_tree(), "taskbar: back once nothing is fullscreen")
+	Host.available = was_available
+
 	# The pointer moving where no Oazy window hears it lets go of hover.
 	App._unheard_at = Time.get_ticks_msec() - 200
 	App._unheard_frames = 5

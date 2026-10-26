@@ -12,6 +12,9 @@ extends Window
 
 ## Kept hidden while true (the taskbar while a game is fullscreen).
 var suppressed := false
+## Stays above other apps (Shell.layer's "top"). Kept here as well as in
+## always_on_top, which Godot can lose when it remakes the window.
+var on_top := false
 ## Stops above Oazy's taskbar instead of covering the whole screen.
 var work_area := false
 ## Passed to the companion to style the window ("taskbar", "start", ...).
@@ -67,6 +70,12 @@ func _ready() -> void:
 		if not visible:
 			os_focused = false
 			parked = false
+			# Godot remembers the last OS window's state for the next one. A
+			# screen-sized window counts as fullscreen to it, and a window
+			# made fullscreen is never made always-on-top: the taskbar came
+			# back from a game or video behind other apps. Start over plain.
+			mode = Window.MODE_WINDOWED
+			always_on_top = on_top
 		if visible:
 			_shown_at = Time.get_ticks_msec()
 			_on_new_window()
@@ -85,6 +94,7 @@ func _on_new_window() -> void:
 	if App.is_windows():
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED, id)
 	_style.call_deferred()
+	_fit_os_window.call_deferred()
 
 
 ## Parking needs the companion to hand focus back when a focused layer empties
@@ -112,14 +122,44 @@ func is_up() -> bool:
 
 
 func fit() -> void:
-	var px := Shell.screen_px
-	if work_area:
-		px.y -= int(round(Shell.reserve * Shell.scale))
 	position = Shell.origin
-	size = px
+	size = Shell.screen_px - Vector2i(0, _inset())
 	content_scale_factor = Shell.scale
 	root.position = Vector2.ZERO
 	root.size = Shell.logical_size()
+	_fit_os_window()
+
+
+## Pixels left free at the bottom (Oazy's taskbar, for work-area layers).
+func _inset() -> int:
+	return int(round(Shell.reserve * Shell.scale)) if work_area else 0
+
+
+## Godot ignores a new position or size for a window it counts as fullscreen
+## (a screen-sized one is), so after a display change the companion moves the
+## OS window instead.
+func _fit_os_window() -> void:
+	var id := get_window_id()
+	if id == DisplayServer.INVALID_WINDOW_ID or not Host.available:
+		return
+	var now := Rect2i(DisplayServer.window_get_position(id), DisplayServer.window_get_size(id))
+	if now != Rect2i(Shell.origin, Shell.screen_px - Vector2i(0, _inset())):
+		Host.fit_window(hwnd(), _inset())
+
+
+## Puts right what can happen to the OS window behind Oazy's back (checked
+## every second, see main): minimised along with everything else (Win+D,
+## Win+M), which the taskbar and the other always-on-top layers never should
+## be (Oazy's windows come back as soon as you open one), or left behind by a
+## display change.
+func heal() -> void:
+	if not visible or get_window_id() == DisplayServer.INVALID_WINDOW_ID or not Host.available:
+		return
+	if DisplayServer.window_get_mode(get_window_id()) == DisplayServer.WINDOW_MODE_MINIMIZED:
+		if on_top:
+			Host.restore_quietly(hwnd())
+	else:
+		_fit_os_window()
 
 
 func hwnd() -> int:
@@ -136,7 +176,7 @@ func just_shown(ms: int = 250) -> bool:
 func _style() -> void:
 	var h := hwnd()
 	if h != 0:
-		Host.style_window(h, kind)
+		Host.style_window(h, kind, on_top)
 
 
 func _process(_delta: float) -> void:
@@ -221,14 +261,14 @@ func _unpark() -> void:
 	if unfocusable:
 		# Newly made windows used to come up above the other layers; a parked
 		# one keeps its old place, so lift it (without taking focus).
-		Host.raise_window(hwnd(), always_on_top)
+		Host.raise_window(hwnd(), on_top)
 
 
 ## Puts an always-on-top layer back at the very top, over every app's window
 ## (Oazy's apps lift themselves when activated, other apps can be topmost
 ## too). Fullscreen games and videos hide these layers instead (suppressed).
 func lift() -> void:
-	if not always_on_top or suppressed or not visible or not Host.available:
+	if not on_top or suppressed or not visible or not Host.available:
 		return
 	var now := Time.get_ticks_msec()
 	if now - _lifted_at < 120:
