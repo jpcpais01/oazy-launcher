@@ -1103,7 +1103,20 @@ namespace OazyTerminal
 		// dark caption-high strip painted across its top by DWM and stopped short of the
 		// taskbar.
 		bool zoomed, zooming;
-		Rectangle unzoomed;
+		Rectangle unzoomed, lastNormal;
+
+		// The last size and place as a plain window: a real maximize (snap) has
+		// already left it by the time Oazy takes over.
+		void NoteNormal()
+		{
+			if (IsHandleCreated && WindowState == FormWindowState.Normal && !zoomed && !zooming) lastNormal = Bounds;
+		}
+
+		protected override void OnLocationChanged(EventArgs e)
+		{
+			base.OnLocationChanged(e);
+			NoteNormal();
+		}
 
 		public bool Maximized { get { return zoomed; } }
 
@@ -1111,6 +1124,7 @@ namespace OazyTerminal
 		{
 			if (on == zoomed || !IsHandleCreated) return;
 			zooming = true;
+			Rectangle from = WindowState == FormWindowState.Normal ? Bounds : lastNormal;
 			if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
 			// Square and without Windows' 1px outline while it fills the screen.
 			int corner = on ? 1 : 2, border = on ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
@@ -1118,7 +1132,7 @@ namespace OazyTerminal
 			Native.DwmSetWindowAttribute(Handle, 34, ref border, 4);
 			if (on)
 			{
-				unzoomed = Bounds;
+				unzoomed = from.Width > 0 ? from : Bounds;
 				zoomed = true;
 				Bounds = Screen.FromHandle(Handle).WorkingArea;
 			}
@@ -1180,6 +1194,7 @@ namespace OazyTerminal
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			NoteNormal();
 			if (WindowState == FormWindowState.Maximized && !zooming && IsHandleCreated)
 				BeginInvoke((Action)delegate { SetMaximized(true); });
 			if (WindowState != shownState && IsHandleCreated)
