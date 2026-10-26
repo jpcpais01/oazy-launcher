@@ -19,6 +19,8 @@ const HEIGHT := 48.0
 const MARGIN := 6.0
 ## The strip at the bottom of the screen the taskbar keeps for itself.
 const RESERVE := HEIGHT + MARGIN * 2.0
+const FLOAT_SHADOW := 0.14
+const DOCK_SHADOW := 0.08
 const APP_GAP := 4.0
 
 var main: Node
@@ -90,8 +92,9 @@ func _ready() -> void:
 
 	_glass = GlassPanel.new(true, HEIGHT / 2.0, GlassPanel.TINT_BAR)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# A tight shadow: the strip above the taskbar belongs to apps in shell mode.
-	_glass.set_shadow_strength(0.4, 14, 5.0)
+	# A faint, diffuse lift rather than a dark band. Kept tight: the strip
+	# above the taskbar belongs to apps in shell mode.
+	_glass.set_shadow_strength(FLOAT_SHADOW, 16, 4.0)
 	add_child(_glass)
 
 	var row := Kit.hbox(8)
@@ -604,7 +607,7 @@ func _set_docked(on: bool) -> void:
 	_dock_tween.tween_property(_glass, "offset_top", -m, 0.4)
 	_dock_tween.tween_property(_glass, "offset_bottom", m + (rad if on else 0.0), 0.4)
 	_dock_tween.tween_property(_glass, "radius", 14.0 if on else rad, 0.4)
-	_glass.set_shadow_strength(0.25 if on else 0.4, 10 if on else 14, 0.0 if on else 5.0)
+	_glass.set_shadow_strength(DOCK_SHADOW if on else FLOAT_SHADOW, 12 if on else 16, 0.0 if on else 4.0)
 
 
 func is_docked() -> bool:
