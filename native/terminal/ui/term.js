@@ -199,7 +199,7 @@ function output(id, data) {
 function cleanTitle(t) {
 	t = String(t || '').trim();
 	// Shells like to title themselves with their own exe path.
-	if (/^[a-z]:\\.*\.exe$/i.test(t)) return '';
+	if (/^(administrator: )?[a-z]:\\.*\.exe$/i.test(t)) return '';
 	return t;
 }
 

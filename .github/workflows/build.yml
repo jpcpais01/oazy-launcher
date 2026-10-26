@@ -271,7 +271,7 @@ jobs:
           path: terminal-shots
           if-no-files-found: ignore
 
-      - name: Publish screenshots to a ci-terminal-shots/<branch> branch
+      - name: Publish screenshots to a ci-shots/terminal/<branch> branch
         if: always() && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main')
         shell: pwsh
         run: |
@@ -282,7 +282,7 @@ jobs:
           git checkout -q -b ci-terminal-shots
           git add -A
           git -c user.name="oazy-ci" -c user.email="oazy-ci@users.noreply.github.com" commit -qm "Terminal screenshots for ${{ github.sha }}"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "ci-terminal-shots:refs/heads/ci-terminal-shots/${{ github.head_ref || github.ref_name }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "ci-terminal-shots:refs/heads/ci-shots/terminal/${{ github.head_ref || github.ref_name }}"
 
   release:
     name: Publish GitHub release
