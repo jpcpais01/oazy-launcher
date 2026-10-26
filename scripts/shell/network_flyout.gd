@@ -354,10 +354,15 @@ func _open_uri(uri: String) -> void:
 
 func _card(lit: bool) -> PanelContainer:
 	var p := PanelContainer.new()
-	var bg := Color(App.accent, 0.13) if lit else Color(1, 1, 1, 0.05)
-	var edge := Color(App.accent, 0.3) if lit else Color(1, 1, 1, 0.08)
-	p.add_theme_stylebox_override("panel", Kit.box(bg, 16, edge, 1, 12, 10))
+	_style_card(p, lit)
 	return p
+
+
+## Quiet glass: a whisper of accent when it's the live link, hairline edges.
+func _style_card(p: PanelContainer, lit: bool) -> void:
+	var bg := Color(App.accent, 0.08) if lit else Color(1, 1, 1, 0.04)
+	var edge := Color(App.accent, 0.2) if lit else Color(1, 1, 1, 0.07)
+	p.add_theme_stylebox_override("panel", Kit.box(bg, 16, edge, 1, 12, 10))
 
 
 func _badge(lit: bool) -> Control:
@@ -371,14 +376,11 @@ func _badge(lit: bool) -> Control:
 
 
 func _style_badge(b: Panel, lit: bool) -> void:
-	var st := Kit.box(Color(App.accent, 0.85) if lit else Color(1, 1, 1, 0.1), 20)
-	if lit:
-		Kit.shadowed(st, Color(App.accent, 0.45), 10, Vector2(0, 2))
-	b.add_theme_stylebox_override("panel", st)
+	b.add_theme_stylebox_override("panel", Kit.box(Color(App.accent, 0.8) if lit else Color(1, 1, 1, 0.08), 20))
 
 
 func _set_badge_lit(card: PanelContainer, lit: bool) -> void:
-	card.add_theme_stylebox_override("panel", Kit.box(Color(App.accent, 0.13) if lit else Color(1, 1, 1, 0.05), 16, Color(App.accent, 0.3) if lit else Color(1, 1, 1, 0.08), 1, 12, 10))
+	_style_card(card, lit)
 	var b := card.find_child("Badge", true, false)
 	if b is Panel:
 		_style_badge(b, lit)
@@ -507,8 +509,8 @@ class NetRow extends PanelContainer:
 			_key.grab_focus.call_deferred()
 
 	func _restyle() -> void:
-		var bg := Color(1, 1, 1, 0.09) if _open else (Color(1, 1, 1, 0.06) if _hover else Color(1, 1, 1, 0.0))
-		var edge := Color(1, 1, 1, 0.12) if _open else Color(0, 0, 0, 0)
+		var bg := Color(1, 1, 1, 0.07) if _open else (Color(1, 1, 1, 0.05) if _hover else Color(1, 1, 1, 0.0))
+		var edge := Color(1, 1, 1, 0.08) if _open else Color(0, 0, 0, 0)
 		add_theme_stylebox_override("panel", Kit.box(bg, 14, edge, 1, 12, 9))
 		_glyph.color = Color.WHITE if _open or _hover else Color(1, 1, 1, 0.85)
 
