@@ -245,6 +245,7 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
 		[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool altTab);
 		[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr h, string name);
 		[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
 		[DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern IntPtr GetClassLongPtr64(IntPtr h, int index);
@@ -846,7 +847,7 @@ namespace Oazy
 					+ ",\"aumid\":" + Json.Str(Aumid(h))
 					+ ",\"class\":" + Json.Str(ClassName(h))
 					+ ",\"min\":" + Json.Bool(Native.IsIconic(h))
-					+ ",\"max\":" + Json.Bool(Native.IsZoomed(h))
+					+ ",\"max\":" + Json.Bool(Native.IsZoomed(h) || Native.GetProp(h, "OazyMax") != IntPtr.Zero)
 					+ "}");
 				return true;
 			}, IntPtr.Zero);
@@ -1614,6 +1615,10 @@ namespace Oazy
 				{
 					if (Themed.ContainsKey(k)) continue;
 					IntPtr h = new IntPtr(k);
+					// Oazy's own apps (Browser, Files, Terminal, Claude) draw their own
+					// title bar on glass: a caption colour there shows as a dark strip
+					// across the top.
+					if (Native.GetProp(h, "OazyGlass") != IntPtr.Zero) continue;
 					int wasDark;
 					if (Native.DwmGetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, out wasDark, 4) != 0) wasDark = 0;
 					int dark = 1, b = ThemeBorder, c = ThemeCaption, t = ThemeText;
