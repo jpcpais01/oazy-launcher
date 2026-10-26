@@ -4,10 +4,15 @@ extends Control
 ## or a soft plate with a glyph or initial when there is no artwork yet.
 
 const PLATE := preload("res://shaders/plate.gdshader")
+const ROUNDED := preload("res://shaders/rounded_tex.gdshader")
+## Real app icons get softly rounded corners, a touch tighter than the plates,
+## so square artwork sits with the rest; shaped (transparent) icons are untouched.
+const ICON_ROUND := 0.18
 
 var item: Dictionary = {}
 var _plate: ColorRect
 var _plate_mat: ShaderMaterial
+var _tex_mat: ShaderMaterial
 var _tex: TextureRect
 var _glyph: TextureRect
 var _letter: Label
@@ -31,6 +36,9 @@ func _init() -> void:
 	_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tex.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_tex_mat = ShaderMaterial.new()
+	_tex_mat.shader = ROUNDED
+	_tex.material = _tex_mat
 	add_child(_tex)
 	_glyph = TextureRect.new()
 	_glyph.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -115,6 +123,7 @@ func refresh() -> void:
 	if tex != null:
 		_tex.texture = tex
 		_tex.visible = true
+		_sync_tex()
 		return
 	var lower := name.to_lower()
 	if lower.contains("claude"):
@@ -226,7 +235,19 @@ func _radius() -> float:
 	return roundf(minf(size.x, size.y) * 0.26)
 
 
+## The shader works in the pixels the icon is actually drawn at (aspect-fit).
+func _sync_tex() -> void:
+	var t := _tex.texture
+	if t == null or t.get_height() <= 0 or size.y <= 0.0:
+		return
+	var aspect := float(t.get_width()) / float(t.get_height())
+	var drawn := Vector2(minf(size.x, size.y * aspect), minf(size.y, size.x / aspect))
+	_tex_mat.set_shader_parameter("size", drawn)
+	_tex_mat.set_shader_parameter("radius", roundf(minf(drawn.x, drawn.y) * ICON_ROUND))
+
+
 func _sync() -> void:
+	_sync_tex()
 	_plate_mat.set_shader_parameter("rect_size", size)
 	_plate_mat.set_shader_parameter("radius", _radius())
 	_letter.add_theme_font_size_override("font_size", int(clampf(minf(size.x, size.y) * 0.46, 10.0, 80.0)))
