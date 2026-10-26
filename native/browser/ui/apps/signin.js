@@ -71,7 +71,8 @@ function scan() {
 		if (r.width < 200 || r.height < 160) continue;
 		// Light layers stay: clearing them would leave dark text on dark glass.
 		if (lum(bg) > 0.4) continue;
-		if (r.width >= vw * 0.9 && r.height >= vh * 0.85) el.setAttribute('data-oazy-clear', '');
+		// Full-width layers are backdrops (narrow windows draw the form on one).
+		if (r.width >= vw * 0.9 && r.height >= Math.min(vh * 0.5, 360)) el.setAttribute('data-oazy-clear', '');
 		else if (form && el.contains(form) && r.width >= 320 && r.width < vw * 0.97) el.setAttribute('data-oazy-card', '');
 	}
 }
