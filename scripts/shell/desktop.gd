@@ -47,7 +47,9 @@ var _recent_head: HBoxContainer
 var _recent_apps: HBoxContainer
 var _cpu: Array = []
 var _mem: Array = []
+var _gpu: Array = []
 var _battery: Array = []
+var _hz: Label
 var _hero_id := ""
 var _last_minute := -1
 var _stats_timer: Timer
@@ -196,7 +198,7 @@ func _tint_accent() -> void:
 	var tone := Color(1, 1, 1).lerp(App.accent, 0.22).lightened(0.1)
 	tone.a = 0.9
 	_clock_mat.set_shader_parameter("tone", tone)
-	for m in [_cpu, _mem, _battery]:
+	for m in [_cpu, _gpu, _mem, _battery]:
 		if not m.is_empty():
 			var mat: ShaderMaterial = m[2]
 			mat.set_shader_parameter("color_a", App.accent.darkened(0.15))
@@ -625,18 +627,26 @@ func _build_system() -> void:
 	col.offset_bottom = -14
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_system.add_child(col)
-	col.add_child(_header("cpu", "This PC"))
+	var head := _header("cpu", "This PC")
+	head.add_child(Kit.spacer(0, 0, true))
+	_hz = Kit.label("", 11, 700, Color(1, 1, 1, 0.55))
+	_hz.tooltip_text = "Display refresh rate"
+	_hz.mouse_filter = Control.MOUSE_FILTER_PASS
+	head.add_child(_hz)
+	col.add_child(head)
 	var rings := Kit.hbox(6)
 	rings.alignment = BoxContainer.ALIGNMENT_CENTER
 	rings.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(rings)
 	_cpu = _ring(rings, "Processor")
+	_gpu = _ring(rings, "Graphics")
+	_gpu[3].visible = false
 	_mem = _ring(rings, "Memory")
 	_battery = _ring(rings, "Battery")
 	_battery[3].visible = false
 
 
-## [value label, caption, ring material, holder]
+## [value label, caption, ring material, holder, detail line]
 func _ring(parent: Control, title: String) -> Array:
 	var holder := Kit.vbox(8)
 	holder.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -661,15 +671,77 @@ func _ring(parent: Control, title: String) -> Array:
 	pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pct.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	ring.add_child(pct)
+	var text := Kit.vbox(1)
+	holder.add_child(text)
 	var cap := Kit.label(title, 12, 600, Color(1, 1, 1, 0.6))
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	holder.add_child(cap)
-	return [pct, cap, mat, holder]
+	text.add_child(cap)
+	# Always laid out (even empty) so the rings don't shift when data arrives.
+	var detail := Kit.label("", 11, 600, Color(1, 1, 1, 0.42))
+	detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	text.add_child(detail)
+	return [pct, cap, mat, holder, detail]
 
 
 func set_stats(cpu: float, mem: float) -> void:
 	_set_ring(_cpu, cpu)
 	_set_ring(_mem, mem)
+
+
+## Clocks and temperatures from the companion's sensor thread. Anything it
+## couldn't read is -1 (or missing) and simply isn't shown.
+func set_sensors(d: Dictionary) -> void:
+	var cpu_temp := float(d.get("cpu_temp", -1.0)) if Settings.get_value("cpu_temp") else -1.0
+	_set_detail(_cpu, float(d.get("cpu_mhz", -1.0)), cpu_temp, 90.0)
+	var load := float(d.get("gpu_load", -1.0))
+	var temp := float(d.get("gpu_temp", -1.0))
+	var on := load >= 0.0 or temp >= 0.0
+	if _gpu[3].visible != on:
+		_gpu[3].visible = on
+		_layout()
+	if on:
+		var name := _short_gpu(str(d.get("gpu_name", "")))
+		(_gpu[1] as Label).text = name if name != "" else "Graphics"
+		_gpu[3].tooltip_text = str(d.get("gpu_name", ""))
+		if load >= 0.0:
+			_set_ring(_gpu, load / 100.0)
+		else:
+			# No load figure (some older drivers): the ring shows the temperature.
+			_set_ring(_gpu, temp / 100.0)
+			(_gpu[0] as Label).text = "%d°" % roundi(temp)
+		_set_detail(_gpu, float(d.get("gpu_mhz", -1.0)), temp if load >= 0.0 else -1.0, 85.0)
+	var total := float(d.get("mem_total", 0.0)) / 1073741824.0
+	var mem := float(d.get("mem", -1.0))
+	if total > 0.0 and mem >= 0.0:
+		(_mem[4] as Label).text = "%.1f / %d GB" % [mem * total, roundi(total)]
+
+
+func _set_detail(m: Array, mhz: float, temp: float, hot: float) -> void:
+	var parts: PackedStringArray = []
+	if mhz > 0.0:
+		parts.append("%.1f GHz" % (mhz / 1000.0) if mhz >= 1000.0 else "%d MHz" % roundi(mhz))
+	if temp > 0.0:
+		parts.append("%d°" % roundi(temp))
+	var l: Label = m[4]
+	l.text = " · ".join(parts)
+	l.add_theme_color_override("font_color", App.WARNING if temp >= hot else Color(1, 1, 1, 0.42))
+
+
+## "NVIDIA GeForce RTX 4070 SUPER" -> "RTX 4070 SUPER", short enough for a caption.
+static func _short_gpu(full: String) -> String:
+	var n := full
+	for prefix in ["NVIDIA ", "GeForce ", "AMD ", "Radeon(TM) ", "Radeon ", "Intel(R) ", "Intel ", "Arc(TM) "]:
+		if n.begins_with(prefix):
+			n = n.substr(prefix.length())
+	n = n.replace("(TM)", "").replace(" Graphics", "").replace(" Laptop GPU", "").strip_edges()
+	return n if n.length() <= 14 else ""
+
+
+func _sync_hz() -> void:
+	var hz := roundi(DisplayServer.screen_get_refresh_rate(get_window().current_screen))
+	if _system.has_meta("mock_hz"):
+		hz = int(_system.get_meta("mock_hz"))
+	_hz.text = "%d Hz" % hz if hz > 0 else ""
 
 
 func set_battery(level: int, charging: bool) -> void:
@@ -698,27 +770,33 @@ func _set_ring(m: Array, v: float, warn_high: bool = true) -> void:
 
 func _sync_system() -> void:
 	_system.visible = Host.available or _system.has_meta("mock")
+	_sync_hz()
 
 
-func show_mock_stats(cpu: float, mem: float) -> void:
+func show_mock_stats(cpu: float, mem: float, sensors: Dictionary = {}) -> void:
 	_system.set_meta("mock", true)
+	if sensors.has("hz"):
+		_system.set_meta("mock_hz", sensors["hz"])
 	_sync_system()
 	_layout()
 	await get_tree().process_frame
 	set_stats(cpu, mem)
+	set_sensors(sensors.merged({"mem": mem}))
 
 
 func _poll_stats() -> void:
 	if not Host.available or not is_visible_in_tree() or not (Host.self_foreground or (Shell.native and not Host.fullscreen_app)):
 		return
+	_sync_hz()
 	Host.stats(func(d: Dictionary) -> void:
 		if not d.get("ok", false):
 			return
 		set_stats(float(d.get("cpu", -1.0)), float(d.get("mem", -1.0)))
+		set_sensors(d)
 		set_battery(int(d.get("battery", -1)), bool(d.get("charging", false)))
 		if main and main.taskbar:
 			main.taskbar.set_battery(int(d.get("battery", -1)), bool(d.get("charging", false)))
-	)
+	, bool(Settings.get_value("cpu_temp")))
 
 
 # --- Layout ------------------------------------------------------------------------------------
@@ -762,8 +840,8 @@ func _layout() -> void:
 	# favourites just above it.
 	var y := bottom
 	if _system.visible:
-		_system.size = Vector2(COLUMN, 150.0)
-		_system.position = Vector2(SIDE, bottom - 150.0)
+		_system.size = Vector2(COLUMN, 166.0)
+		_system.position = Vector2(SIDE, bottom - 166.0)
 		y = _system.position.y - GAP
 	var rows := 0
 	if _favs.visible:

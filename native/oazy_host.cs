@@ -3,7 +3,7 @@
 // Godot has no FFI, so everything that needs Win32 lives here: listing the
 // real application windows (like Alt+Tab does), focusing / minimising /
 // closing them, live DWM thumbnails drawn into Oazy's window, app icons,
-// the list of installed apps, system stats, speaker volume, media keys,
+// the list of installed apps, system stats and sensors, speaker volume, media keys,
 // Oazy's mouse pointers and the global "home" hotkey.
 //
 // Oazy compiles this file on first run with the C# compiler that ships with
@@ -558,7 +558,7 @@ namespace Oazy
 					ClearThumbs();
 					return "\"ok\":true";
 				case "stats":
-					return "\"ok\":true," + StatsJson();
+					return "\"ok\":true," + StatsJson() + Sensors.Read(Arg(p, 2) == "1");
 				case "lock":
 					return "\"ok\":" + Json.Bool(Native.LockWorkStation());
 				case "sleep":
@@ -1794,6 +1794,527 @@ namespace Oazy
 				catch (ArgumentException) { RestoreCursors(); ClearThumbs(); ExitShell(); Environment.Exit(0); }
 				catch (Exception) { }
 			}
+		}
+	}
+
+	// --- Sensors ------------------------------------------------------------------
+	//
+	// Clocks, temperatures and GPU load for the desktop's This PC widget, all
+	// read without admin rights or a driver of Oazy's own: the CPU clock from
+	// the counters Task Manager uses, NVIDIA GPUs through NVML (part of every
+	// NVIDIA driver), other GPUs through what WDDM drivers report to Windows
+	// (D3DKMT) plus the "GPU Engine" counters for load. Windows only exposes the
+	// CPU's own temperature to kernel drivers, so rather than install one (the
+	// old WinRing0 driver is on Microsoft's vulnerable-driver blocklist) the
+	// opt-in CPU temperature comes from HWiNFO or LibreHardwareMonitor when one
+	// is running, and otherwise from the motherboard's ACPI thermal zone.
+	//
+	// Some of these calls take tens of milliseconds, so a background thread
+	// polls them and "stats" copies the last snapshot. It idles when nobody has
+	// asked for a while (the desktop is hidden or a game is fullscreen).
+	static class Sensors
+	{
+		static readonly object Lock = new object();
+		static Thread Worker;
+		static volatile bool WantCpuTemp;
+		static long LastAsked;
+		static string Snapshot = "";
+
+		public static string Read(bool cpuTemp)
+		{
+			WantCpuTemp = cpuTemp;
+			Interlocked.Exchange(ref LastAsked, DateTime.UtcNow.Ticks);
+			lock (Lock)
+			{
+				if (Worker == null)
+				{
+					Worker = new Thread(Loop);
+					Worker.IsBackground = true;
+					Worker.Priority = ThreadPriority.BelowNormal;
+					Worker.Start();
+				}
+				return Snapshot;
+			}
+		}
+
+		static void Loop()
+		{
+			while (true)
+			{
+				if (new TimeSpan(DateTime.UtcNow.Ticks - Interlocked.Read(ref LastAsked)).TotalSeconds < 15)
+				{
+					string s;
+					try { s = Poll(); }
+					catch (Exception) { s = ""; }
+					lock (Lock) Snapshot = s;
+				}
+				Thread.Sleep(2000);
+			}
+		}
+
+		static string Poll()
+		{
+			StringBuilder sb = new StringBuilder();
+			Num(sb, "cpu_mhz", CpuMhz());
+			double mhz = -1, temp = -1, load = -1;
+			string name = "";
+			Adapters();
+			if (!Hybrid && NvmlReady())
+			{
+				uint v;
+				NvUtilization u;
+				if (NvClock != null && NvClock(NvDevice, 0, out v) == 0) mhz = v;
+				if (NvTemp != null && NvTemp(NvDevice, 0, out v) == 0) temp = v;
+				if (NvLoad != null && NvLoad(NvDevice, out u) == 0) load = u.Gpu;
+				name = NvDeviceName;
+			}
+			if (Gpu != 0)
+			{
+				if (name == "") name = GpuName;
+				if (temp < 0) temp = KmtTemp();
+				if (mhz < 0) mhz = KmtMhz();
+				if (load < 0) load = EngineLoad();
+			}
+			if (name != "") sb.Append(",\"gpu_name\":").Append(Json.Str(name));
+			Num(sb, "gpu_mhz", mhz);
+			Num(sb, "gpu_temp", temp);
+			Num(sb, "gpu_load", load);
+			if (WantCpuTemp)
+			{
+				string src;
+				double t = CpuTemp(out src);
+				Num(sb, "cpu_temp", t);
+				if (t >= 0) sb.Append(",\"cpu_temp_src\":").Append(Json.Str(src));
+			}
+			return sb.ToString();
+		}
+
+		static void Num(StringBuilder sb, string key, double v)
+		{
+			sb.Append(",\"").Append(key).Append("\":").Append(v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+		}
+
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibrary(string path);
+		[DllImport("kernel32.dll", CharSet = CharSet.Ansi)] static extern IntPtr GetProcAddress(IntPtr lib, string name);
+
+		static T Fn<T>(IntPtr lib, string name) where T : class
+		{
+			IntPtr p = GetProcAddress(lib, name);
+			return p == IntPtr.Zero ? null : Marshal.GetDelegateForFunctionPointer(p, typeof(T)) as T;
+		}
+
+		// --- CPU clock ---
+
+		static PerformanceCounter CpuFreq, CpuPerf;
+		static bool CpuFailed;
+
+		// "Processor Frequency" is the base clock; "% Processor Performance" is
+		// how far above or below it the cores ran since the last read (turbo
+		// shows as more than 100%), which is how Task Manager gets its "Speed".
+		static double CpuMhz()
+		{
+			if (CpuFailed) return -1;
+			try
+			{
+				if (CpuFreq == null)
+				{
+					CpuFreq = new PerformanceCounter("Processor Information", "Processor Frequency", "_Total", true);
+					try
+					{
+						CpuPerf = new PerformanceCounter("Processor Information", "% Processor Performance", "_Total", true);
+						CpuPerf.NextValue();
+					}
+					catch (Exception) { CpuPerf = null; }
+				}
+				double mhz = CpuFreq.NextValue();
+				if (CpuPerf != null)
+				{
+					double perf = CpuPerf.NextValue();
+					if (perf > 0) mhz *= perf / 100.0;
+				}
+				return mhz > 0 ? mhz : -1;
+			}
+			catch (Exception) { CpuFailed = true; return -1; }
+		}
+
+		// --- NVIDIA (NVML) ---
+
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int NvInitFn();
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int NvHandleFn(uint index, out IntPtr device);
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int NvValueFn(IntPtr device, int kind, out uint value);
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int NvLoadFn(IntPtr device, out NvUtilization util);
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int NvNameFn(IntPtr device, byte[] name, uint length);
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct NvUtilization { public uint Gpu, Memory; }
+
+		static int NvState;
+		static IntPtr NvDevice;
+		static NvValueFn NvTemp, NvClock;
+		static NvLoadFn NvLoad;
+		static string NvDeviceName = "";
+
+		static bool NvmlReady()
+		{
+			if (NvState != 0) return NvState > 0;
+			NvState = -1;
+			string pf = Environment.GetEnvironmentVariable("ProgramW6432");
+			if (string.IsNullOrEmpty(pf)) pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+			string[] paths = {
+				Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "nvml.dll"),
+				Path.Combine(pf, "NVIDIA Corporation\\NVSMI\\nvml.dll"),
+			};
+			IntPtr lib = IntPtr.Zero;
+			foreach (string path in paths)
+			{
+				if (!File.Exists(path)) continue;
+				lib = LoadLibrary(path);
+				if (lib != IntPtr.Zero) break;
+			}
+			if (lib == IntPtr.Zero) return false;
+			NvInitFn init = Fn<NvInitFn>(lib, "nvmlInit_v2");
+			NvHandleFn handle = Fn<NvHandleFn>(lib, "nvmlDeviceGetHandleByIndex_v2");
+			NvNameFn name = Fn<NvNameFn>(lib, "nvmlDeviceGetName");
+			NvTemp = Fn<NvValueFn>(lib, "nvmlDeviceGetTemperature");
+			NvClock = Fn<NvValueFn>(lib, "nvmlDeviceGetClockInfo");
+			NvLoad = Fn<NvLoadFn>(lib, "nvmlDeviceGetUtilizationRates");
+			if (init == null || handle == null || init() != 0 || handle(0, out NvDevice) != 0) return false;
+			if (name != null)
+			{
+				byte[] b = new byte[96];
+				if (name(NvDevice, b, (uint)b.Length) == 0)
+				{
+					int end = Array.IndexOf(b, (byte)0);
+					NvDeviceName = Encoding.UTF8.GetString(b, 0, end < 0 ? b.Length : end).Trim();
+				}
+			}
+			NvState = 1;
+			return true;
+		}
+
+		// --- Any WDDM GPU (D3DKMT), what Task Manager's GPU page reads ---
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtAdapterInfo { public uint Adapter; public uint LuidLow; public int LuidHigh; public uint Sources; public int PrecisePresent; }
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtEnum { public uint Count; public IntPtr Adapters; }
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtQuery { public uint Adapter; public int Type; public IntPtr Data; public uint Size; }
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtAdapterPerf
+		{
+			public uint PhysicalIndex;
+			public ulong MemFreq, MaxMemFreq, MaxMemFreqOC, MemBandwidth, PcieBandwidth;
+			public uint FanRpm, Power, Temperature;
+			public byte PowerStateOverride;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtNodePerf
+		{
+			public uint Node, PhysicalIndex;
+			public ulong Freq, MaxFreq, MaxFreqOC;
+			public uint Voltage, VoltageMax, VoltageMaxOC;
+			public ulong MaxLatency;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtSegments { public ulong Dedicated, DedicatedSystem, Shared; }
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct KmtType { public uint Flags; }
+
+		[DllImport("gdi32.dll")] static extern int D3DKMTEnumAdapters2(ref KmtEnum e);
+		[DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref KmtQuery q);
+		[DllImport("gdi32.dll")] static extern int D3DKMTCloseAdapter(ref uint adapter);
+
+		const int KMT_REGISTRY_INFO = 8, KMT_SEGMENT_SIZE = 3, KMT_ADAPTER_TYPE = 15, KMT_NODE_PERF = 61, KMT_ADAPTER_PERF = 62;
+		const uint TYPE_RENDER = 0x1, TYPE_SOFTWARE = 0x4, TYPE_HYBRID_DISCRETE = 0x10;
+
+		static bool Enumerated, Hybrid;
+		static uint Gpu;
+		static string GpuLuid = "", GpuName = "";
+
+		static bool Query<T>(uint adapter, int type, ref T data) where T : struct
+		{
+			int size = Marshal.SizeOf(typeof(T));
+			IntPtr buf = Marshal.AllocHGlobal(size);
+			try
+			{
+				Marshal.StructureToPtr(data, buf, false);
+				KmtQuery q = new KmtQuery();
+				q.Adapter = adapter;
+				q.Type = type;
+				q.Data = buf;
+				q.Size = (uint)size;
+				if (D3DKMTQueryAdapterInfo(ref q) != 0) return false;
+				data = (T)Marshal.PtrToStructure(buf, typeof(T));
+				return true;
+			}
+			finally { Marshal.FreeHGlobal(buf); }
+		}
+
+		// Picks the GPU with the most dedicated memory (the discrete one when a
+		// PC has two), skipping Microsoft's software renderer.
+		static void Adapters()
+		{
+			if (Enumerated) return;
+			Enumerated = true;
+			try
+			{
+				KmtEnum e = new KmtEnum();
+				if (D3DKMTEnumAdapters2(ref e) != 0 || e.Count == 0) return;
+				int stride = Marshal.SizeOf(typeof(KmtAdapterInfo));
+				e.Adapters = Marshal.AllocHGlobal(stride * (int)e.Count);
+				try
+				{
+					if (D3DKMTEnumAdapters2(ref e) != 0) return;
+					ulong best = 0;
+					KmtAdapterInfo pick = new KmtAdapterInfo();
+					List<uint> handles = new List<uint>();
+					for (int i = 0; i < e.Count; i++)
+					{
+						KmtAdapterInfo a = (KmtAdapterInfo)Marshal.PtrToStructure(new IntPtr(e.Adapters.ToInt64() + i * stride), typeof(KmtAdapterInfo));
+						handles.Add(a.Adapter);
+						KmtType kt = new KmtType();
+						if (Query(a.Adapter, KMT_ADAPTER_TYPE, ref kt))
+						{
+							uint type = kt.Flags;
+							if ((type & TYPE_HYBRID_DISCRETE) != 0) Hybrid = true;
+							if ((type & TYPE_SOFTWARE) != 0 || (type & TYPE_RENDER) == 0) continue;
+						}
+						KmtSegments seg = new KmtSegments();
+						Query(a.Adapter, KMT_SEGMENT_SIZE, ref seg);
+						if (Gpu == 0 || seg.Dedicated > best)
+						{
+							best = seg.Dedicated;
+							Gpu = a.Adapter;
+							pick = a;
+						}
+					}
+					foreach (uint h in handles)
+					{
+						if (h == Gpu) continue;
+						uint c = h;
+						D3DKMTCloseAdapter(ref c);
+					}
+					if (Gpu == 0) return;
+					GpuLuid = string.Format("luid_0x{0:X8}_0x{1:X8}", pick.LuidHigh, pick.LuidLow);
+					GpuName = KmtName(Gpu);
+				}
+				finally { Marshal.FreeHGlobal(e.Adapters); }
+			}
+			catch (Exception) { Gpu = 0; }
+		}
+
+		static string KmtName(uint adapter)
+		{
+			int size = 4 * 260 * 2;
+			IntPtr buf = Marshal.AllocHGlobal(size);
+			try
+			{
+				KmtQuery q = new KmtQuery();
+				q.Adapter = adapter;
+				q.Type = KMT_REGISTRY_INFO;
+				q.Data = buf;
+				q.Size = (uint)size;
+				if (D3DKMTQueryAdapterInfo(ref q) != 0) return "";
+				return (Marshal.PtrToStringUni(buf) ?? "").Trim();
+			}
+			catch (Exception) { return ""; }
+			finally { Marshal.FreeHGlobal(buf); }
+		}
+
+		static double KmtTemp()
+		{
+			KmtAdapterPerf p = new KmtAdapterPerf();
+			if (!Query(Gpu, KMT_ADAPTER_PERF, ref p) || p.Temperature == 0) return -1;
+			double c = p.Temperature / 10.0;
+			return c > 0 && c < 150 ? c : -1;
+		}
+
+		// Node 0 is the 3D engine on every driver Oazy has seen.
+		static double KmtMhz()
+		{
+			KmtNodePerf p = new KmtNodePerf();
+			if (!Query(Gpu, KMT_NODE_PERF, ref p) || p.Freq == 0) return -1;
+			return p.Freq / 1000000.0;
+		}
+
+		// --- GPU load from the "GPU Engine" counters ---
+		//
+		// Like Task Manager: add up every process's share of each engine, then
+		// take the busiest engine. One ReadCategory per poll, not one counter
+		// per process.
+
+		static Dictionary<string, CounterSample> EnginePrev = new Dictionary<string, CounterSample>();
+		static bool EngineFailed;
+
+		static double EngineLoad()
+		{
+			if (EngineFailed) return -1;
+			try
+			{
+				InstanceDataCollectionCollection all = new PerformanceCounterCategory("GPU Engine").ReadCategory();
+				InstanceDataCollection util = all["Utilization Percentage"];
+				if (util == null) { EngineFailed = true; return -1; }
+				Dictionary<string, CounterSample> now = new Dictionary<string, CounterSample>();
+				Dictionary<string, double> engines = new Dictionary<string, double>();
+				bool any = false;
+				foreach (InstanceData d in util.Values)
+				{
+					string inst = d.InstanceName;
+					int at = inst.IndexOf("luid_", StringComparison.OrdinalIgnoreCase);
+					if (at < 0) continue;
+					string engine = inst.Substring(at);
+					if (GpuLuid != "" && !engine.StartsWith(GpuLuid, StringComparison.OrdinalIgnoreCase)) continue;
+					now[inst] = d.Sample;
+					CounterSample prev;
+					if (!EnginePrev.TryGetValue(inst, out prev)) continue;
+					any = true;
+					double v;
+					engines.TryGetValue(engine, out v);
+					engines[engine] = v + CounterSample.Calculate(prev, d.Sample);
+				}
+				EnginePrev = now;
+				if (!any) return -1;
+				double max = 0;
+				foreach (double v in engines.Values) max = Math.Max(max, v);
+				return Math.Min(100.0, max);
+			}
+			catch (Exception) { EngineFailed = true; return -1; }
+		}
+
+		// --- CPU temperature (opt-in) ---
+
+		static DateTime LhmRetry, OhmRetry, AcpiRetry;
+
+		static double CpuTemp(out string src)
+		{
+			double t = HwInfoTemp();
+			src = "hwinfo";
+			if (t < 0) { t = WmiTemp("root\\LibreHardwareMonitor", ref LhmRetry); src = "lhm"; }
+			if (t < 0) { t = WmiTemp("root\\OpenHardwareMonitor", ref OhmRetry); src = "ohm"; }
+			if (t < 0) { t = AcpiTemp(); src = "acpi"; }
+			return t;
+		}
+
+		static readonly string[] CpuLabels = {
+			"cpu package", "cpu (tctl/tdie)", "cpu (tdie)", "cpu (tctl)", "cpu die (average)",
+			"core (tctl/tdie)", "core (tdie)", "core (tctl)", "package", "core max", "core average",
+		};
+
+		static int LabelRank(string label)
+		{
+			int i = Array.IndexOf(CpuLabels, label.Trim().ToLowerInvariant());
+			return i < 0 ? CpuLabels.Length : i;
+		}
+
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr OpenFileMapping(uint access, bool inherit, string name);
+		[DllImport("kernel32.dll")] static extern IntPtr MapViewOfFile(IntPtr map, uint access, uint high, uint low, UIntPtr bytes);
+		[DllImport("kernel32.dll")] static extern bool UnmapViewOfFile(IntPtr view);
+		[DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+		// HWiNFO's shared memory (Settings > Shared Memory Support), packed:
+		// a header of offsets and counts, then fixed-size "reading" records
+		// holding type (1 = temperature), labels, unit and current value.
+		static double HwInfoTemp()
+		{
+			IntPtr map = OpenFileMapping(4, false, "Global\\HWiNFO_SENS_SM2");
+			if (map == IntPtr.Zero) return -1;
+			IntPtr view = MapViewOfFile(map, 4, 0, 0, UIntPtr.Zero);
+			try
+			{
+				if (view == IntPtr.Zero || Marshal.ReadInt32(view, 0) != 0x53695748) return -1;
+				long first = (uint)Marshal.ReadInt32(view, 32);
+				long stride = (uint)Marshal.ReadInt32(view, 36);
+				long count = (uint)Marshal.ReadInt32(view, 40);
+				if (stride < 292 || count > 10000) return -1;
+				double best = -1;
+				int rank = int.MaxValue;
+				for (long i = 0; i < count; i++)
+				{
+					IntPtr r = new IntPtr(view.ToInt64() + first + i * stride);
+					if (Marshal.ReadInt32(r, 0) != 1) continue;
+					string label = Marshal.PtrToStringAnsi(new IntPtr(r.ToInt64() + 12)) ?? "";
+					int k = LabelRank(label);
+					if (k == CpuLabels.Length && !label.StartsWith("CPU", StringComparison.OrdinalIgnoreCase)) continue;
+					if (k >= rank) continue;
+					string unit = Marshal.PtrToStringAnsi(new IntPtr(r.ToInt64() + 268)) ?? "";
+					double v = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(r, 284));
+					if (unit.IndexOf('F') >= 0) v = (v - 32.0) * 5.0 / 9.0;
+					if (v <= 0 || v > 150) continue;
+					best = v;
+					rank = k;
+				}
+				return best;
+			}
+			catch (Exception) { return -1; }
+			finally
+			{
+				if (view != IntPtr.Zero) UnmapViewOfFile(view);
+				CloseHandle(map);
+			}
+		}
+
+		// LibreHardwareMonitor and OpenHardwareMonitor publish their sensors
+		// over WMI while they run. A missing namespace is retried every 30 s.
+		static double WmiTemp(string ns, ref DateTime retry)
+		{
+			if (DateTime.UtcNow < retry) return -1;
+			try
+			{
+				double best = -1;
+				int rank = int.MaxValue;
+				using (System.Management.ManagementObjectSearcher s = new System.Management.ManagementObjectSearcher(ns, "SELECT Name, Identifier, Value FROM Sensor WHERE SensorType='Temperature'"))
+				{
+					foreach (System.Management.ManagementBaseObject o in s.Get())
+					{
+						string id = (Convert.ToString(o["Identifier"]) ?? "").ToLowerInvariant();
+						if (id.IndexOf("cpu") < 0) continue;
+						double v = Convert.ToDouble(o["Value"]);
+						int k = LabelRank(Convert.ToString(o["Name"]) ?? "");
+						if (v <= 0 || v > 150) continue;
+						if (k < rank || (k == rank && v > best))
+						{
+							best = v;
+							rank = k;
+						}
+					}
+				}
+				if (best < 0) retry = DateTime.UtcNow.AddSeconds(30);
+				return best;
+			}
+			catch (Exception)
+			{
+				retry = DateTime.UtcNow.AddSeconds(30);
+				return -1;
+			}
+		}
+
+		// The motherboard's ACPI thermal zones (Kelvin). Close to the CPU on
+		// most laptops; some desktops report a fixed value or none at all.
+		static double AcpiTemp()
+		{
+			if (DateTime.UtcNow < AcpiRetry) return -1;
+			try
+			{
+				InstanceDataCollectionCollection all = new PerformanceCounterCategory("Thermal Zone Information").ReadCategory();
+				double best = -1;
+				InstanceDataCollection fine = all["High Precision Temperature"];
+				if (fine != null)
+					foreach (InstanceData d in fine.Values) best = Math.Max(best, d.RawValue / 10.0 - 273.15);
+				InstanceDataCollection coarse = all["Temperature"];
+				if (best <= 0 && coarse != null)
+					foreach (InstanceData d in coarse.Values) best = Math.Max(best, d.RawValue - 273.15);
+				if (best > 5 && best < 125) return best;
+			}
+			catch (Exception) { }
+			AcpiRetry = DateTime.UtcNow.AddSeconds(60);
+			return -1;
 		}
 	}
 }

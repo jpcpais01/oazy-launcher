@@ -12,6 +12,7 @@ const DEFAULTS := {
 	"hide_windows_taskbar": true,
 	"theme_app_windows": true,
 	"alt_tab": true,
+	"cpu_temp": false,
 	"favorites": [],
 	"custom_icons": ["explorer", "terminal", "claude", "whatsapp"],
 	## Default custom icons already offered, so new defaults reach old installs once.
