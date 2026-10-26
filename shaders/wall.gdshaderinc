@@ -46,12 +46,12 @@ vec3 wall_vignette(vec3 col, vec2 uv) {
 vec3 wall_oasis(vec2 uv, float ph) {
 	vec2 p = vec2(uv.x * aspect, uv.y);
 	// A gentle warp keeps the pools organic rather than perfectly round.
-	p += 0.05 * vec2(wall_wave(ph, 19.0, p.y * 2.3), wall_wave(ph, -15.0, p.x * 1.9 + 1.5708));
+	p += 0.05 * vec2(wall_wave(ph, 57.0, p.y * 2.3), wall_wave(ph, -45.0, p.x * 1.9 + 1.5708));
 	vec3 col = wall_base.rgb;
-	vec2 ca = vec2(aspect * (0.22 + 0.05 * wall_wave(ph, 10.0, 0.0)), 0.28 + 0.06 * wall_wave(ph, 8.0, 1.5708));
-	vec2 cb = vec2(aspect * (0.78 + 0.05 * wall_wave(ph, 9.0, 1.5708)), 0.32 + 0.07 * wall_wave(ph, 13.0, 1.0));
-	vec2 cc = vec2(aspect * (0.52 + 0.08 * wall_wave(ph, 7.0, 2.0)), 1.02 + 0.04 * wall_wave(ph, 10.0, 1.5708));
-	vec2 cd = vec2(aspect * (0.08 + 0.04 * wall_wave(ph, 6.0, 1.5708)), 0.95);
+	vec2 ca = vec2(aspect * (0.22 + 0.05 * wall_wave(ph, 30.0, 0.0)), 0.28 + 0.06 * wall_wave(ph, 24.0, 1.5708));
+	vec2 cb = vec2(aspect * (0.78 + 0.05 * wall_wave(ph, 27.0, 1.5708)), 0.32 + 0.07 * wall_wave(ph, 39.0, 1.0));
+	vec2 cc = vec2(aspect * (0.52 + 0.08 * wall_wave(ph, 21.0, 2.0)), 1.02 + 0.04 * wall_wave(ph, 30.0, 1.5708));
+	vec2 cd = vec2(aspect * (0.08 + 0.04 * wall_wave(ph, 18.0, 1.5708)), 0.95);
 	ca = mix(ca, vec2(aspect * 0.5, 0.42), focus_center * 0.6);
 	col = mix(col, wall_a.rgb, wall_pool(p, ca, 0.62) * 0.85);
 	col = mix(col, wall_b.rgb, wall_pool(p, cb, 0.58) * 0.8);
@@ -59,7 +59,7 @@ vec3 wall_oasis(vec2 uv, float ph) {
 	col = mix(col, accent.rgb * 0.55, wall_pool(p, cd, 0.4) * 0.35);
 	// The oasis, barely there: a band of light on a far horizon, and below
 	// it a slow, faint shimmer like sun on still water.
-	float hy = 0.6 + 0.012 * wall_wave(ph, 23.0, p.x * 1.4);
+	float hy = 0.6 + 0.012 * wall_wave(ph, 46.0, p.x * 1.4);
 	float hd = (uv.y - hy) * 6.5;
 	vec3 sheen = mix(wall_glow.rgb, accent.rgb, 0.45);
 	col += sheen * exp(-hd * hd) * 0.045;
@@ -76,11 +76,11 @@ vec3 wall_oasis(vec2 uv, float ph) {
 // curtain, with faint threads along it and a glow that swells and fades
 // along its length.
 vec3 wall_ribbon(vec2 p, float ph, float y0, float tilt, float w, float o, vec3 silk) {
-	float y = y0 + tilt * p.x + 0.075 * wall_wave(ph, 5.0, p.x * 1.25 + o) + 0.03 * wall_wave(ph, -8.0, p.x * 2.8 + o * 1.7);
+	float y = y0 + tilt * p.x + 0.075 * wall_wave(ph, 40.0, p.x * 1.25 + o) + 0.03 * wall_wave(ph, -64.0, p.x * 2.8 + o * 1.7);
 	float d = p.y - y;
 	float sheet = d < 0.0 ? exp(-d * d / (w * w * 0.02)) : exp(-d / w);
 	float threads = 0.93 + 0.07 * sin(d * 160.0 + p.x * 2.0);
-	float along = 0.25 + 0.75 * smoothstep(-0.7, 0.9, wall_wave(ph, 6.0, p.x * 1.6 + o));
+	float along = 0.25 + 0.75 * smoothstep(-0.7, 0.9, wall_wave(ph, 36.0, p.x * 1.6 + o));
 	float crest = exp(-d * d * 40000.0);
 	return (silk * sheet * threads * 0.42 + wall_glow.rgb * crest * 0.06) * along;
 }
@@ -88,7 +88,7 @@ vec3 wall_ribbon(vec2 p, float ph, float y0, float tilt, float w, float o, vec3 
 vec3 wall_aurora(vec2 uv, float ph) {
 	vec2 p = vec2(uv.x * aspect, uv.y);
 	vec3 col = wall_base.rgb;
-	col = mix(col, wall_a.rgb, wall_pool(p, vec2(aspect * (0.3 + 0.04 * wall_wave(ph, 4.0, 0.0)), -0.1), 0.85) * 0.55);
+	col = mix(col, wall_a.rgb, wall_pool(p, vec2(aspect * (0.3 + 0.04 * wall_wave(ph, 20.0, 0.0)), -0.1), 0.85) * 0.55);
 	col = mix(col, wall_c.rgb * 0.6, wall_pool(p, vec2(aspect * 0.92, 1.12), 0.6) * 0.3);
 	vec3 silk_a = mix(wall_b.rgb, accent.rgb, 0.45);
 	vec3 silk_b = mix(wall_a.rgb, wall_glow.rgb, 0.3);
@@ -111,8 +111,8 @@ vec3 wall_tide(vec2 uv, float ph) {
 		float k = fi / 3.0;
 		float base = 0.53 + fi * 0.105;
 		float amp = 0.03 + fi * 0.01;
-		float y = base + amp * wall_wave(ph, 3.0 + fi * 2.0, p.x * (1.15 + fi * 0.3) + fi * 1.7)
-			+ amp * 0.45 * wall_wave(ph, -(6.0 + fi), p.x * (2.6 - fi * 0.35) + fi * 3.1);
+		float y = base + amp * wall_wave(ph, 50.0 + fi * 12.0, p.x * (1.15 + fi * 0.3) + fi * 1.7)
+			+ amp * 0.45 * wall_wave(ph, -(70.0 + fi * 8.0), p.x * (2.6 - fi * 0.35) + fi * 3.1);
 		float d = uv.y - y;
 		float inside = smoothstep(-0.0012, 0.0012, d);
 		vec3 sheet = mix(mix(wall_a.rgb, wall_b.rgb, 0.6), mix(wall_base.rgb, wall_b.rgb, 0.45), k);
@@ -121,7 +121,7 @@ vec3 wall_tide(vec2 uv, float ph) {
 		sheet *= 1.0 - 0.45 * smoothstep(0.0, 0.32, d);
 		sheet += haze * exp(-max(d, 0.0) * 30.0) * 0.06;
 		col = mix(col, sheet, inside * (0.6 + 0.3 * k));
-		float lit = 0.4 + 0.6 * smoothstep(-0.8, 1.0, wall_wave(ph, 9.0, p.x * 1.6 + fi * 2.4));
+		float lit = 0.4 + 0.6 * smoothstep(-0.8, 1.0, wall_wave(ph, 45.0, p.x * 1.6 + fi * 2.4));
 		col += vec3(0.92, 0.97, 1.0) * (exp(-d * d * 400000.0) * 0.1 + exp(-d * d * 6000.0) * 0.015) * lit;
 	}
 	return wall_vignette(col, uv);
@@ -155,11 +155,11 @@ vec3 wall_drift(vec2 uv, float ph) {
 	col = mix(col, wall_c.rgb, wall_pool(p, vec2(aspect * 0.55, 1.15), 0.5) * 0.35);
 	col += wall_glow.rgb * exp(-uv.y * uv.y * 5.0) * 0.03;
 	// Far bubbles are small and sharp, near ones large and out of focus.
-	col = wall_bubble(col, p, vec2(aspect * (0.62 + 0.02 * wall_wave(ph, 3.0, 0.0)), 0.3 + 0.025 * wall_wave(ph, 4.0, 1.0)), 0.06, 0.04);
-	col = wall_bubble(col, p, vec2(aspect * (0.38 + 0.025 * wall_wave(ph, 2.0, 2.0)), 0.72 + 0.03 * wall_wave(ph, 3.0, 0.5)), 0.1, 0.05);
-	col = wall_bubble(col, p, vec2(aspect * (0.88 + 0.02 * wall_wave(ph, 2.0, 4.0)), 0.18 + 0.03 * wall_wave(ph, 3.0, 2.5)), 0.13, 0.08);
-	col = wall_bubble(col, p, vec2(aspect * (0.13 + 0.025 * wall_wave(ph, 1.0, 1.2)), 0.88 + 0.03 * wall_wave(ph, 2.0, 3.0)), 0.22, 0.1);
-	col = wall_bubble(col, p, vec2(aspect * (0.74 + 0.03 * wall_wave(ph, 1.0, 5.0)), 0.92 + 0.035 * wall_wave(ph, 2.0, 0.7)), 0.34, 0.12);
+	col = wall_bubble(col, p, vec2(aspect * (0.62 + 0.06 * wall_wave(ph, 34.0, 0.0)), 0.3 + 0.05 * wall_wave(ph, 46.0, 1.0)), 0.06, 0.04);
+	col = wall_bubble(col, p, vec2(aspect * (0.38 + 0.07 * wall_wave(ph, 26.0, 2.0)), 0.72 + 0.06 * wall_wave(ph, 38.0, 0.5)), 0.1, 0.05);
+	col = wall_bubble(col, p, vec2(aspect * (0.88 + 0.05 * wall_wave(ph, 22.0, 4.0)), 0.18 + 0.06 * wall_wave(ph, 31.0, 2.5)), 0.13, 0.08);
+	col = wall_bubble(col, p, vec2(aspect * (0.13 + 0.05 * wall_wave(ph, 17.0, 1.2)), 0.88 + 0.05 * wall_wave(ph, 24.0, 3.0)), 0.22, 0.1);
+	col = wall_bubble(col, p, vec2(aspect * (0.74 + 0.05 * wall_wave(ph, 13.0, 5.0)), 0.92 + 0.04 * wall_wave(ph, 19.0, 0.7)), 0.34, 0.12);
 	return wall_vignette(col, uv);
 }
 
