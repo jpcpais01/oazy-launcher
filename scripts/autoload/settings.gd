@@ -22,6 +22,7 @@ const DEFAULTS := {
 	"volume": 0.6,
 	"effects": "high",
 	"accent": "38d6c4",
+	"wallpaper": "oasis",
 	"wallpaper_light": "auto",
 	"user_name": "",
 	"pins": [],

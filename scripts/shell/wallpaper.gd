@@ -1,7 +1,8 @@
 class_name Wallpaper
 extends ColorRect
-## The desktop background (shaders/oasis.gdshader): soft pools of colour that
-## follow the local time of day unless a fixed light is picked in Settings.
+## The desktop background (shaders/oasis.gdshader): one of a few calm, slowly
+## moving styles, lit by colours that follow the local time of day unless a
+## fixed light is picked in Settings.
 
 const SHADER := preload("res://shaders/oasis.gdshader")
 ## base, pool a, pool b, pool c, glow
@@ -10,6 +11,13 @@ const PALETTES := {
 	"dawn": [Color("0a1020"), Color("2f3c72"), Color("1b5566"), Color("b5786a"), Color("ffd2b0")],
 	"day": [Color("081722"), Color("17506b"), Color("1f7470"), Color("a7845f"), Color("fff1d6")],
 	"dusk": [Color("0b0919"), Color("3f2a61"), Color("173d55"), Color("b0594f"), Color("ffc0a0")],
+}
+## Settings id -> [name, wall_style], in the order Settings shows them.
+const STYLES := {
+	"oasis": ["Oasis", 0],
+	"aurora": ["Aurora", 1],
+	"tide": ["Tide", 2],
+	"drift": ["Drift", 3],
 }
 const PARAMS := ["wall_base", "wall_a", "wall_b", "wall_c", "wall_glow"]
 ## Hour -> palette keyframes for "auto".
@@ -20,6 +28,7 @@ static var shared := {}
 
 var mat: ShaderMaterial
 var _accent_tween: Tween
+var _fade_tween: Tween
 var _accent := App.accent
 
 
@@ -44,6 +53,8 @@ func _ready() -> void:
 			apply_effects()
 		elif key == "wallpaper_light":
 			update_sky()
+		elif key == "wallpaper":
+			apply_style()
 	)
 	var timer := Timer.new()
 	timer.wait_time = 60.0
@@ -51,6 +62,7 @@ func _ready() -> void:
 	timer.timeout.connect(update_sky)
 	add_child(timer)
 	_param("accent", _accent)
+	apply_style()
 	apply_effects()
 	update_sky()
 
@@ -59,6 +71,29 @@ func apply_effects() -> void:
 	var eco: bool = Settings.get_value("effects") == "eco"
 	_param("speed", 0.35 if eco else 1.0)
 	_publish()
+
+
+## Switches to the style picked in Settings, crossfading from the old one.
+func apply_style() -> void:
+	var to := style_index(str(Settings.get_value("wallpaper")))
+	if _fade_tween and _fade_tween.is_valid():
+		_fade_tween.kill()
+	if not is_inside_tree() or not mat.get_shader_parameter("wall_style") is int or to == mat.get_shader_parameter("wall_style"):
+		_param("wall_style", to)
+		_param("wall_fade", 1.0)
+		_publish()
+		return
+	_param("wall_from", mat.get_shader_parameter("wall_style"))
+	_param("wall_style", to)
+	_fade_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_fade_tween.tween_method(func(k: float) -> void:
+		_param("wall_fade", k)
+		_publish()
+	, 0.0, 1.0, 0.9)
+
+
+static func style_index(id: String) -> int:
+	return int(STYLES.get(id, STYLES["oasis"])[1])
 
 
 ## Palette for a fixed light, or blended from the clock for "auto".

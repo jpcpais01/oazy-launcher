@@ -99,6 +99,23 @@ func _ready() -> void:
 		]})
 	await _wait(2.5)
 	await shot("01-desktop")
+	# Each wallpaper: on the desktop, then on its own.
+	for id in Wallpaper.STYLES:
+		Settings.set_value("wallpaper", id)
+		await _wait(1.3)
+		if id != "oasis":
+			await shot("01w-desktop-" + id)
+		var shown := []
+		for c in main.get_children():
+			if c is CanvasItem and c != main.wallpaper and (c as CanvasItem).visible:
+				(c as CanvasItem).visible = false
+				shown.append(c)
+		await _wait(0.2)
+		await shot("01x-wallpaper-" + id)
+		for c in shown:
+			(c as CanvasItem).visible = true
+	Settings.set_value("wallpaper", "oasis")
+	await _wait(1.3)
 	main.weather.open(main.taskbar._weather_btn)
 	await _wait(0.9)
 	await shot("01b-weather")
@@ -136,6 +153,13 @@ func _ready() -> void:
 		scroller.scroll_vertical = int(icons.global_position.y - scroller.global_position.y) - 160
 		await _wait(0.4)
 		await shot("06b-settings-icons")
+		scroller.scroll_vertical = 0
+	var walls := settings.find_child("Wallpapers", true, false) as Control
+	if walls and scroller:
+		var content := scroller.get_child(0) as Control
+		scroller.scroll_vertical = int((content.get_global_transform().affine_inverse() * walls.global_position).y) - 200
+		await _wait(0.4)
+		await shot("06d-settings-wallpapers")
 		scroller.scroll_vertical = 0
 	var pointers := settings.find_child("Pointers", true, false) as Control
 	if pointers:

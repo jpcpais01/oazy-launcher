@@ -239,6 +239,7 @@ func _logic_tests() -> void:
 		check(built_files.has("exe"), "files: compiles on Windows (%s)" % str(built_files.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
+	check(Wallpaper.style_index("tide") == 2 and Wallpaper.style_index("gone") == 0, "wallpaper: styles, unknown falls back to Oasis")
 	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")
 
 	# Start's quick answers: sums, addresses, paths and commands.
