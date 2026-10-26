@@ -131,13 +131,7 @@ func _build_updates() -> void:
 	_col.add_child(card)
 	var row := Kit.hbox(20)
 	card.add_child(row)
-	var logo := TextureRect.new()
-	logo.texture = load("res://assets/icon.png")
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.custom_minimum_size = Vector2(64, 64)
-	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(logo)
+	row.add_child(OazyMark.icon(64))
 	var text := Kit.vbox(4)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.alignment = BoxContainer.ALIGNMENT_CENTER

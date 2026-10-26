@@ -11,7 +11,7 @@ signal finished_early
 const MIN_TIME := 0.85
 
 var _orb: UpdateOrb
-var _logo: TextureRect
+var _logo: OazyMark
 var _word: Label
 var _word_font: FontVariation
 var _tag: Label
@@ -84,14 +84,11 @@ static func build_stage(root: Control, tag_text: String, swirl: float) -> Dictio
 	orb.mat.set_shader_parameter("swirl", swirl)
 	orb.mat.set_shader_parameter("waves", 0.4)
 	mark.add_child(orb)
-	var logo := TextureRect.new()
-	logo.texture = load("res://assets/icon.png")
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.position = Vector2(160, 160)
-	logo.size = Vector2(100, 100)
-	logo.pivot_offset = Vector2(50, 50)
-	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Oazy's mark floats in the water: the orb and the mark are the app icon.
+	var logo := OazyMark.new(0.21 * 0.5)
+	logo.position = Vector2.ZERO
+	logo.size = Vector2(420, 420)
+	logo.pivot_offset = Vector2(210, 210)
 	mark.add_child(logo)
 
 	var word := Kit.label("OAZY", 46, 800, Color.WHITE, true)
@@ -132,8 +129,8 @@ func _intro() -> void:
 	t.tween_property(_tag, "modulate:a", 1.0, 0.45).set_delay(0.3).set_trans(Tween.TRANS_SINE)
 	t.tween_property(_status, "modulate:a", 1.0, 0.45).set_delay(0.4).set_trans(Tween.TRANS_SINE)
 	var bob := _logo.create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	bob.tween_property(_logo, "position:y", 152.0, 1.4)
-	bob.tween_property(_logo, "position:y", 160.0, 1.4)
+	bob.tween_property(_logo, "position:y", -6.0, 1.4)
+	bob.tween_property(_logo, "position:y", 0.0, 1.4)
 
 
 func _step(text: String, progress: float) -> void:
