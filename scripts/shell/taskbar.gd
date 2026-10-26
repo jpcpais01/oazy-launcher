@@ -3,21 +3,26 @@ extends Control
 ## The glass taskbar. Left: the Start orb and search. Middle: pinned and
 ## running apps, real Windows windows and Oazy's own side by side, with a
 ## liquid "lens" that glides to whichever one is active. Drag an app to
-## reorder; its neighbours ease aside and the order is kept. Right: updates,
-## the network (Wi-Fi and cable), sound (quick settings), the weather, the
+## reorder; its neighbours ease aside and the order is kept. Right: the
+## network (Wi-Fi and cable), sound (quick settings), the weather, the
 ## clock (calendar) and an invisible corner that shows the desktop.
 ## The task manager always has a button among the apps; it opens as a card
 ## rising from that button rather than as a window.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
+## The orb (or the corner past it): Claude.
 signal start_pressed
+## The orb right-clicked: Start.
+signal start_alt_pressed
 signal search_pressed
 
 const HEIGHT := 48.0
 const MARGIN := 6.0
 ## The strip at the bottom of the screen the taskbar keeps for itself.
 const RESERVE := HEIGHT + MARGIN * 2.0
+const FLOAT_SHADOW := 0.14
+const DOCK_SHADOW := 0.08
 const APP_GAP := 4.0
 
 var main: Node
@@ -39,7 +44,6 @@ var _drag_grab := 0.0
 var _reflowing := false
 var _clock: Label
 var _date: Label
-var _update_btn: FxButton
 var _battery: Label
 var _sound: Button
 var _net: Button
@@ -51,7 +55,8 @@ var _weather_icon: TextureRect
 var _weather_temp: Label
 ## Hover intent for the window previews (see _step_preview).
 var _hover_btn: TaskbarButton
-## How long the pointer has been on _hover_btn, and how long it has held still.
+## How long the pointer has been on _hover_btn, and how long it has held still
+## (within REST_SLOP of where it came to rest, _last_pointer).
 var _dwell := 0.0
 var _still := 0.0
 var _last_pointer := Vector2.INF
@@ -91,8 +96,9 @@ func _ready() -> void:
 
 	_glass = GlassPanel.new(true, HEIGHT / 2.0, GlassPanel.TINT_BAR)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# A tight shadow: the strip above the taskbar belongs to apps in shell mode.
-	_glass.set_shadow_strength(0.4, 14, 5.0)
+	# A faint, diffuse lift rather than a dark band. Kept tight: the strip
+	# above the taskbar belongs to apps in shell mode.
+	_glass.set_shadow_strength(FLOAT_SHADOW, 16, 4.0)
 	add_child(_glass)
 
 	var row := Kit.hbox(8)
@@ -104,17 +110,11 @@ func _ready() -> void:
 	orb = StartOrb.new()
 	orb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	orb.pressed.connect(func() -> void: start_pressed.emit())
+	orb.alt_pressed.connect(func() -> void: start_alt_pressed.emit())
 	row.add_child(orb)
 	_start_corner()
 	row.add_child(_search_pill())
 	row.add_child(Kit.spacer(0, 0, true))
-
-	_update_btn = FxButton.make("Update", "download", FxButton.Style.ACCENT, 38)
-	_update_btn.visible = false
-	_update_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_update_btn.focus_mode = Control.FOCUS_NONE
-	_update_btn.pressed.connect(func() -> void: main.show_update())
-	row.add_child(_update_btn)
 
 	_battery = Kit.label("", 14, 600, App.TEXT_DIM)
 	_battery.visible = false
@@ -191,7 +191,6 @@ func _ready() -> void:
 	Catalog.apps_changed.connect(queue_rebuild)
 	Host.windows_changed.connect(queue_rebuild)
 	Library.changed.connect(queue_rebuild)
-	Updater.state_changed.connect(_on_update_state)
 	layer.changed.connect(queue_rebuild)
 	rebuild()
 
@@ -271,12 +270,13 @@ class CornerHit extends Button:
 		return Rect2(Vector2.ZERO, size).has_point(point) and not hole.has_point(point)
 
 
-## The Start corner, like the show desktop one on the right: throwing the mouse
-## into the screen's bottom-left corner and clicking opens Start. The button
+## The orb's corner, like the show desktop one on the right: throwing the mouse
+## into the screen's bottom-left corner and clicking does what the orb does
+## (opens Claude). The button
 ## covers the orb's end of the bar out to the corner, minus the orb itself.
 func _start_corner() -> void:
 	var s := CornerHit.new()
-	s.tooltip_text = "Start (Ctrl + Alt + O)"
+	s.tooltip_text = "Claude (Ctrl + Space)"
 	s.pressed.connect(func() -> void: start_pressed.emit())
 	add_child(s)
 	_start_hit = s
@@ -620,7 +620,7 @@ func _set_docked(on: bool) -> void:
 	_dock_tween.tween_property(_glass, "offset_top", -m, 0.4)
 	_dock_tween.tween_property(_glass, "offset_bottom", m + (rad if on else 0.0), 0.4)
 	_dock_tween.tween_property(_glass, "radius", 14.0 if on else rad, 0.4)
-	_glass.set_shadow_strength(0.25 if on else 0.4, 10 if on else 14, 0.0 if on else 5.0)
+	_glass.set_shadow_strength(DOCK_SHADOW if on else FLOAT_SHADOW, 12 if on else 16, 0.0 if on else 4.0)
 
 
 func is_docked() -> bool:
@@ -695,22 +695,29 @@ func _on_hover(_btn: TaskbarButton, _on: bool) -> void:
 
 # --- Window previews ------------------------------------------------------------------
 # One card that follows the pointer along the taskbar. It opens after the
-# pointer rests on an app, glides to the next app as the pointer moves along,
-# and stays while the pointer heads up to it: from where it left the button,
-# anywhere inside the triangle up to the card's bottom corners counts as on
-# the way, even across other apps' buttons. It closes a moment after the
-# pointer is off the button, the card and that path. All of this is worked
-# out from where the pointer is each frame, not from enter and leave events,
-# so a fast sweep can't leave it confused.
+# pointer rests on an app and moves to another app once the pointer settles on
+# that one's button, so a quick sweep along the bar doesn't flick it through
+# every app on the way. It stays while the pointer heads up to it: from where
+# it left the button, anywhere inside the triangle up to the card's bottom
+# corners counts as on the way, even across other apps' buttons. It closes a
+# moment after the pointer is off the buttons, the card and that path. All of
+# this is worked out from where the pointer is each frame, not from enter and
+# leave events, so a fast sweep can't leave it confused.
 
 const OPEN_DELAY := 0.4
 ## How far under the card still counts as just below it.
 const GAP_SLACK := TaskPreview.GAP + 4.0
 ## Reopening right after it closed (sweeping back) is immediate.
 const REOPEN_WINDOW := 400
-const CLOSE_DELAY := 0.3
-## On the way to the card, another app takes it only once the pointer rests there.
-const SWITCH_REST := 0.12
+const CLOSE_DELAY := 0.45
+## With the card up, another app takes it once the pointer has been on its
+## button this long...
+const SWITCH_DWELL := 0.1
+## ...or, on the way up to the card, once the pointer rests there this long.
+const SWITCH_REST := 0.2
+## Moving less than this (in pixels) still counts as resting, however many
+## frames it's spread over.
+const REST_SLOP := 3.0
 
 
 func _step_preview(delta: float) -> bool:
@@ -720,9 +727,11 @@ func _step_preview(delta: float) -> bool:
 			_close_preview()
 		return false
 	var p := get_global_mouse_position()
-	var moved := _last_pointer == Vector2.INF or p.distance_to(_last_pointer) > 2.0
-	_last_pointer = p
-	_still = 0.0 if moved else _still + delta
+	if _last_pointer == Vector2.INF or p.distance_to(_last_pointer) > REST_SLOP:
+		_last_pointer = p
+		_still = 0.0
+	else:
+		_still += delta
 	var over := _button_at(p)
 	if over != _hover_btn:
 		_hover_btn = over
@@ -745,12 +754,17 @@ func _step_preview(delta: float) -> bool:
 		_anchor = p
 		_away = 0.0
 		return true
-	if preview.get_global_rect().grow(6.0).has_point(p):
+	if preview.covers(p, 6.0):
 		_away = 0.0
 		return true
 	var heading := _heading_to_preview(p)
-	if over and over != _hush and (not heading or _still >= SWITCH_REST):
-		_open_preview(over, p)
+	if over and over != _hush:
+		# On another app: it takes the card once the pointer settles there.
+		var settled := (_still >= SWITCH_REST) if heading else (_dwell >= SWITCH_DWELL)
+		if settled:
+			_open_preview(over, p)
+		else:
+			_away = 0.0
 		return true
 	if heading:
 		_away = 0.0
@@ -786,16 +800,16 @@ func _button_at(p: Vector2) -> TaskbarButton:
 	return null
 
 
-## The pointer is on its way from the button up to the card: inside the
-## triangle from where it left the button to the card's bottom corners, or in
-## the strip right under the card.
+## The pointer is on its way from the button up to the card (where the card is
+## going, if it's still gliding there): inside the triangle from where it left
+## the button to the card's bottom corners, or in the strip right under the card.
 func _heading_to_preview(p: Vector2) -> bool:
-	var r := preview.get_global_rect()
-	var bottom := r.position.y + r.size.y
+	var r := preview.aim_rect()
+	var bottom := r.end.y
 	if p.y < bottom - 2.0:
 		return false
-	var left := Vector2(r.position.x - 12.0, bottom)
-	var right := Vector2(r.end.x + 12.0, bottom)
+	var left := Vector2(r.position.x - 20.0, bottom)
+	var right := Vector2(r.end.x + 20.0, bottom)
 	if Geometry2D.point_is_inside_triangle(p, _anchor, left, right):
 		return true
 	return p.x >= r.position.x and p.x <= r.end.x and p.y <= bottom + GAP_SLACK
@@ -1092,19 +1106,3 @@ func _tray_button(min_size: Vector2, tip: String) -> Button:
 	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.16), 14, Color(1, 1, 1, 0.14), 1))
 	b.add_theme_stylebox_override("hover_pressed", Kit.box(Color(1, 1, 1, 0.16), 14, Color(1, 1, 1, 0.14), 1))
 	return b
-
-
-func _on_update_state(state: StringName) -> void:
-	# A (re)check leaves the button as it was, so it never blinks away
-	# while Oazy looks for an even newer update.
-	if state == &"checking":
-		return
-	var show := state in [&"available", &"downloading", &"ready"]
-	_update_btn.visible = show
-	match state:
-		&"downloading":
-			_update_btn.text = "Downloading"
-		&"ready":
-			_update_btn.text = "Restart to update"
-		_:
-			_update_btn.text = "Update"

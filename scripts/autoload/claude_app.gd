@@ -33,7 +33,7 @@ func data_dir() -> String:
 
 
 ## Opens the window (or brings it up). `opts`: cwd, a folder to start a
-## conversation in.
+## conversation in; resume (+ title), a conversation to carry on.
 func open(opts: Dictionary = {}) -> bool:
 	if not App.is_windows():
 		App.toast("Claude runs on Windows")
@@ -93,6 +93,12 @@ func _flush() -> void:
 			args.append_array(["--terminal", _terminal, "--terminal-data", Terminal.data_dir()])
 		if str(q.get("cwd", "")) != "":
 			args.append_array(["--cwd", str(q["cwd"])])
+		if str(q.get("resume", "")) != "":
+			args.append_array(["--resume", str(q["resume"])])
+			# Godot doesn't escape quotes inside an argument on Windows.
+			var title := str(q.get("title", "")).replace("\"", "'").strip_edges()
+			if title != "":
+				args.append_array(["--title", title])
 		if OS.create_process(_exe, args) <= 0:
 			App.toast("Couldn't start Claude", &"error")
 	_queue.clear()

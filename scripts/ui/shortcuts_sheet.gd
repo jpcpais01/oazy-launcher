@@ -8,6 +8,7 @@ const MARKDOWN := "### Anywhere
 ### On the desktop
 - **Just type** to search apps, games, settings, sums and the web.
 - **Ctrl + F** opens Start search.
+- **Ctrl + Space** opens Claude, like clicking the orb.
 - **Ctrl + L** opens your Library, **Ctrl + ,** opens Settings.
 - **Ctrl + N** adds a game or app. You can also drop an .exe or shortcut onto Oazy.
 - **F11** or **Alt + Enter** switches between fullscreen and a window.
@@ -16,6 +17,10 @@ const MARKDOWN := "### Anywhere
 ### In Start search
 - **↑ ↓** pick a result, **Enter** opens it, **Esc** closes Start.
 - Type a sum like `19.99*3` and press **Enter** to copy the answer.
+
+### Claude (the orb)
+- **Enter** sends, **Shift + Enter** starts a new line, **Esc** closes it.
+- **Right-click** the orb (or click the search bar) for Start.
 
 ### Oazy's windows
 - **Ctrl + W** closes the active window, **Esc** minimises it.

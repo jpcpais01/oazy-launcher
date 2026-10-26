@@ -210,34 +210,38 @@ static func wanted() -> bool:
 
 
 ## A union of rectangles as one polygon (in window pixels), the shape a layer's
-## window is cut to. Overlapping rectangles are merged first so the polygon's
-## even-odd fill never punches holes.
+## window is cut to: exactly the rectangles, nothing between them. (Merging
+## overlapping ones into their bounding box used to leave invisible patches,
+## say between two overlapping Oazy windows or beside a taskbar preview, that
+## swallowed clicks meant for the apps underneath.)
 static func union_polygon(rects: Array[Rect2], px_scale: float) -> PackedVector2Array:
-	var merged: Array[Rect2] = []
+	# In whole pixels first, so pieces that meet share their edge exactly.
+	var pieces: Array[Rect2i] = []
 	for r in rects:
-		if r.has_area():
-			merged.append(r)
-	var again := true
-	while again:
-		again = false
-		for i in merged.size():
-			for j in range(i + 1, merged.size()):
-				if merged[i].grow(1.0).intersects(merged[j]):
-					merged[i] = merged[i].merge(merged[j])
-					merged.remove_at(j)
-					again = true
-					break
-			if again:
+		if not r.has_area():
+			continue
+		var a := Vector2i((r.position * px_scale).floor())
+		var b := Vector2i((r.end * px_scale).ceil())
+		# Only what no earlier piece covers yet: the polygon's even-odd fill
+		# would punch a hole wherever two pieces overlapped.
+		var add: Array[Rect2i] = [Rect2i(a, b - a)]
+		for p in pieces:
+			var rest: Array[Rect2i] = []
+			for q in add:
+				rest.append_array(_subtract(q, p))
+			add = rest
+			if add.is_empty():
 				break
+		pieces.append_array(add)
 	var poly := PackedVector2Array()
-	if merged.is_empty():
+	if pieces.is_empty():
 		return poly
-	# Each rectangle hangs off a shared anchor; the bridges to it are walked
-	# there and back, so they add no area.
+	# Each piece hangs off a shared anchor; the bridges to it are walked there
+	# and back, so they add no area.
 	var anchor := Vector2.ZERO
-	for r in merged:
-		var a := (r.position * px_scale).floor()
-		var b := (r.end * px_scale).ceil()
+	for r in pieces:
+		var a := Vector2(r.position)
+		var b := Vector2(r.end)
 		poly.append(anchor)
 		poly.append(a)
 		poly.append(Vector2(b.x, a.y))
@@ -246,3 +250,26 @@ static func union_polygon(rects: Array[Rect2], px_scale: float) -> PackedVector2
 		poly.append(a)
 	poly.append(anchor)
 	return poly
+
+
+## The parts of `r` outside `cut`: up to four rectangles.
+static func _subtract(r: Rect2i, cut: Rect2i) -> Array[Rect2i]:
+	var out: Array[Rect2i] = []
+	if not r.intersects(cut):
+		out.append(r)
+		return out
+	var top := cut.position.y
+	var bottom := cut.end.y
+	# Above and below the cut, full width...
+	if r.position.y < top:
+		out.append(Rect2i(r.position.x, r.position.y, r.size.x, top - r.position.y))
+	if r.end.y > bottom:
+		out.append(Rect2i(r.position.x, bottom, r.size.x, r.end.y - bottom))
+	# ...and either side of it, in the band they share.
+	var y0 := maxi(r.position.y, top)
+	var y1 := mini(r.end.y, bottom)
+	if r.position.x < cut.position.x:
+		out.append(Rect2i(r.position.x, y0, cut.position.x - r.position.x, y1 - y0))
+	if r.end.x > cut.end.x:
+		out.append(Rect2i(cut.end.x, y0, r.end.x - cut.end.x, y1 - y0))
+	return out

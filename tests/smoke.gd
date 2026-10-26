@@ -39,6 +39,15 @@ func _logic_tests() -> void:
 	check(Library.is_steam_tool("228980", "Steamworks Common Redistributables"), "steam: skips redistributables")
 	check(not Library.is_steam_tool("1245620", "ELDEN RING"), "steam: keeps games")
 
+	# Claude's replies in the orb popup.
+	var md := ChatMarkdown.blocks("Hi **there**\n\n- one\n- two\n\n```py\nprint(1)\n```\nafter")
+	check(md.size() == 3 and md[0]["t"] == "text" and md[1]["t"] == "code" and md[2]["t"] == "text", "chat markdown: text, code, text")
+	check(str(md[0]["bb"]).contains("[b]there[/b]") and str(md[0]["bb"]).contains("[ul"), "chat markdown: bold and list")
+	check(str(md[1]["lang"]) == "py" and str(md[1]["code"]) == "print(1)", "chat markdown: fenced code")
+	var open_fence := ChatMarkdown.blocks("Look:\n```\nhalf")
+	check(open_fence.size() == 2 and str(open_fence[1]["code"]) == "half", "chat markdown: code still streaming")
+	check(ClaudeCli._quote("C:/Program Files/x") == "\"C:/Program Files/x\"" and ClaudeCli._quote("-p") == "-p", "claude cli: argument quoting")
+
 	# Epic manifest.
 	var epic := Library.epic_entry({
 		"DisplayName": "Fortnite", "AppName": "Fortnite", "MainGameAppName": "Fortnite",
@@ -134,7 +143,7 @@ func _logic_tests() -> void:
 	check(Art.brand_art("Claude Code", &"hero").ends_with("claudecode_hero.webp.bin") and Art.brand_art("Visual Studio Code", &"cover") != "" and Art.brand_art("Discord", &"logo") != "", "art: built-in app art by name")
 	check(Art.decode(FileAccess.get_file_as_bytes(Art.brand_art("Higgsfield", &"cover"))) != null, "art: built-in app art decodes")
 	check(Art.brand_art("Some Random Game", &"cover") == "", "art: no built-in art for unknown names")
-	check(Art.brand_art("WhatsApp Beta", &"cover").ends_with("whatsapp_cover.webp.bin") and Art.brand_art("Discord PTB", &"hero").ends_with("discord_hero.webp.bin") and Art.brand_art("Microsoft Teams", &"cover") != "" and Art.brand_art("Teams", &"logo") != "" and Art.brand_art("ArcGIS Earth", &"hero") != "", "art: built-in art for app editions, Teams and ArcGIS Earth")
+	check(Art.brand_art("WhatsApp Beta", &"cover").ends_with("whatsapp_cover.webp.bin") and Art.brand_art("Discord PTB", &"hero").ends_with("discord_hero.webp.bin") and Art.brand_art("Microsoft Teams", &"cover") != "" and Art.brand_art("Teams", &"logo") != "" and Art.brand_art("ArcGIS Earth", &"hero") != "" and Art.brand_art("Hyperliquid", &"logo") != "", "art: built-in art for app editions, Teams, ArcGIS Earth and Hyperliquid")
 
 	check(Art.share_image("<head><meta property=\"og:image\" content=\"https://cdn.x/og.jpg\"></head>", "https://x.com") == "https://cdn.x/og.jpg", "art: share image from og:image")
 	check(Art.share_image("<meta content='/img/s.png' name='twitter:image'>", "https://x.com/app") == "https://x.com/img/s.png", "art: share image, relative and reversed attributes")
@@ -371,7 +380,12 @@ func _logic_tests() -> void:
 	check(not Shell.native, "shell: one window in tests")
 	var poly := Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(50, 50, 10, 10)] as Array[Rect2], 2.0)
 	check(poly.size() == 13 and poly[1] == Vector2(0, 0) and poly[8] == Vector2(120, 100), "shell: shape of separate parts")
-	check(Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(5, 5, 10, 10)] as Array[Rect2], 1.0).size() == 7, "shell: overlapping parts merge")
+	var both := Shell.union_polygon([Rect2(0, 0, 10, 10), Rect2(5, 5, 10, 10)] as Array[Rect2], 1.0)
+	check(Geometry2D.is_point_in_polygon(Vector2(7, 7), both) and Geometry2D.is_point_in_polygon(Vector2(2, 2), both)
+		and Geometry2D.is_point_in_polygon(Vector2(13, 13), both) and Geometry2D.is_point_in_polygon(Vector2(12, 7), both),
+		"shell: overlapping parts join without holes")
+	check(not Geometry2D.is_point_in_polygon(Vector2(2, 13), both) and not Geometry2D.is_point_in_polygon(Vector2(13, 2), both),
+		"shell: nothing between overlapping parts takes clicks")
 	check(Shell.union_polygon([] as Array[Rect2], 1.0).is_empty(), "shell: nothing to show")
 	check(AppIcon.custom_look({"ref": "app:Microsoft.Windows.Explorer", "name": "File Explorer"})[0] == "folder", "icons: File Explorer gets Oazy's folder")
 	check(AppIcon.custom_look({"ref": "win:C:/Windows/explorer.exe", "name": "Windows Explorer"})[0] == "folder", "icons: Explorer windows too")
@@ -634,6 +648,32 @@ func _ui_tests() -> void:
 	cl.close()
 	await _wait(0.4)
 
+	# The orb's Claude popup (no claude here: events are fed in).
+	var ai: AssistantPanel = main.assistant
+	ai.mock = true
+	main.taskbar.start_pressed.emit()
+	await _wait(0.4)
+	check(ai.is_open and not main.start.is_open, "assistant: the orb opens Claude, not Start")
+	check(main.get_viewport_rect().grow(1.0).encloses(ai.get_global_rect()) and ai.get_global_rect().end.y <= main.taskbar.get_global_rect().position.y + 1.0, "assistant: fits above the taskbar")
+	ai.submit("hello")
+	check(ai.running and main.taskbar.orb.busy, "assistant: sending stirs the orb")
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}})
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hi **João**"}}})
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}})
+	ai.handle_message({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Write", "input": {"file_path": "/tmp/x.txt"}}})
+	check(ai._asks.size() == 1, "assistant: asks before writing")
+	ai._answer("r1", false)
+	ai.handle_message({"type": "result", "subtype": "success"})
+	check(not ai.running and ai._asks.is_empty() and not main.taskbar.orb.busy, "assistant: reply done")
+	main.taskbar.start_alt_pressed.emit()
+	await _wait(0.3)
+	check(main.start.is_open and not ai.is_open, "assistant: right-clicking the orb opens Start instead")
+	main.start.close()
+	ai.new_chat()
+	check(not ai._has_conversation(), "assistant: new chat clears it")
+	ai.mock = false
+	await _wait(0.3)
+
 	# Start.
 	main.start.open()
 	await _wait(0.4)
@@ -728,6 +768,28 @@ func _ui_tests() -> void:
 	main.launch(first_id)
 	await _wait(0.30)
 	Updater.apply_releases([{"tag_name": "v99.0.0", "body": "- Big", "assets": [{"name": "OazyLauncher.exe", "size": 1, "browser_download_url": "https://x"}]}], App.version)
+	var was_state := Updater.state
+	Updater.state = &"available"
+	Updater.state_changed.emit(&"available")
+	await _wait(0.6)
+	check(main.update_pill._card.visible and main.update_pill._open, "update pill: slides in, open with the news")
+	check(main.update_pill.shell_shape().size() == 1, "update pill: its layer keeps it on screen")
+	Updater.state = &"downloading"
+	Updater.state_changed.emit(&"downloading")
+	Updater.progress.emit(500, 1000, 100.0)
+	await _wait(0.3)
+	check(main.update_pill._sub.text.contains("/s"), "update pill: shows download speed")
+	Updater.state = &"checking"
+	Updater.state_changed.emit(&"checking")
+	Updater.state = &"error"
+	Updater.state_changed.emit(&"error")
+	check(main.update_pill._want_in, "update pill: a failed download stays to retry")
+	Updater.state = &"idle"
+	Updater.state_changed.emit(&"idle")
+	Updater.state = &"error"
+	Updater.state_changed.emit(&"error")
+	check(not main.update_pill._want_in, "update pill: a failed background check isn't news")
+	Updater.state = was_state
 	main.show_update()
 	main.show_patch_notes()
 	main.toasts.show_toast("Smoke toast", &"success")

@@ -244,7 +244,11 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
 		[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool altTab);
+		[DllImport("user32.dll")] public static extern IntPtr GetLastActivePopup(IntPtr h);
+		[DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+		[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int cmd);
+		[DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr h);
 		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr h, string name);
 		[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
@@ -338,8 +342,9 @@ namespace Oazy
 		const int WS_EX_TOOLWINDOW = 0x80;
 		const int WS_EX_APPWINDOW = 0x40000;
 		const int WS_EX_NOACTIVATE = 0x8000000;
-		const uint GW_OWNER = 4;
-		const uint GA_ROOT = 2;
+		const int WS_EX_TOPMOST = 0x8;
+		const uint GW_OWNER = 4, GW_HWNDNEXT = 2;
+		const uint GA_ROOT = 2, GA_ROOTOWNER = 3;
 		const int DWMWA_CLOAKED = 14;
 		const uint WM_CLOSE = 0x10;
 		const uint WM_GETICON = 0x7F;
@@ -357,9 +362,10 @@ namespace Oazy
 		const uint HOTKEY_HOME = 1, HOTKEY_DESKTOP = 2;
 		const int SIIGBF_ICONONLY = 4;
 		const int SW_HIDE = 0;
+		const int SW_SHOWNOACTIVATE = 4;
 		const int SW_SHOWMINNOACTIVE = 7;
 		const int SW_SHOWNA = 8;
-		const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200;
+		const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
 		const uint SPI_GETWORKAREA = 0x30, SPI_SETWORKAREA = 0x2F, SPIF_SENDCHANGE = 0x2;
 		const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 		const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -405,8 +411,8 @@ namespace Oazy
 		static int TrayState = -1;
 		static readonly List<IntPtr> Peeked = new List<IntPtr>();
 		static bool ThemeOn;
-		static int ThemeBorder, ThemeCaption, ThemeText;
-		static readonly Dictionary<long, int> Themed = new Dictionary<long, int>();
+		static int ThemeBorder;
+		static readonly HashSet<long> Themed = new HashSet<long>();
 		static string RestorePath = "";
 		// Set while Oazy's pointers replace the system ones (see Cursors).
 		static string CursorMarker = "";
@@ -537,12 +543,26 @@ namespace Oazy
 				case "toggle":
 				{
 					IntPtr h = H(Arg(p, 2));
-					if (Native.GetForegroundWindow() == h && !Native.IsIconic(h))
+					// The app counts as in front while one of its dialogs is.
+					IntPtr fg = Native.GetForegroundWindow();
+					bool active = fg == h || (fg != IntPtr.Zero && Native.GetAncestor(fg, GA_ROOTOWNER) == h);
+					if (active && !Native.IsIconic(h))
 					{
 						Native.ShowWindow(h, SW_MINIMIZE);
 						return "\"ok\":true,\"action\":\"minimize\"";
 					}
 					return "\"ok\":" + Json.Bool(Focus(h)) + ",\"action\":\"focus\"";
+				}
+				case "expect":
+					Expect();
+					return "\"ok\":true";
+				case "restore_quietly":
+				{
+					// Back from minimised without taking focus (Oazy's desktop after Win+D).
+					IntPtr h = H(Arg(p, 2));
+					bool ok = Native.IsIconic(h) && Native.ShowWindow(h, SW_SHOWNOACTIVATE);
+					if (h == Desktop) KeepDesktopDown();
+					return "\"ok\":" + Json.Bool(ok);
 				}
 				case "minimize":
 					return "\"ok\":" + Json.Bool(Native.ShowWindow(H(Arg(p, 2)), SW_MINIMIZE));
@@ -574,7 +594,7 @@ namespace Oazy
 				case "theme":
 					return Theme(Arg(p, 2) == "1", Int(Arg(p, 3), 0), Int(Arg(p, 4), 0), Int(Arg(p, 5), 0));
 				case "show_desktop":
-					return ShowDesktop();
+					return ShowDesktop(Arg(p, 2) == "1", H(Arg(p, 3)));
 				case "thumb_clear":
 					ClearThumbs();
 					return "\"ok\":true";
@@ -836,12 +856,15 @@ namespace Oazy
 			IntPtr fg = Native.GetForegroundWindow();
 			List<string> list = new List<string>();
 			HashSet<long> alive = new HashSet<long>();
+			// Front to back, as Windows keeps them.
+			List<IntPtr> order = new List<IntPtr>();
 			Native.EnumWindows(delegate(IntPtr h, IntPtr l)
 			{
 				uint pid;
 				Native.GetWindowThreadProcessId(h, out pid);
 				if (!IsAppWindow(h, pid)) return true;
 				alive.Add(h.ToInt64());
+				order.Add(h);
 				string exe = ExePath(pid);
 				string file = Path.GetFileName(exe).ToLowerInvariant();
 				string name = file == "applicationframehost.exe" ? "" : Description(exe);
@@ -864,57 +887,238 @@ namespace Oazy
 				foreach (long k in gone) Aumids.Remove(k);
 			}
 			ThemeWindows(alive);
+			CheckExpected(order);
 			uint fgPid;
 			Native.GetWindowThreadProcessId(fg, out fgPid);
 			bool selfFg = fg != IntPtr.Zero && ((fg == Self && Self != IntPtr.Zero) || (ParentPid != 0 && fgPid == (uint)ParentPid));
-			return "\"windows\":[" + string.Join(",", list.ToArray()) + "],\"fg\":" + fg.ToInt64() + ",\"self_fg\":" + Json.Bool(selfFg)
+			// A dialog in front (Save as, a message box) stands for the app it belongs to.
+			IntPtr fgApp = fg;
+			if (fg != IntPtr.Zero && !alive.Contains(fg.ToInt64()))
+			{
+				IntPtr owner = Native.GetAncestor(fg, GA_ROOTOWNER);
+				if (owner != IntPtr.Zero && alive.Contains(owner.ToInt64())) fgApp = owner;
+			}
+			return "\"windows\":[" + string.Join(",", list.ToArray()) + "],\"fg\":" + fgApp.ToInt64() + ",\"self_fg\":" + Json.Bool(selfFg)
 				+ ",\"fs\":" + Json.Bool(!selfFg && IsFullscreen(fg));
 		}
+
+		// --- Focus ------------------------------------------------------------------
+		// Windows lets only the app you're using hand the foreground to another
+		// window. Oazy's taskbar never takes focus (clicking it leaves the app you
+		// were in active), so bringing a window forward from it has to get that
+		// right the way Windows' own shell features do. A window is only raised
+		// without focus when all of that fails: a window in front that isn't the
+		// active one is what made clicks on the window behind it do nothing.
+
+		static readonly object FocusLock = new object();
+		// The windows that were in front, newest first: where focus goes back to
+		// when one of Oazy's layers (Start, a menu) closes.
+		static readonly List<IntPtr> FgHistory = new List<IntPtr>();
 
 		static bool Focus(IntPtr h)
 		{
 			if (h == IntPtr.Zero || !Native.IsWindow(h)) return false;
-			if (Native.IsIconic(h)) Native.ShowWindow(h, SW_RESTORE);
-			// Lift it above everything first. Moving windows in the z-order is not
-			// bound by the foreground lock, so even if Windows refuses activation
-			// below, the window still ends up in front of the one that was there
-			// (one of Oazy's layers over Chrome, or a real app back over Oazy).
-			// Topmost then not-topmost leaves it at the top of the normal band.
-			uint z = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
-			Native.SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, z);
-			Native.SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, z);
-			if (Native.SetForegroundWindow(h) && Native.GetForegroundWindow() == h) return true;
-			// Windows only lets the process that received the last input steal the
-			// foreground. Attach to the current foreground thread and tap Alt, the
-			// long-standing way shells and launchers get permission.
+			// An app that stopped responding only gets the requests that don't
+			// wait for it, or the companion would hang along with it.
+			if (Native.IsHungAppWindow(h))
+			{
+				if (Native.IsIconic(h)) Native.ShowWindowAsync(h, SW_RESTORE);
+				return Native.SetForegroundWindow(h);
+			}
+			lock (FocusLock)
+			{
+				if (Native.IsIconic(h)) Native.ShowWindow(h, SW_RESTORE);
+				// An app with a dialog open (Save as, a message box) hands focus to
+				// the dialog, as on Windows' own taskbar.
+				IntPtr target = h;
+				IntPtr popup = Native.GetLastActivePopup(h);
+				if (popup != IntPtr.Zero && popup != h && Native.IsWindowVisible(popup) && Native.IsWindowEnabled(popup)) target = popup;
+				if (Activate(target)) return true;
+				Lift(h);
+				if (target != h) Lift(target);
+				return false;
+			}
+		}
+
+		// Makes `w` the foreground window. Hold FocusLock.
+		static bool Activate(IntPtr w)
+		{
+			if (Native.GetForegroundWindow() == w) return true;
+			if (Native.SetForegroundWindow(w) && Native.GetForegroundWindow() == w) return true;
+			// Share input with the window in front for a moment: to Windows the
+			// request then comes from the app you're in.
 			IntPtr fg = Native.GetForegroundWindow();
 			uint ignored;
-			uint fgThread = Native.GetWindowThreadProcessId(fg, out ignored);
+			uint fgThread = fg != IntPtr.Zero ? Native.GetWindowThreadProcessId(fg, out ignored) : 0;
 			uint me = Native.GetCurrentThreadId();
 			bool attached = fgThread != 0 && fgThread != me && Native.AttachThreadInput(me, fgThread, true);
-			Native.keybd_event(0x12, 0, 0, UIntPtr.Zero);
-			Native.keybd_event(0x12, 0, 2, UIntPtr.Zero);
-			Native.BringWindowToTop(h);
-			Native.SetForegroundWindow(h);
-			if (attached) Native.AttachThreadInput(me, fgThread, false);
-			// Last resort: the call Windows' own Alt+Tab uses, which gets past
-			// the lock in cases the dance above does not.
-			if (Native.GetForegroundWindow() != h) Native.SwitchToThisWindow(h, true);
-			return Native.GetForegroundWindow() == h;
+			try
+			{
+				Native.BringWindowToTop(w);
+				Native.SetForegroundWindow(w);
+			}
+			finally
+			{
+				if (attached) Native.AttachThreadInput(me, fgThread, false);
+			}
+			if (Native.GetForegroundWindow() == w) return true;
+			// Still refused (the app in front is busy, or runs as administrator):
+			// a key press of our own makes this the process with the last input.
+			PressUnusedKey();
+			if (Native.SetForegroundWindow(w) && Native.GetForegroundWindow() == w) return true;
+			// Last resort: the call Windows' own Alt+Tab makes.
+			Native.SwitchToThisWindow(w, true);
+			return Native.GetForegroundWindow() == w;
+		}
+
+		// Alt with a key nobody uses in between, so no app opens its menu bar as it
+		// would for Alt on its own (Chrome's menu button, Explorer's menus, an
+		// invisible system menu in apps without a title bar). Alt is left out
+		// while Shift or Ctrl is down, where it would make a shortcut.
+		static void PressUnusedKey()
+		{
+			bool alt = (Native.GetAsyncKeyState((int)VK_MENU) & 0x8000) == 0
+				&& (Native.GetAsyncKeyState((int)VK_SHIFT) & 0x8000) == 0
+				&& (Native.GetAsyncKeyState(0x11) & 0x8000) == 0;
+			if (alt) Native.keybd_event((byte)VK_MENU, 0, 0, UIntPtr.Zero);
+			Native.keybd_event(VK_MASK, 0, 0, UIntPtr.Zero);
+			Native.keybd_event(VK_MASK, 0, 2, UIntPtr.Zero);
+			if (alt) Native.keybd_event((byte)VK_MENU, 0, 2, UIntPtr.Zero);
+		}
+
+		// To the top of its band without focus. An always-on-top window stays
+		// always on top. Posted to the window's own thread, so a busy app never
+		// holds the companion up.
+		static void Lift(IntPtr h)
+		{
+			uint z = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS;
+			bool topmost = (Native.GetWindowLong(h, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+			Native.SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, z);
+			if (!topmost) Native.SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, z);
+		}
+
+		static void NoteForeground(IntPtr h)
+		{
+			if (h == IntPtr.Zero) return;
+			lock (FgHistory)
+			{
+				FgHistory.Remove(h);
+				FgHistory.Insert(0, h);
+				if (FgHistory.Count > 16) FgHistory.RemoveAt(FgHistory.Count - 1);
+			}
+		}
+
+		// False while a window is cut down to nothing (one of Oazy's parked layers).
+		static bool HasShape(IntPtr h)
+		{
+			Native.RECT box;
+			if (Native.GetWindowRgnBox(h, out box) == 0) return true;
+			return box.Right > 0 && box.Bottom > 0 && box.Right > box.Left && box.Bottom > box.Top;
 		}
 
 		// One of Oazy's layers emptied while active (it stays up, cut to nothing,
-		// so it can come back instantly). Hiding it for a moment makes Windows
-		// activate the next window in line, exactly as when it used to close.
-		// Skipped if the layer already has a shape again (opened straight back).
+		// so it can come back instantly): focus goes back to the window that had
+		// it before, as when a menu closes. Skipped if the layer has a shape
+		// again (opened straight back).
 		static bool Release(IntPtr h)
 		{
-			if (h == IntPtr.Zero || !Native.IsWindow(h) || Native.GetForegroundWindow() != h) return false;
-			Native.RECT box;
-			if (Native.GetWindowRgnBox(h, out box) == 0 || box.Right > 0 || box.Bottom > 0) return false;
+			if (h == IntPtr.Zero || !Native.IsWindow(h) || Native.GetForegroundWindow() != h || HasShape(h)) return false;
+			IntPtr back = FocusBackTarget(h);
+			lock (FocusLock)
+			{
+				if (back != IntPtr.Zero && Activate(back))
+				{
+					if (back == Desktop) KeepDesktopDown();
+					return true;
+				}
+			}
+			// Nothing to go back to, or Windows refused: hiding the layer for a
+			// moment makes Windows activate the next window in line.
 			Native.ShowWindow(h, SW_HIDE);
 			Native.ShowWindow(h, SW_SHOWNA);
 			return true;
+		}
+
+		// The most recent window in front that is still there to go back to:
+		// open, not minimised, on this virtual desktop, and if it is another of
+		// Oazy's layers, showing something. Else Oazy's desktop.
+		static IntPtr FocusBackTarget(IntPtr leaving)
+		{
+			List<IntPtr> recent;
+			lock (FgHistory) recent = new List<IntPtr>(FgHistory);
+			IntPtr desktop = Desktop != IntPtr.Zero ? Desktop : Self;
+			foreach (IntPtr w in recent)
+			{
+				if (w == leaving || !Native.IsWindow(w) || !Native.IsWindowVisible(w) || Native.IsIconic(w) || !Native.IsWindowEnabled(w)) continue;
+				int cloaked;
+				if (Native.DwmGetWindowAttribute(w, DWMWA_CLOAKED, out cloaked, 4) == 0 && cloaked != 0) continue;
+				uint pid;
+				Native.GetWindowThreadProcessId(w, out pid);
+				if (w != desktop && ParentPid != 0 && pid == (uint)ParentPid && !HasShape(w)) continue;
+				return w;
+			}
+			return desktop;
+		}
+
+		// A window Oazy just launched comes up in front with focus. Started from
+		// Oazy's taskbar (which never takes focus), a new app doesn't get the
+		// right to come forward by itself: Windows leaves it behind the app you
+		// were in, or in front of it without focus.
+		static readonly object ExpectLock = new object();
+		static DateTime ExpectUntil = DateTime.MinValue;
+		static DateTime ExpectSettled = DateTime.MinValue;
+		static HashSet<long> ExpectKnown = new HashSet<long>();
+
+		static void Expect()
+		{
+			HashSet<long> known = new HashSet<long>();
+			Native.EnumWindows(delegate(IntPtr h, IntPtr l)
+			{
+				uint pid;
+				Native.GetWindowThreadProcessId(h, out pid);
+				if (IsAppWindow(h, pid)) known.Add(h.ToInt64());
+				return true;
+			}, IntPtr.Zero);
+			lock (ExpectLock)
+			{
+				ExpectKnown = known;
+				ExpectUntil = DateTime.UtcNow.AddSeconds(20);
+				// Start closing and handing focus back is part of launching.
+				ExpectSettled = DateTime.UtcNow.AddSeconds(1.5);
+			}
+		}
+
+		// Went on to another window while the app was still loading: as with
+		// Windows' own Start menu, it then opens without taking focus.
+		static void ForegroundMoved(IntPtr h)
+		{
+			lock (ExpectLock)
+			{
+				DateTime now = DateTime.UtcNow;
+				if (now > ExpectUntil || now < ExpectSettled) return;
+				if (ExpectKnown.Contains(h.ToInt64())) ExpectUntil = DateTime.MinValue;
+			}
+		}
+
+		// With every new window list (front to back): the first new window since
+		// Expect() is the one that was launched.
+		static void CheckExpected(List<IntPtr> order)
+		{
+			IntPtr fresh = IntPtr.Zero;
+			lock (ExpectLock)
+			{
+				if (DateTime.UtcNow > ExpectUntil) return;
+				foreach (IntPtr h in order)
+				{
+					if (ExpectKnown.Contains(h.ToInt64()) || Native.IsIconic(h)) continue;
+					fresh = h;
+					break;
+				}
+				if (fresh == IntPtr.Zero) return;
+				ExpectUntil = DateTime.MinValue;
+			}
+			if (Native.GetForegroundWindow() == fresh) return;
+			ThreadPool.QueueUserWorkItem(delegate(object state) { Focus(fresh); });
 		}
 
 		// --- Live thumbnails -------------------------------------------------------
@@ -1271,10 +1475,20 @@ namespace Oazy
 			Native.SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | 0x4);
 		}
 
+		// Back under every other window, unless it already is. Windows lifts a
+		// window it activates (a click on the desktop) and Godot lifts its own
+		// when it restyles them; this runs on every change of the window in front.
 		static void KeepDesktopDown()
 		{
-			if (Desktop == IntPtr.Zero) return;
-			Native.SetWindowPos(Desktop, new IntPtr(1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+			IntPtr d = Desktop;
+			if (d == IntPtr.Zero || !ShellOn) return;
+			for (IntPtr n = Native.GetWindow(d, GW_HWNDNEXT); n != IntPtr.Zero; n = Native.GetWindow(n, GW_HWNDNEXT))
+			{
+				if (!Native.IsWindowVisible(n)) continue;
+				// Asynchronous, so a busy Oazy never holds up the companion.
+				Native.SetWindowPos(d, new IntPtr(1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+				return;
+			}
 		}
 
 		static Native.RECT MonitorRect(IntPtr h, bool work)
@@ -1585,27 +1799,24 @@ namespace Oazy
 			return "\"ok\":true,\"kind\":" + Json.Str(kind);
 		}
 
-		// Gives other apps' title bars and borders Oazy's colours (Windows 11).
+		// Gives other apps' window borders Oazy's accent (Windows 11). Only the
+		// border: changing an app's dark mode or title bar colour after it is on
+		// screen left DWM drawing a stale title bar (a dark band, or the wrong
+		// shade over Mica) until the window was restored and maximised again.
+		// The caption and text colours are still accepted, and ignored.
 		static string Theme(bool on, int border, int caption, int text)
 		{
 			lock (ShellLock)
 			{
 				ThemeOn = on;
 				ThemeBorder = border;
-				ThemeCaption = caption;
-				ThemeText = text;
 				if (!on) ResetTheme();
 				else
 				{
-					// New colours for windows we already themed; their original
-					// dark-mode value stays remembered for the reset.
-					foreach (long k in Themed.Keys)
+					foreach (long k in Themed)
 					{
-						IntPtr h = new IntPtr(k);
-						int b = border, c = caption, t = text;
-						Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref b, 4);
-						Native.DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, ref c, 4);
-						Native.DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, ref t, 4);
+						int b = border;
+						Native.DwmSetWindowAttribute(new IntPtr(k), DWMWA_BORDER_COLOR, ref b, 4);
 					}
 				}
 			}
@@ -1617,72 +1828,95 @@ namespace Oazy
 		{
 			lock (ShellLock)
 			{
-				List<long> gone = new List<long>();
-				foreach (long k in Themed.Keys) if (!alive.Contains(k)) gone.Add(k);
-				foreach (long k in gone) Themed.Remove(k);
+				Themed.RemoveWhere(delegate(long k) { return !alive.Contains(k); });
 				if (!ThemeOn) return;
 				foreach (long k in alive)
 				{
-					if (Themed.ContainsKey(k)) continue;
+					if (Themed.Contains(k)) continue;
 					IntPtr h = new IntPtr(k);
-					// Oazy's own apps (Browser, Files, Terminal, Claude) draw their own
-					// title bar on glass: a caption colour there shows as a dark strip
-					// across the top.
+					// Oazy's own apps (Browser, Files, Terminal, Claude) set their own.
 					if (Native.GetProp(h, "OazyGlass") != IntPtr.Zero) continue;
-					int wasDark;
-					if (Native.DwmGetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, out wasDark, 4) != 0) wasDark = 0;
-					int dark = 1, b = ThemeBorder, c = ThemeCaption, t = ThemeText;
-					Native.DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, 4);
+					int b = ThemeBorder;
 					Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref b, 4);
-					Native.DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, ref c, 4);
-					Native.DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, ref t, 4);
-					Themed[k] = wasDark;
+					Themed.Add(k);
 				}
 			}
 		}
 
 		static void ResetTheme()
 		{
-			foreach (KeyValuePair<long, int> kv in Themed)
+			foreach (long k in Themed)
 			{
-				IntPtr h = new IntPtr(kv.Key);
+				IntPtr h = new IntPtr(k);
 				if (!Native.IsWindow(h)) continue;
-				int d = DWM_COLOR_DEFAULT, dark = kv.Value;
+				int d = DWM_COLOR_DEFAULT;
 				Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref d, 4);
-				d = DWM_COLOR_DEFAULT;
-				Native.DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, ref d, 4);
-				d = DWM_COLOR_DEFAULT;
-				Native.DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, ref d, 4);
-				Native.DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, 4);
 			}
 			Themed.Clear();
 		}
 
-		// Minimise everything to show the desktop; again brings it all back.
-		static string ShowDesktop()
+		// Show desktop, for other apps' windows and Oazy's together, so the two
+		// never go opposite ways. If anything is showing (`oazyOpen`: Oazy's own
+		// windows, in the OS window `layer`, which Oazy minimises itself),
+		// everything steps aside and the desktop takes focus; if nothing is,
+		// what stepped aside comes back in the order it was in, and the window
+		// that was in front gets focus again.
+		static string ShowDesktop(bool oazyOpen, IntPtr layer)
 		{
 			List<IntPtr> open = new List<IntPtr>();
 			Native.EnumWindows(delegate(IntPtr h, IntPtr l)
 			{
 				uint pid;
 				Native.GetWindowThreadProcessId(h, out pid);
-				if (IsAppWindow(h, pid) && !Native.IsIconic(h)) open.Add(h);
+				if (h == layer && oazyOpen) open.Add(h);
+				else if (IsAppWindow(h, pid) && !Native.IsIconic(h)) open.Add(h);
 				return true;
 			}, IntPtr.Zero);
-			if (open.Count > 0)
+			if (open.Count > 0 || oazyOpen)
 			{
-				foreach (IntPtr h in open) Native.ShowWindow(h, SW_SHOWMINNOACTIVE);
+				foreach (IntPtr h in open)
+				{
+					if (h != layer) ShowPolitely(h, SW_SHOWMINNOACTIVE);
+				}
 				lock (Peeked) { Peeked.Clear(); Peeked.AddRange(open); }
-				return "\"ok\":true,\"action\":\"minimize\"";
+				IntPtr desktop = Desktop != IntPtr.Zero ? Desktop : Self;
+				if (desktop != IntPtr.Zero)
+				{
+					lock (FocusLock) Activate(desktop);
+					KeepDesktopDown();
+				}
+				return "\"ok\":true,\"action\":\"hide\"";
 			}
 			List<IntPtr> back;
 			lock (Peeked) { back = new List<IntPtr>(Peeked); Peeked.Clear(); }
+			back.RemoveAll(delegate(IntPtr h) { return !Native.IsWindow(h); });
+			bool restored = false;
+			// Back to front, so each one lands on top of the ones behind it...
 			for (int i = back.Count - 1; i >= 0; i--)
 			{
-				if (Native.IsWindow(back[i]) && Native.IsIconic(back[i])) Native.ShowWindow(back[i], SW_RESTORE);
+				if (back[i] == layer) continue;
+				if (Native.IsIconic(back[i])) ShowPolitely(back[i], SW_RESTORE);
+				restored = true;
 			}
-			if (back.Count > 0) Focus(back[0]);
-			return "\"ok\":true,\"action\":\"restore\"";
+			// ...and Oazy's layer slots in under the window that was in front of
+			// it (Oazy shows its windows in it again when this returns).
+			int at = back.IndexOf(layer);
+			if (at >= 0)
+			{
+				IntPtr after = at > 0 ? back[at - 1] : IntPtr.Zero;
+				Native.SetWindowPos(layer, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+			}
+			if (back.Count > 0 && back[0] != layer) Focus(back[0]);
+			return "\"ok\":true,\"action\":\"restore\",\"restored\":" + Json.Bool(restored)
+				+ ",\"oazy_front\":" + Json.Bool(at == 0);
+		}
+
+		// ShowWindow, or for an app that stopped responding the kind that
+		// doesn't wait for it.
+		static void ShowPolitely(IntPtr h, int cmd)
+		{
+			if (Native.IsHungAppWindow(h)) Native.ShowWindowAsync(h, cmd);
+			else Native.ShowWindow(h, cmd);
 		}
 
 		// --- Sound and media ----------------------------------------------------------
@@ -1766,11 +2000,13 @@ namespace Oazy
 		static void MessageLoop()
 		{
 			HookProc = new Native.WinEventProc(OnWinEvent);
-			// Foreground, minimise start/end, object create/destroy/show/hide, title changes.
+			// Foreground, minimise start/end, object create/destroy/show/hide, title
+			// changes, cloaked/uncloaked (store apps show by uncloaking).
 			Native.SetWinEventHook(0x0003, 0x0003, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x0016, 0x0017, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x8000, 0x8003, IntPtr.Zero, HookProc, 0, 0, 0);
 			Native.SetWinEventHook(0x800B, 0x800C, IntPtr.Zero, HookProc, 0, 0, 0);
+			Native.SetWinEventHook(0x8017, 0x8018, IntPtr.Zero, HookProc, 0, 0, 0);
 			bool hotkey = Native.RegisterHotKey(IntPtr.Zero, (int)HOTKEY_HOME, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4F);
 			Native.RegisterHotKey(IntPtr.Zero, (int)HOTKEY_DESKTOP, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x44);
 			KeyProc = new Native.KeyboardProc(OnKey);
@@ -1805,7 +2041,12 @@ namespace Oazy
 				Native.ShowWindow(hwnd, SW_HIDE);
 				return;
 			}
-			if (ev == 0x0003 && ShellOn && hwnd == Desktop) KeepDesktopDown();
+			if (ev == 0x0003)
+			{
+				NoteForeground(hwnd);
+				ForegroundMoved(hwnd);
+				KeepDesktopDown();
+			}
 			Dirty = true;
 		}
 

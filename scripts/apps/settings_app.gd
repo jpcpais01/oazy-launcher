@@ -813,7 +813,7 @@ func _build_desktop() -> void:
 		App.toast("Restart Oazy to switch")
 	, "shell mode replace explorer", App.is_windows() or Shell.native)
 	_toggle_row(shell, "Hide the Windows taskbar", "Oazy's taskbar takes its place while Oazy is running.", "hide_windows_taskbar", Callable(), "explorer", Shell.native)
-	_toggle_row(shell, "Match app title bars to Oazy", "Gives other apps' title bars and borders Oazy's colours (Windows 11).", "theme_app_windows", Callable(), "theme window border dark", Shell.native)
+	_toggle_row(shell, "Tint app window borders", "Gives other apps' window borders Oazy's accent colour (Windows 11).", "theme_app_windows", Callable(), "theme window border title bar colour", Shell.native)
 	_toggle_row(shell, "Open in fullscreen", "Oazy covers the whole screen like a real desktop. F11 switches any time.", "shell_fullscreen", func(on: bool) -> void: main.apply_window_mode(on), "window f11", not Shell.native)
 	_toggle_row(shell, "Start with Windows", "Sign in and land straight on your Oazy desktop.", "launch_at_startup", func(on: bool) -> void: main.set_autostart(on), "startup boot login autostart")
 

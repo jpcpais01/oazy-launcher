@@ -354,6 +354,9 @@ static func is_own_window_app(ref: String) -> bool:
 
 
 func launch(ref: String) -> bool:
+	if not ref.begins_with("lib:") and (not OAZY_APPS.has(ref) or is_own_window_app(ref)):
+		# Whatever window this opens comes up in front with focus.
+		Host.expect_window()
 	if ref == Browser.REF:
 		note_recent(ref)
 		return Browser.open()

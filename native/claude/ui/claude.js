@@ -1267,7 +1267,10 @@ function onHost(e) {
 			drawRecents();
 			break;
 		case 'exit': onExit(d); break;
-		case 'open': if (d.cwd) newChat(d.cwd); break;
+		case 'open':
+			if (d.resume) resume({ id: d.resume, cwd: d.cwd, title: d.title || '' });
+			else if (d.cwd) newChat(d.cwd);
+			break;
 		case 'toast': toast(d.text); break;
 		case 'win':
 			body.classList.toggle('maximized', d.max);
@@ -1305,6 +1308,8 @@ function init(m) {
 	showHome();
 	drawSend();
 	$('input').focus();
+	// Carried over from the Start orb's Claude popup.
+	if (m.resume) resume({ id: m.resume, cwd: m.cwd, title: m.title || '' });
 }
 
 function selftest(m) {

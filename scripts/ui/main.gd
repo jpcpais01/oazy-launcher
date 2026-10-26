@@ -10,17 +10,18 @@ const GRIP := 6.0
 const APP_TITLES := {&"library": "Library", &"settings": "Settings", &"cleaner": "Cleaner"}
 const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(1120, 820), &"cleaner": Vector2(1180, 800)}
 
-## The update version a toast already announced.
-var _announced_update := ""
 var wallpaper: Wallpaper
 var desktop: Desktop
 var layer: WindowLayer
 var taskbar: Taskbar
 var start: StartPanel
+## The Start orb's Claude popup.
+var assistant: AssistantPanel
 var preview: TaskPreview
 var switcher: Switcher
 var overlay_layer: Control
 var toasts: Toasts
+var update_pill: UpdatePill
 var loaded := false
 
 var _chrome: Control
@@ -31,6 +32,7 @@ var _desk_menu: PopupMenu
 var _grips: Array[Control] = []
 var _launching := false
 var _peeked: Array[ShellWindow] = []
+var _unminimized_at := 0
 var _fg_at_start := 0
 var _menus: Control
 var quick: QuickSettings
@@ -76,6 +78,9 @@ func _ready() -> void:
 	calendar = CalendarFlyout.new()
 	start_layer.add_child(calendar)
 	taskbar.attach_flyouts(quick, calendar)
+	assistant = AssistantPanel.new()
+	assistant.main = self
+	start_layer.add_child(assistant)
 	weather = WeatherFlyout.new()
 	start_layer.add_child(weather)
 	taskbar.attach_weather(weather)
@@ -86,27 +91,36 @@ func _ready() -> void:
 	tasks.main = self
 	start_layer.add_child(tasks)
 	taskbar.attach_tasks(tasks)
-	taskbar.start_pressed.connect(start.toggle)
+	# The orb is Claude now; the search pill (and right-clicking the orb) is Start.
+	taskbar.start_pressed.connect(assistant.toggle)
+	taskbar.start_alt_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
-		taskbar.orb.open = o
+		taskbar.orb.open = o or assistant.is_open
 		if o:
 			_fg_at_start = Host.foreground
 		desktop.dim(o)
 		if o:
-			preview.hide_preview()
-			quick.close()
-			calendar.close()
-			weather.close()
-			network.close()
-			tasks.close()
+			assistant.close()
+			_close_popups()
 	)
+	assistant.visibility_changed_to.connect(func(o: bool) -> void:
+		taskbar.orb.open = o or start.is_open
+		if o:
+			start.close()
+			_close_popups()
+	)
+	assistant.busy_changed.connect(func(on: bool) -> void: taskbar.orb.busy = on)
+	assistant.needs_you.connect(_on_assistant_needs_you)
 
 	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})
 	overlay_layer = OverlayLayer.new()
 	_menus.add_child(overlay_layer)
 	toasts = Toasts.new()
 	Shell.layer("toasts", {"top": true}).add_child(toasts)
+	update_pill = UpdatePill.new()
+	update_pill.main = self
+	Shell.layer("pill", {"top": true}).add_child(update_pill)
 	switcher = Switcher.new()
 	switcher.main = self
 	Shell.layer("switcher", {"top": true}).add_child(switcher)
@@ -309,6 +323,22 @@ func _exit_tree() -> void:
 	Settings.save()
 
 
+func _close_popups() -> void:
+	preview.hide_preview()
+	quick.close()
+	calendar.close()
+	weather.close()
+	network.close()
+	tasks.close()
+
+
+## Claude finished or asked something while its popup was closed.
+func _on_assistant_needs_you(why: String) -> void:
+	taskbar.orb.ping()
+	if why == "ask":
+		toasts.show_toast("Claude is waiting for your OK", &"info", assistant.open)
+
+
 func quit() -> void:
 	Settings.save()
 	Host.shutdown()
@@ -393,21 +423,23 @@ func show_desktop() -> void:
 	start.close()
 	if Shell.native:
 		# Every window steps aside (Oazy's and other apps'), and the next
-		# click brings them back.
-		var open: Array[ShellWindow] = []
-		for w in layer.windows():
-			if not w.minimized:
-				open.append(w)
-		if not open.is_empty():
-			_peeked = open
-			for w in open:
-				w.minimize()
-		else:
-			for w in _peeked:
-				if is_instance_valid(w):
-					w.unminimize()
-			_peeked.clear()
-		Host.show_desktop()
+		# click brings them back. The companion makes the one decision for
+		# both, so Oazy's windows never stay up while the rest go (or the
+		# other way round).
+		var open := _open_shell_windows()
+		if not Host.available:
+			_peek_shell_windows(not open.is_empty())
+			return
+		Host.show_desktop(not open.is_empty(), Shell.hwnd_of(layer), func(d: Dictionary) -> void:
+			var action := str(d.get("action", ""))
+			if action == "hide":
+				_peek_shell_windows(true)
+			elif action == "restore":
+				var had := not _peeked.is_empty()
+				_peek_shell_windows(false)
+				if had and (bool(d.get("oazy_front", false)) or not bool(d.get("restored", false))):
+					Shell.focus(layer)
+		)
 		return
 	var any_open := false
 	for w in layer.windows():
@@ -420,6 +452,28 @@ func show_desktop() -> void:
 			w.unminimize()
 	if not Host.self_foreground:
 		Host.go_home()
+
+
+func _open_shell_windows() -> Array[ShellWindow]:
+	var open: Array[ShellWindow] = []
+	for w in layer.windows():
+		if not w.minimized and w.visible:
+			open.append(w)
+	return open
+
+
+## Minimises Oazy's open windows (remembering them), or brings the
+## remembered ones back.
+func _peek_shell_windows(hide: bool) -> void:
+	if hide:
+		_peeked = _open_shell_windows()
+		for w in _peeked:
+			w.minimize()
+	else:
+		for w in _peeked:
+			if is_instance_valid(w):
+				w.unminimize()
+		_peeked.clear()
 
 
 func modal_open() -> bool:
@@ -530,6 +584,13 @@ func show_update() -> void:
 	# Make sure what's offered is still the newest; the screen follows along.
 	if Updater.state in [&"available", &"ready"] and Time.get_unix_time_from_system() - Updater.last_checked > 120:
 		Updater.check()
+
+
+func update_screen_open() -> bool:
+	for c in overlay_layer.get_children():
+		if c is UpdateOverlay and not c.is_queued_for_deletion():
+			return true
+	return false
 
 
 func show_patch_notes() -> void:
@@ -799,10 +860,9 @@ func _on_import_finished(added: int, found: int) -> void:
 
 
 func _on_update_state(state: StringName) -> void:
-	# Rechecks find the same update again; only a new version is news.
-	if state == &"available" and loaded and str(Updater.latest.get("version", "")) != _announced_update:
-		_announced_update = str(Updater.latest.get("version", ""))
-		toasts.show_toast("Oazy %s is available. See what's new" % Updater.latest.get("version", ""), &"update", show_update)
+	# Restarting from the update pill or Settings still plays the full restart.
+	if state == &"installing" and loaded:
+		show_update()
 
 
 func _on_hotkey(was_foreground: bool) -> void:
@@ -854,10 +914,12 @@ func _on_fullscreen_app(on: bool) -> void:
 	# A game or video took the whole screen: get out of its way.
 	if on:
 		start.close()
+		assistant.close()
 		preview.hide_preview()
 	if loaded:
 		Shell.set_layer_visible("bar", not on)
 	Shell.set_layer_visible("toasts", not on)
+	Shell.set_layer_visible("pill", not on)
 	App.refresh_fps()
 
 
@@ -913,6 +975,9 @@ func handle_key(event: InputEvent, from: Window = null) -> bool:
 	if Shell.native and start.is_open and not modal_open() and from != Shell.surface_of(start):
 		start.forward_key(k)
 		return true
+	if Shell.native and assistant.is_open and not modal_open() and from != Shell.surface_of(assistant):
+		assistant.forward_key(k)
+		return true
 	if k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed):
 		toggle_fullscreen()
 	elif modal_open():
@@ -921,6 +986,8 @@ func handle_key(event: InputEvent, from: Window = null) -> bool:
 		show_shortcuts()
 	elif k.keycode == KEY_F and k.ctrl_pressed:
 		start.open()
+	elif k.keycode == KEY_SPACE and k.ctrl_pressed:
+		assistant.toggle()
 	elif k.keycode == KEY_L and k.ctrl_pressed:
 		open_app(&"library")
 	elif k.keycode == KEY_N and k.ctrl_pressed:
@@ -966,9 +1033,15 @@ func _confirm_quit() -> void:
 
 
 func _process(_delta: float) -> void:
-	# The desktop never minimises (Win+D, Win+M).
+	# The desktop never minimises (Win+D, Win+M). The companion brings it back
+	# without activating it: Godot's own way restyles the window, which lifts
+	# it over every app until the companion pushes it back down.
 	if Shell.native and get_window().mode == Window.MODE_MINIMIZED:
-		get_window().mode = Window.MODE_WINDOWED
+		if not Host.available:
+			get_window().mode = Window.MODE_WINDOWED
+		elif Time.get_ticks_msec() - _unminimized_at > 500:
+			_unminimized_at = Time.get_ticks_msec()
+			Host.restore_quietly(Host.self_hwnd)
 
 
 # --- Oazy Browser ------------------------------------------------------------------------------
