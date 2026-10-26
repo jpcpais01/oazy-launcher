@@ -193,9 +193,16 @@ func _ready() -> void:
 	await _wait(1.0)
 	await shot("07-windows")
 	main.preview.hide_preview()
+	# Stand-in window pictures (no real windows here): the screen as it is now.
+	var pic := ImageTexture.create_from_image(get_viewport().get_texture().get_image())
+	for w in Host.windows:
+		Host.captures[int(w["hwnd"])] = pic
 	main.switcher.handle_key("open")
 	await _wait(0.8)
 	await shot("07b-switcher")
+	main.switcher.step(1)
+	await _wait(0.5)
+	await shot("07b2-switcher-picture")
 	main.switcher.handle_key("cancel")
 	await _wait(0.3)
 	# A maximised app: the taskbar melts into a full-width shelf.

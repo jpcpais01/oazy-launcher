@@ -243,6 +243,7 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 		[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+		[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool altTab);
 		[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 		[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
@@ -864,6 +865,14 @@ namespace Oazy
 		{
 			if (h == IntPtr.Zero || !Native.IsWindow(h)) return false;
 			if (Native.IsIconic(h)) Native.ShowWindow(h, SW_RESTORE);
+			// Lift it above everything first. Moving windows in the z-order is not
+			// bound by the foreground lock, so even if Windows refuses activation
+			// below, the window still ends up in front of the one that was there
+			// (one of Oazy's layers over Chrome, or a real app back over Oazy).
+			// Topmost then not-topmost leaves it at the top of the normal band.
+			uint z = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+			Native.SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, z);
+			Native.SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, z);
 			if (Native.SetForegroundWindow(h) && Native.GetForegroundWindow() == h) return true;
 			// Windows only lets the process that received the last input steal the
 			// foreground. Attach to the current foreground thread and tap Alt, the
@@ -878,6 +887,9 @@ namespace Oazy
 			Native.BringWindowToTop(h);
 			Native.SetForegroundWindow(h);
 			if (attached) Native.AttachThreadInput(me, fgThread, false);
+			// Last resort: the call Windows' own Alt+Tab uses, which gets past
+			// the lock in cases the dance above does not.
+			if (Native.GetForegroundWindow() != h) Native.SwitchToThisWindow(h, true);
 			return Native.GetForegroundWindow() == h;
 		}
 
