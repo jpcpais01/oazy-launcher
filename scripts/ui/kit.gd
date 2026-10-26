@@ -130,6 +130,18 @@ static func ease_tween(node: Node, trans: Tween.TransitionType = Tween.TRANS_EXP
 	return t
 
 
+## The one hover tween a control runs: starting a new one stops the last, so
+## a quick pass over a tile can't leave an "in" animation finishing after the
+## "out" one and the tile stuck lit.
+static func hover_tween(node: Node) -> Tween:
+	var old: Variant = node.get_meta("_hover_tween") if node.has_meta("_hover_tween") else null
+	if old is Tween and (old as Tween).is_valid():
+		(old as Tween).kill()
+	var t := node.create_tween()
+	node.set_meta("_hover_tween", t)
+	return t
+
+
 ## A colour pair for procedural covers, stable per name.
 static func cover_colors(name: String, accent_hex: String = "") -> Array[Color]:
 	var h := absi(name.hash())
