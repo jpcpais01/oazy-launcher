@@ -271,6 +271,8 @@ func _show() -> void:
 	var surface := Shell.surface_of(self)
 	if surface:
 		surface.reveal()
+		# Above everything, a fullscreen app that keeps itself on top included.
+		Host.raise_window(surface.hwnd())
 	_layout(0.0)
 	Sfx.play(&"open", 1.3)
 

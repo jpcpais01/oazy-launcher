@@ -243,6 +243,7 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 		[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+		[DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state);
 		[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool altTab);
 		[DllImport("user32.dll")] public static extern IntPtr GetLastActivePopup(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
@@ -1814,6 +1815,13 @@ namespace Oazy
 			return home == IntPtr.Zero || Native.MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == Native.MonitorFromWindow(home, MONITOR_DEFAULTTONEAREST);
 		}
 
+		static bool ExclusiveFullscreen()
+		{
+			int state;
+			// QUNS_RUNNING_D3D_FULL_SCREEN
+			return Native.SHQueryUserNotificationState(out state) == 0 && state == 3;
+		}
+
 		static bool IsOazy(IntPtr h)
 		{
 			if (h == IntPtr.Zero) return false;
@@ -2170,7 +2178,7 @@ namespace Oazy
 		// swallows Tab (and the keys used to steer) and tells Oazy, which draws
 		// it and switches when Alt comes up. Windows' own one still shows over
 		// apps running as administrator (their keys never reach this hook), over
-		// fullscreen games, and whenever Oazy didn't answer the last time.
+		// games in exclusive fullscreen, and whenever Oazy didn't answer the last time.
 
 		static IntPtr OnKey(int code, IntPtr w, IntPtr l)
 		{
@@ -2200,7 +2208,11 @@ namespace Oazy
 				uint pid;
 				Native.GetWindowThreadProcessId(fg, out pid);
 				bool self = fg == Self || (ParentPid != 0 && pid == (uint)ParentPid);
-				if (!self && IsFullscreen(fg)) return false;
+				// Over a game in exclusive fullscreen nothing else can draw, so
+				// Windows' own switcher (which drops out of it) takes those.
+				// Borderless fullscreen (browsers, videos, most games) is just
+				// a big window, and Oazy's switcher shows over it.
+				if (!self && ExclusiveFullscreen()) return false;
 				Switching = true;
 				SwitchAcked = false;
 				// A key between Alt going down and up, so the app underneath
