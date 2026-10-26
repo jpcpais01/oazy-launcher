@@ -36,6 +36,9 @@ var screenshot_dir := ""
 var game_running := false
 ## The pointer is over Oazy's taskbar (shell mode keeps it smooth then).
 var pointer_on_bar := false: set = set_pointer_on_bar
+## Oazy's Alt+Tab is on screen: it animates at full speed even while
+## another app has focus (it never takes focus itself).
+var switcher_open := false: set = set_switcher_open
 ## Frame cap used when vsync turns out not to pace the frame (0 = none).
 var _vsync_cap := 0
 var _probe_at := 0
@@ -112,7 +115,9 @@ func _update_fps(focused: bool) -> void:
 	if smoke_test:
 		return
 	var eco: bool = Settings.get_value("effects") == "eco"
-	if Shell.native and Host.fullscreen_app:
+	if switcher_open:
+		Engine.max_fps = 60 if eco else _vsync_cap
+	elif Shell.native and Host.fullscreen_app:
 		# A game or video has the screen: nothing of Oazy's is visible.
 		Engine.max_fps = 5
 	elif Shell.native and not focused:
@@ -156,6 +161,13 @@ func _process(_delta: float) -> void:
 
 func refresh_fps() -> void:
 	_update_fps(_app_focused())
+
+
+func set_switcher_open(on: bool) -> void:
+	if on == switcher_open:
+		return
+	switcher_open = on
+	refresh_fps()
 
 
 func set_pointer_on_bar(on: bool) -> void:
