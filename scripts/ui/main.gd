@@ -23,6 +23,8 @@ var overlay_layer: Control
 var toasts: Toasts
 var update_pill: UpdatePill
 var loaded := false
+## One of Oazy's windows has focus (Godot's application focus).
+var _app_focused := true
 
 var _chrome: Control
 var _max_btn: FxButton
@@ -181,6 +183,14 @@ func _ready() -> void:
 			Shell.precreate_layers()
 	)
 
+	# The taskbar and the other layers put themselves right once a second,
+	# whatever events were missed.
+	var heal := Timer.new()
+	heal.wait_time = 1.0
+	heal.autostart = true
+	heal.timeout.connect(_heal)
+	add_child(heal)
+
 	if not App.smoke_test or App.is_windows():
 		Host.start()
 	if App.is_windows() and not App.smoke_test and not Settings.get_value("claude_checked"):
@@ -196,9 +206,9 @@ func _ready() -> void:
 
 func _setup_window() -> void:
 	var w := get_window()
-	w.min_size = Vector2i(1100, 680)
 	if Shell.native:
-		# The desktop: the whole primary screen, under every other window.
+		# The desktop: the whole primary screen, under every other window,
+		# however small the screen.
 		var scr := DisplayServer.get_primary_screen()
 		w.mode = Window.MODE_WINDOWED
 		w.borderless = true
@@ -206,6 +216,7 @@ func _setup_window() -> void:
 		w.position = DisplayServer.screen_get_position(scr)
 		w.size = DisplayServer.screen_get_size(scr)
 		return
+	w.min_size = Vector2i(1100, 680)
 	if App.smoke_test:
 		return
 	var usable := DisplayServer.screen_get_usable_rect(w.current_screen)
@@ -816,7 +827,7 @@ func _on_desk_menu(item: int) -> void:
 
 func _on_loaded() -> void:
 	loaded = true
-	Shell.set_layer_visible("bar", not Host.fullscreen_app)
+	_sync_layers()
 	desktop.intro()
 	taskbar.intro()
 	Sfx.play(&"open", 0.8)
@@ -874,6 +885,7 @@ func _on_hotkey(was_foreground: bool) -> void:
 
 
 func _on_host_status(ok: bool) -> void:
+	_sync_layers()
 	if ok and Shell.native:
 		_enter_shell()
 		if loaded:
@@ -916,11 +928,45 @@ func _on_fullscreen_app(on: bool) -> void:
 		start.close()
 		assistant.close()
 		preview.hide_preview()
-	if loaded:
-		Shell.set_layer_visible("bar", not on)
-	Shell.set_layer_visible("toasts", not on)
-	Shell.set_layer_visible("pill", not on)
+	_sync_layers()
 	App.refresh_fps()
+
+
+## Which of Oazy's always-on-top layers show, worked out from scratch each
+## time: the taskbar, toasts and update pill step aside while a game or video
+## is fullscreen, and for nothing else. Also run once a second (see _heal), so
+## a missed event can never leave the taskbar hidden.
+func _sync_layers() -> void:
+	var fullscreen := Host.available and Host.fullscreen_app
+	# In shell mode the taskbar slides in once Oazy has loaded.
+	var bar := not fullscreen and (loaded or not Shell.native)
+	if Shell.native and Host.failed:
+		# Without the companion other apps can't make room for the taskbar,
+		# so it only shows while Oazy is in use.
+		bar = bar and _app_focused
+	Shell.set_layer_visible("bar", bar)
+	Shell.set_layer_visible("toasts", not fullscreen)
+	Shell.set_layer_visible("pill", not fullscreen)
+
+
+## Once a second: the layers show what they should (see _sync_layers), and
+## their OS windows are still up and cover the screen.
+func _heal() -> void:
+	_sync_layers()
+	if not Shell.native or not Host.available:
+		return
+	if get_window().mode != Window.MODE_MINIMIZED:
+		var scr := DisplayServer.window_get_current_screen()
+		var want := Rect2i(DisplayServer.screen_get_position(scr), DisplayServer.screen_get_size(scr))
+		if Rect2i(DisplayServer.window_get_position(), DisplayServer.window_get_size()) != want:
+			# The screen changed under Oazy (resolution, scaling, a monitor
+			# waking up), and Godot won't resize a window it counts as
+			# fullscreen: the desktop would cover part of it, with the
+			# taskbar off at the old bottom.
+			Host.fit_window(Host.self_hwnd)
+		elif want.position != Shell.origin or want.size != Shell.screen_px:
+			Shell.sync_metrics()
+	Shell.heal_layers()
 
 
 func _on_files_dropped(files: PackedStringArray) -> void:
@@ -1014,10 +1060,8 @@ func _notification(what: int) -> void:
 		# Alt+F4 on the desktop: ask before taking the desktop away.
 		_confirm_quit()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
-		if Shell.native and not Host.available and loaded:
-			# Without the companion other apps can't make room for the taskbar,
-			# so it only shows while Oazy is in use.
-			Shell.set_layer_visible("bar", what == NOTIFICATION_APPLICATION_FOCUS_IN)
+		_app_focused = what == NOTIFICATION_APPLICATION_FOCUS_IN
+		_sync_layers()
 
 
 func _confirm_quit() -> void:

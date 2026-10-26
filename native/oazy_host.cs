@@ -338,7 +338,8 @@ namespace Oazy
 
 	static class Host
 	{
-		const int GWL_EXSTYLE = -20;
+		const int GWL_EXSTYLE = -20, GWL_STYLE = -16;
+		const int WS_CAPTION = 0xC00000, WS_THICKFRAME = 0x40000;
 		const int WS_EX_TOOLWINDOW = 0x80;
 		const int WS_EX_APPWINDOW = 0x40000;
 		const int WS_EX_NOACTIVATE = 0x8000000;
@@ -365,7 +366,8 @@ namespace Oazy
 		const int SW_SHOWNOACTIVATE = 4;
 		const int SW_SHOWMINNOACTIVE = 7;
 		const int SW_SHOWNA = 8;
-		const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
+		const uint MONITOR_DEFAULTTONEAREST = 2;
+		const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
 		const uint SPI_GETWORKAREA = 0x30, SPI_SETWORKAREA = 0x2F, SPIF_SENDCHANGE = 0x2;
 		const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 		const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -410,6 +412,10 @@ namespace Oazy
 		// Explorer's taskbar autohide state before we changed it, -1 if untouched.
 		static int TrayState = -1;
 		static readonly List<IntPtr> Peeked = new List<IntPtr>();
+		// Oazy's always-on-top layers (taskbar, Start, menus...), kept there.
+		static readonly HashSet<long> OnTop = new HashSet<long>();
+		// What the last window list said about a fullscreen app (see Watchdog).
+		static volatile bool LastFs;
 		static bool ThemeOn;
 		static int ThemeBorder;
 		static readonly HashSet<long> Themed = new HashSet<long>();
@@ -590,7 +596,9 @@ namespace Oazy
 					ExitShell();
 					return "\"ok\":true";
 				case "style":
-					return Style(H(Arg(p, 2)), Arg(p, 3));
+					return Style(H(Arg(p, 2)), Arg(p, 3), Arg(p, 4) == "1");
+				case "fit":
+					return Fit(H(Arg(p, 2)), Int(Arg(p, 3), 0));
 				case "theme":
 					return Theme(Arg(p, 2) == "1", Int(Arg(p, 3), 0), Int(Arg(p, 4), 0), Int(Arg(p, 5), 0));
 				case "show_desktop":
@@ -898,8 +906,10 @@ namespace Oazy
 				IntPtr owner = Native.GetAncestor(fg, GA_ROOTOWNER);
 				if (owner != IntPtr.Zero && alive.Contains(owner.ToInt64())) fgApp = owner;
 			}
+			bool fs = !selfFg && FullscreenOverOazy(fg);
+			LastFs = fs;
 			return "\"windows\":[" + string.Join(",", list.ToArray()) + "],\"fg\":" + fgApp.ToInt64() + ",\"self_fg\":" + Json.Bool(selfFg)
-				+ ",\"fs\":" + Json.Bool(!selfFg && IsFullscreen(fg));
+				+ ",\"fs\":" + Json.Bool(fs);
 		}
 
 		// --- Focus ------------------------------------------------------------------
@@ -1118,7 +1128,11 @@ namespace Oazy
 				ExpectUntil = DateTime.MinValue;
 			}
 			if (Native.GetForegroundWindow() == fresh) return;
-			ThreadPool.QueueUserWorkItem(delegate(object state) { Focus(fresh); });
+			ThreadPool.QueueUserWorkItem(delegate(object state)
+			{
+				try { Focus(fresh); }
+				catch (Exception) { }
+			});
 		}
 
 		// --- Live thumbnails -------------------------------------------------------
@@ -1769,23 +1783,54 @@ namespace Oazy
 			catch (Exception) { }
 		}
 
+		// A game or video taking a whole screen. Not a maximised app: on a screen
+		// where nothing keeps room for a taskbar (a second monitor) one covers
+		// it too, its borders hanging off the edges. Not Windows' own
+		// full-screen views either (Task View, Alt+Tab, Snap), which Windows
+		// keeps its taskbar up for.
 		static bool IsFullscreen(IntPtr h)
 		{
-			if (h == IntPtr.Zero || h == Desktop) return false;
+			if (h == IntPtr.Zero || h == Desktop || Native.IsIconic(h)) return false;
 			string cls = ClassName(h);
-			if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd") return false;
+			if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd"
+				|| cls == "MultitaskingViewFrame" || cls == "XamlExplorerHostIslandWindow" || cls == "ForegroundStaging")
+				return false;
 			Native.RECT r;
 			if (!Native.GetWindowRect(h, out r)) return false;
 			Native.RECT m = MonitorRect(h, false);
-			return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
+			if (r.Left > m.Left || r.Top > m.Top || r.Right < m.Right || r.Bottom < m.Bottom) return false;
+			if (SameRect(r, m) || !Native.IsZoomed(h)) return true;
+			// Maximised and hanging over the edges: just a maximised app, unless it
+			// dropped its frame the way Chrome or a game does for fullscreen.
+			return (Native.GetWindowLong(h, GWL_STYLE) & (WS_CAPTION | WS_THICKFRAME)) == 0;
+		}
+
+		// Fullscreen on the screen Oazy's desktop and taskbar are on: a game on
+		// another monitor leaves Oazy's taskbar alone, as Windows' does.
+		static bool FullscreenOverOazy(IntPtr h)
+		{
+			if (!IsFullscreen(h)) return false;
+			IntPtr home = Desktop != IntPtr.Zero ? Desktop : Self;
+			return home == IntPtr.Zero || Native.MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) == Native.MonitorFromWindow(home, MONITOR_DEFAULTTONEAREST);
+		}
+
+		static bool IsOazy(IntPtr h)
+		{
+			if (h == IntPtr.Zero) return false;
+			if (h == Self) return true;
+			uint pid;
+			Native.GetWindowThreadProcessId(h, out pid);
+			return ParentPid != 0 && pid == (uint)ParentPid;
 		}
 
 		// --- Window looks ------------------------------------------------------------
 
 		// Oazy's own layers (taskbar, Start, previews, dialogs, Oazy's windows) are
 		// screen-sized transparent windows cut to shape: no Alt+Tab entry, no
-		// rounding or frame from Windows, dark like the rest.
-		static string Style(IntPtr h, string kind)
+		// rounding or frame from Windows, dark like the rest. A `top` one stays
+		// above other apps from now on (see KeepOnTop), whatever Godot does
+		// with the window.
+		static string Style(IntPtr h, string kind, bool top)
 		{
 			if (h == IntPtr.Zero || !Native.IsWindow(h)) return "\"ok\":false";
 			int ex = Native.GetWindowLong(h, GWL_EXSTYLE);
@@ -1796,7 +1841,55 @@ namespace Oazy
 			Native.DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, 4);
 			int none = DWM_COLOR_NONE;
 			Native.DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, ref none, 4);
+			lock (OnTop)
+			{
+				if (top) OnTop.Add(h.ToInt64());
+				else OnTop.Remove(h.ToInt64());
+			}
+			if (top) Native.SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
 			return "\"ok\":true,\"kind\":" + Json.Str(kind);
+		}
+
+		// Every couple of seconds: Oazy's always-on-top layers that have somehow
+		// dropped out of the topmost band go back into it.
+		static void KeepOnTop()
+		{
+			List<IntPtr> drop = new List<IntPtr>();
+			lock (OnTop)
+			{
+				List<long> gone = new List<long>();
+				foreach (long k in OnTop)
+				{
+					IntPtr h = new IntPtr(k);
+					if (!Native.IsWindow(h)) gone.Add(k);
+					else if (Native.IsWindowVisible(h) && (Native.GetWindowLong(h, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0) drop.Add(h);
+				}
+				foreach (long k in gone) OnTop.Remove(k);
+			}
+			foreach (IntPtr h in drop)
+				Native.SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+		}
+
+		// One of Oazy's screen-sized windows back over the whole screen Oazy's
+		// desktop is on, `inset` pixels short of the bottom (layers that stop
+		// above the taskbar). Godot won't move or resize a window it counts as
+		// fullscreen, so after a display change this is the only way. If it is
+		// already right, Godot is just asked to read its position again (its
+		// coordinates move when a monitor to the left or above comes or goes).
+		static string Fit(IntPtr h, int inset)
+		{
+			if (h == IntPtr.Zero || !Native.IsWindow(h) || Native.IsIconic(h)) return "\"ok\":false";
+			IntPtr home = Desktop != IntPtr.Zero ? Desktop : (Self != IntPtr.Zero ? Self : h);
+			Native.RECT m = MonitorRect(home, false);
+			m.Bottom -= Math.Max(0, inset);
+			Native.RECT r;
+			if (Native.GetWindowRect(h, out r) && SameRect(r, m))
+			{
+				Native.SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS);
+				return "\"ok\":true,\"moved\":false";
+			}
+			bool ok = Native.SetWindowPos(h, IntPtr.Zero, m.Left, m.Top, m.Right - m.Left, m.Bottom - m.Top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+			return "\"ok\":" + Json.Bool(ok) + ",\"moved\":true";
 		}
 
 		// Gives other apps' window borders Oazy's accent (Windows 11). Only the
@@ -2018,13 +2111,25 @@ namespace Oazy
 			while (Native.GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
 			{
 				if (msg.message == WM_HOTKEY && (uint)msg.wParam.ToInt64() == HOTKEY_DESKTOP) Write("{\"ev\":\"desktop_key\"}");
-				else if (msg.message == WM_HOTKEY) OnHotkey();
+				else if (msg.message == WM_HOTKEY)
+				{
+					try { OnHotkey(); }
+					catch (Exception) { }
+				}
 				Native.TranslateMessage(ref msg);
 				Native.DispatchMessage(ref msg);
 			}
 		}
 
 		static void OnWinEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
+		{
+			// An exception here would end the companion (and Oazy's taskbar
+			// would lose its windows until it restarted).
+			try { WinEvent(ev, hwnd, idObject, idChild); }
+			catch (Exception) { Dirty = true; }
+		}
+
+		static void WinEvent(uint ev, IntPtr hwnd, int idObject, int idChild)
 		{
 			if (idObject != 0 || idChild != 0 || hwnd == IntPtr.Zero) return;
 			if (ev == 0x800B)
@@ -2252,6 +2357,16 @@ namespace Oazy
 			{
 				Thread.Sleep(2000);
 				try { ReassertShell(); }
+				catch (Exception) { }
+				// Oazy's taskbar can't be left out of place by a missed event: back
+				// on top if it ever dropped out, and a fullscreen app that went away
+				// without anything else coming to the front is noticed anyway.
+				try
+				{
+					KeepOnTop();
+					IntPtr fg = Native.GetForegroundWindow();
+					if ((!IsOazy(fg) && FullscreenOverOazy(fg)) != LastFs) Dirty = true;
+				}
 				catch (Exception) { }
 				if (ParentPid <= 0) continue;
 				try
