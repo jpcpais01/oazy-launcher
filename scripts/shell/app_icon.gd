@@ -90,6 +90,11 @@ func refresh() -> void:
 		_show_plate(App.accent.lightened(0.05), App.accent.darkened(0.4))
 		_show_glyph(str(item.get("glyph", "grid")))
 		return
+	var own := custom_look(item)
+	if not own.is_empty():
+		_show_plate(own[1], own[2])
+		_show_glyph(own[0])
+		return
 	var tex := Catalog.icon(_key) if _key != "" else null
 	if tex != null:
 		_tex.texture = tex
@@ -105,6 +110,22 @@ func refresh() -> void:
 	_show_plate(Color.from_hsv(base, 0.34, 0.74), Color.from_hsv(fposmod(base + 0.06, 1.0), 0.46, 0.44))
 	_letter.text = Fmt.initials(name).substr(0, 1) if name != "" else "?"
 	_letter.visible = true
+
+
+## Oazy's own icon for a few Windows staples whose stock icons clash with
+## the rest of the taskbar: [glyph, top colour, bottom colour], or [] for the
+## app's real icon.
+static func custom_look(it: Dictionary) -> Array:
+	var name := str(it.get("name", "")).to_lower().strip_edges()
+	var id := (str(it.get("ref", "")) + "|" + str(it.get("icon_key", ""))).to_lower().replace("\\", "/")
+	if name.contains("claude"):
+		return []
+	if id.contains("microsoft.windows.explorer") or id.ends_with("/explorer.exe") or id.contains("/explorer.exe|") or name == "file explorer":
+		return ["folder", Color("f3c978"), Color("c27a35")]
+	if id.contains("windowsterminal") or id.contains("/wt.exe") or id.contains("/cmd.exe") or id.contains("powershell") or id.contains("/pwsh.exe") \
+			or name in ["terminal", "windows terminal", "command prompt", "windows powershell", "powershell"]:
+		return ["terminal", Color("4a5869"), Color("161c26")]
+	return []
 
 
 func _show_plate(a: Color, b: Color) -> void:

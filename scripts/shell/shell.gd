@@ -75,28 +75,44 @@ static func focus(node: Node) -> void:
 
 
 ## Opens a menu that lives in one of the layers, bringing the layer up first.
-## A menu can only open inside a layer's window once that window has been on
-## screen for a frame, so a hidden layer waits one first.
+##
+## Godot closes an open menu as soon as the window it sits in (or the desktop
+## under it) gains focus, and the OS reports focus a moment late. Opened
+## straight away, a menu would show and vanish again, so it waits until its
+## layer really has focus. A layer's window must also have been on screen
+## for a frame before a menu can open in it.
 static func popup(menu: Popup) -> void:
 	var s := surface_of(menu.get_parent())
-	if s:
+	if s == null:
+		menu.popup()
+		return
+	var tree := menu.get_tree()
+	s.pin(true)
+	if s.unfocusable:
 		var was_visible := s.visible
-		if s.unfocusable:
-			s.reveal()
-		else:
-			s.bring_to_front()
+		s.reveal()
 		if not was_visible:
-			await menu.get_tree().process_frame
-			if not is_instance_valid(menu):
-				return
-		if not menu.has_meta("shell_ready"):
-			# A menu's very first opening inside another OS window only
-			# registers it with that window (and logs an error); it shows
-			# from the second time on. Get the first one out of the way.
-			menu.set_meta("shell_ready", true)
-			menu.popup()
-			menu.hide()
+			await tree.process_frame
+	elif not s.os_focused:
+		s.bring_to_front()
+		var until := Time.get_ticks_msec() + 600
+		while is_instance_valid(s) and not s.os_focused and Time.get_ticks_msec() < until:
+			await tree.process_frame
+		# Let the focus change the click itself caused settle too.
+		await tree.process_frame
+		await tree.process_frame
+	if not is_instance_valid(s):
+		return
+	s.pin(false)
+	if not is_instance_valid(menu):
+		return
 	menu.popup()
+	if not menu.visible:
+		# The first menu in a freshly shown window only registers it with
+		# that window; it opens from the second try on.
+		await tree.process_frame
+		if is_instance_valid(menu) and not menu.visible:
+			menu.popup()
 
 
 ## Hides or shows a whole layer (the taskbar while a game is fullscreen).
