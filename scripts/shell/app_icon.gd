@@ -117,14 +117,18 @@ func refresh() -> void:
 
 
 ## Oazy's own icons for common Windows apps, in place of their stock ones.
-## Settings ("custom_icons") picks which are on; File Explorer and Terminal
-## are by default. Each one matches app ids / paths (lowercase, "/" slashes)
+## Settings ("custom_icons") picks which are on; File Explorer, Terminal,
+## Claude and WhatsApp are by default. Each one matches app ids / paths (lowercase, "/" slashes)
 ## or exact display names.
 const CUSTOM := {
 	"explorer": {"name": "File Explorer", "glyph": "folder", "a": "f3c978", "b": "c27a35",
 		"ids": ["microsoft.windows.explorer", "/explorer.exe"], "names": ["file explorer"]},
 	"terminal": {"name": "Terminal", "glyph": "terminal", "a": "4a5869", "b": "161c26",
 		"ids": ["windowsterminal", "/wt.exe", "/cmd.exe", "powershell", "/pwsh.exe"], "names": ["terminal", "windows terminal", "command prompt", "windows powershell", "powershell"]},
+	"claude": {"name": "Claude", "glyph": "claude", "a": "f0a07a", "b": "b5502f",
+		"ids": ["anthropicclaude", "/claude.exe"], "names": ["claude"]},
+	"whatsapp": {"name": "WhatsApp", "glyph": "whatsapp", "a": "6fe39a", "b": "17905a",
+		"ids": ["whatsapp"], "names": ["whatsapp"]},
 	"chrome": {"name": "Google Chrome", "glyph": "globe", "a": "7cb8f5", "b": "2d63b8",
 		"ids": ["chrome"], "names": ["google chrome"]},
 	"edge": {"name": "Microsoft Edge", "glyph": "compass", "a": "5fd6c0", "b": "1f6f8f",
@@ -154,13 +158,14 @@ const CUSTOM := {
 }
 
 
-## Which CUSTOM entry an app matches ("" for none). Claude keeps its own look.
+## Which CUSTOM entry an app matches ("" for none). Anything named Claude
+## (the app, Claude Code in a terminal) is Claude's before it is a terminal's.
 static func custom_key(it: Dictionary) -> String:
 	if it.has("custom"):
 		return str(it["custom"])
 	var name := str(it.get("name", "")).to_lower().strip_edges()
 	if name.contains("claude"):
-		return ""
+		return "claude"
 	var id := (str(it.get("ref", "")) + "|" + str(it.get("icon_key", "")) + "|").to_lower().replace("\\", "/")
 	for key in CUSTOM:
 		var c: Dictionary = CUSTOM[key]
@@ -186,7 +191,10 @@ static func custom_look(it: Dictionary) -> Array:
 	if key == "" or not CUSTOM.has(key) or (not it.has("custom") and not custom_enabled(key)):
 		return []
 	var c: Dictionary = CUSTOM[key]
-	return [c["glyph"], Color(str(c["a"])), Color(str(c["b"]))]
+	var glyph := str(c["glyph"])
+	if key == "claude" and str(it.get("name", "")).to_lower().contains("code"):
+		glyph = "claude_code"
+	return [glyph, Color(str(c["a"])), Color(str(c["b"]))]
 
 
 func _show_plate(a: Color, b: Color) -> void:

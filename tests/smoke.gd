@@ -239,7 +239,10 @@ func _logic_tests() -> void:
 	check(AppIcon.custom_look({"ref": "app:Microsoft.Windows.Explorer", "name": "File Explorer"})[0] == "folder", "icons: File Explorer gets Oazy's folder")
 	check(AppIcon.custom_look({"ref": "win:C:/Windows/explorer.exe", "name": "Windows Explorer"})[0] == "folder", "icons: Explorer windows too")
 	check(AppIcon.custom_look({"ref": "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App", "name": "Terminal"})[0] == "terminal", "icons: Terminal gets Oazy's terminal")
-	check(AppIcon.custom_look({"ref": "lib:x", "name": "Claude Code", "icon_key": "C:\\Windows\\System32\\cmd.exe"}).is_empty(), "icons: Claude Code keeps its own look")
+	check(AppIcon.custom_look({"ref": "lib:x", "name": "Claude Code", "icon_key": "C:\\Windows\\System32\\cmd.exe"})[0] == "claude_code", "icons: Claude Code gets Claude's, not the terminal's")
+	check(AppIcon.custom_look({"ref": "win:C:/Users/j/AppData/Local/AnthropicClaude/app-1.0/claude.exe", "name": "Claude"})[0] == "claude", "icons: the Claude app")
+	check(AppIcon.custom_look({"ref": "app:5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", "name": "WhatsApp"})[0] == "whatsapp", "icons: WhatsApp")
+	check((Settings.get_value("custom_icons_offered") as Array).has("whatsapp"), "icons: new defaults are offered once")
 	check(AppIcon.custom_look({"ref": "app:Chrome", "name": "Google Chrome"}).is_empty(), "icons: other apps keep their icons")
 
 	# Mouse pointers: ten complete themes, unpacked into real Windows cursors.
