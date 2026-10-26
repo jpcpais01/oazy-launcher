@@ -1127,7 +1127,21 @@ namespace OazyBrowser
 		{
 			base.OnShown(e);
 			if (startMaximized) WindowState = FormWindowState.Maximized;
+			RefreshFrame();
+			BeginInvoke((Action)RefreshFrame);
 			Init();
+		}
+
+		// Until the frame is recalculated once the window is on screen, DWM keeps
+		// painting a dark caption strip across the top of the glass (behind the
+		// tabs), even though the window has no title bar.
+		void RefreshFrame()
+		{
+			int color = unchecked((int)0xFFFFFFFF); // DWMWA_COLOR_DEFAULT
+			Native.DwmSetWindowAttribute(Handle, 35, ref color, 4);
+			long style = Native.GetWindowLongPtr(Handle, -16).ToInt64() & ~0x00C00000L;
+			Native.SetWindowLongPtr(Handle, -16, new IntPtr(style));
+			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 		}
 
 		bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
@@ -2211,16 +2225,6 @@ namespace OazyBrowser
 
 		public void TestOpenPanel(string name) { Post(Json.Obj("t", "openPanel", "name", name)); }
 		public void TestNavigate(string url) { Navigate(Active, url); }
-		// Self-test only: try a frame variant (0 = as shipped) to compare the bare glass.
-		public void TestFrame(bool caption, bool noCaptionColor)
-		{
-			long style = Native.GetWindowLongPtr(Handle, -16).ToInt64();
-			style = caption ? style | 0x00C00000 : style & ~0x00C00000L;
-			Native.SetWindowLongPtr(Handle, -16, new IntPtr(style));
-			int color = noCaptionColor ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
-			Native.DwmSetWindowAttribute(Handle, 35, ref color, 4);
-			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
-		}
 		public void TestShowChrome(bool on) { try { chrome.IsVisible = on; } catch { } }
 		public void TestShowPage(bool on) { try { Active.C.IsVisible = on; } catch { } }
 	}
@@ -2233,7 +2237,7 @@ namespace OazyBrowser
 		readonly List<string> log = new List<string>();
 		public int ExitCode = 1;
 		BrowserWindow win;
-		bool chromeOk, ntpOk, pageOk, done;
+		bool chromeOk, ntpOk, pageOk, glassOk, done;
 		int step, retries;
 		const string TestUrl = "https://en.wikipedia.org/wiki/Oasis";
 		System.Windows.Forms.Timer timeout;
@@ -2291,17 +2295,7 @@ namespace OazyBrowser
 				win.TestShowPage(false);
 				await Task.Delay(600);
 				Shot("browser-backdrop.png");
-				win.TestFrame(true, false);
-				await Task.Delay(600);
-				Shot("frame-caption.png");
-				win.TestFrame(false, true);
-				await Task.Delay(600);
-				Shot("frame-nocolor.png");
-				win.TestFrame(true, true);
-				await Task.Delay(600);
-				Shot("frame-caption-nocolor.png");
-				win.TestFrame(false, false);
-				await Task.Delay(400);
+				glassOk = EvenGlass("browser-backdrop.png");
 				win.TestShowChrome(true);
 				await Task.Delay(400);
 				Shot("browser-chrome-only.png");
@@ -2334,6 +2328,24 @@ namespace OazyBrowser
 			try { File.WriteAllLines(Path.Combine(dir, "browser-selftest.log"), log.ToArray()); } catch { }
 		}
 
+		// The bare window should be one even sheet of glass from the top edge down,
+		// with no caption strip behind the tabs.
+		bool EvenGlass(string name)
+		{
+			try
+			{
+				using (Bitmap bmp = new Bitmap(Path.Combine(dir, name)))
+				{
+					int x = bmp.Width * 6 / 10;
+					Color top = bmp.GetPixel(x, 12), below = bmp.GetPixel(x, Math.Min(80, bmp.Height - 1));
+					int diff = Math.Abs(top.R - below.R) + Math.Abs(top.G - below.G) + Math.Abs(top.B - below.B);
+					Log("glass top vs below: " + diff);
+					return diff < 30;
+				}
+			}
+			catch (Exception e) { Log("glass check failed: " + e.Message); return false; }
+		}
+
 		void Shot(string name)
 		{
 			try
@@ -2361,8 +2373,8 @@ namespace OazyBrowser
 		{
 			if (done) return;
 			done = true;
-			ExitCode = chromeOk && ntpOk && pageOk ? 0 : 1;
-			Log("chrome=" + chromeOk + " ntp=" + ntpOk + " page=" + pageOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
+			ExitCode = chromeOk && ntpOk && pageOk && glassOk ? 0 : 1;
+			Log("chrome=" + chromeOk + " ntp=" + ntpOk + " page=" + pageOk + " glass=" + glassOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
 			try { File.WriteAllLines(Path.Combine(dir, "browser-selftest.log"), log.ToArray()); } catch { }
 			App.Quit();
 		}
