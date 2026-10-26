@@ -8,9 +8,11 @@ html:not(.oazy-signin) { background-color: Canvas; }
 html.oazy-signin,
 html.oazy-signin body { background: transparent !important; }
 
-/* Full-window layers behind the page: cleared, so the glass shows. */
+/* Full-window layers behind the page: a dark tint, so the glass shows through.
+   Not fully clear: the field labels sit on little patches of Google's own
+   backdrop colour, which would show as dark blocks on bare glass. */
 html.oazy-signin [data-oazy-clear] {
-	background-color: transparent !important;
+	background-color: rgba(6, 12, 16, 0.8) !important;
 	background-image: none !important;
 	box-shadow: none !important;
 }

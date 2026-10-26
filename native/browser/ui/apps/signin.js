@@ -3,8 +3,8 @@
 // hands it OAZY: {id, hosts, on, accent, test, css} (see WebApps.Bootstrap).
 //
 // The window asks Google for its dark pages (prefers-color-scheme). Once the
-// page really is dark, its full-window backgrounds are cleared so it sits on
-// the window's glass, and the card holding the form (wide windows only) turns
+// page really is dark, its full-window backgrounds become a dark tint so it
+// sits on the window's glass, and the card holding the form (wide windows only) turns
 // into tinted glass. Everything is found by size and colour, not Google's
 // class names; if the page isn't dark or can't be read, it shows as Google
 // drew it, on a solid backdrop.
