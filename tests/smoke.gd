@@ -324,6 +324,9 @@ func _logic_tests() -> void:
 	check(Catalog.is_favorite("app:Chrome") and Catalog.is_favorite(lib_ref), "favourites: add")
 	check(bool(Library.get_entry(lib_ref.substr(4))["favorite"]), "favourites: library entries keep the heart")
 	check(Catalog.favorites().slice(0, 2) == ["app:Chrome", lib_ref], "favourites: in the order added")
+	Catalog.move_favorite(lib_ref, 0)
+	check(Catalog.favorites().slice(0, 2) == [lib_ref, "app:Chrome"], "favourites: drag to reorder")
+	Catalog.move_favorite(lib_ref, 1)
 	check(Catalog.toggle_favorite("app:Chrome") == false and not Catalog.favorites().has("app:Chrome"), "favourites: remove")
 	check(not Catalog.can_favorite("web:x") and Catalog.can_favorite("oazy:settings"), "favourites: only things you can open")
 	Library.toggle_favorite(lib_ref.substr(4))
@@ -557,7 +560,7 @@ func _ui_tests() -> void:
 	st.search("")
 	check(st.page_visible("desktop") and not st.page_visible("personalise"), "settings: clearing search goes back to the page")
 	st.open_page("personalise")
-	var favs := main.desktop.get("_favs") as GridContainer
+	var favs := main.desktop.get("_favs") as ReorderGrid
 	for size_id in ["large", "small", "medium"]:
 		Settings.set_value("fav_icon_size", size_id)
 		await _wait(0.1)
