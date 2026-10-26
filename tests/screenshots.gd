@@ -112,6 +112,19 @@ func _ready() -> void:
 		await _wait(0.4)
 		await shot("06b-settings-icons")
 		scroller.scroll_vertical = 0
+	var pointers := settings.find_child("Pointers", true, false) as Control
+	if pointers:
+		var sc := pointers.get_parent()
+		while sc and not sc is ScrollContainer:
+			sc = sc.get_parent()
+		if sc:
+			var content := (sc as ScrollContainer).get_child(0) as Control
+			var y := (content.get_global_transform().affine_inverse() * pointers.global_position).y
+			(sc as ScrollContainer).scroll_vertical = int(y) - 260
+		await _wait(0.4)
+		await shot("06c-settings-pointers")
+		if sc:
+			(sc as ScrollContainer).scroll_vertical = 0
 	var work: Rect2 = main.layer.work_rect()
 	lib.set_rect(Rect2(work.position + Vector2(40, 30), Vector2(work.size.x * 0.56, work.size.y * 0.8)))
 	settings.set_rect(Rect2(work.position + Vector2(work.size.x * 0.48, work.size.y * 0.12), Vector2(work.size.x * 0.48, work.size.y * 0.84)))
