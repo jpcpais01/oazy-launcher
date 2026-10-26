@@ -81,13 +81,9 @@ func _focus_first() -> void:
 ## Installed apps that aren't in the library yet (as an app, or as a game
 ## with the same name), by name.
 static func candidates() -> Array[Dictionary]:
-	var taken := Catalog.library_app_ids()
-	var names := {}
-	for e in Library.entries:
-		names[Art.norm_title(str(e["name"]))] = true
 	var out: Array[Dictionary] = []
 	for a in Catalog.apps:
-		if taken.has(str(a["id"]).to_lower()) or names.has(Art.norm_title(str(a["name"]))):
+		if Catalog.canonical("app:" + str(a["id"])).begins_with("lib:"):
 			continue
 		out.append(a)
 	return out

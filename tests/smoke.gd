@@ -188,12 +188,12 @@ func _logic_tests() -> void:
 	var chrome := Catalog.add_to_library("app:Chrome")
 	check(chrome != "" and Library.get_entry(chrome)["kind"] == "app", "library apps: added as an app")
 	check(Catalog.add_to_library("app:Chrome") == chrome and not Catalog.can_add_to_library("app:Chrome"), "library apps: added once")
-	check(Catalog.is_pinned("lib:" + chrome) and not Catalog.is_pinned("app:Chrome"), "library apps: pin moves to the entry")
+	check(Catalog.is_pinned("lib:" + chrome) and Settings.get_value("pins").has("lib:" + chrome) and not Settings.get_value("pins").has("app:Chrome"), "library apps: pin moves to the entry")
+	check(Catalog.canonical("app:Chrome") == "lib:" + chrome and Catalog.is_pinned("app:Chrome"), "one ref: the Start app is its library entry")
 	check(Catalog.ref_for_window({"exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "aumid": "Chrome"}) == "lib:" + chrome, "library apps: windows group with the entry")
 	check(FindAppsDialog.candidates().size() == before - 1, "library apps: Find apps skips what's in the library")
 	check(not Catalog.all_items().any(func(it: Dictionary) -> bool: return it["ref"] == "app:Chrome"), "library apps: no duplicate in All apps")
-	Catalog.forget_entry(chrome)
-	Library.remove_entry(chrome)
+	Catalog.remove_from_library(chrome)
 	check(Catalog.is_pinned("app:Chrome") and Catalog.can_add_to_library("app:Chrome"), "library apps: pin goes back on removal")
 
 	# Oazy Browser: an Oazy app whose windows are real ones.
@@ -280,6 +280,20 @@ func _logic_tests() -> void:
 	Library.toggle_favorite(lib_ref.substr(4))
 	check(not Catalog.is_favorite(lib_ref) and not Catalog.favorites().has(lib_ref), "favourites: follow the library's heart")
 	Catalog.set_favorite("app:Chrome", true)
+
+	# One thing, one ref: a game's Start shortcut, or its window, is the game.
+	Catalog.set_mock_apps(_mock_apps() + [{"name": "Smoke Game™", "id": "C:/Games/Smoke Launcher.exe"}])
+	var game_ref := "lib:" + str(Library.entries[0]["id"])
+	check(Catalog.canonical("app:C:/Games/Smoke Launcher.exe") == game_ref, "one ref: a game's Start shortcut is the game")
+	check(Catalog.canonical("win:C:/Games/smoke.exe") == game_ref and Catalog.ref_for_window({"exe": "C:\\Games\\smoke.exe"}) == game_ref, "one ref: a game's window is the game")
+	check(not Catalog.all_items().any(func(it: Dictionary) -> bool: return it["ref"] == "app:C:/Games/Smoke Launcher.exe"), "one ref: no Start duplicate of a game")
+	Catalog.set_favorite(game_ref, false)
+	Settings.set_value("favorites", ["app:C:/Games/Smoke Launcher.exe", "app:Chrome"])
+	Catalog._tidy()
+	check(Settings.get_value("favorites") == [game_ref, "app:Chrome"] and bool(Library.get_entry(game_ref.substr(4))["favorite"]), "one ref: an old Start-shortcut favourite becomes the game's heart")
+	Catalog.set_favorite("win:C:/Games/smoke.exe", true)
+	check(Catalog.favorites().count(game_ref) == 1 and Catalog.is_favorite("app:C:/Games/Smoke Launcher.exe"), "one ref: favourited anywhere, one favourite")
+	Catalog.set_mock_apps(_mock_apps())
 
 	# Weather: codes, units and reading the forecast offline.
 	check(Weather.kind_for(0) == "clear" and Weather.kind_for(2) == "partly" and Weather.kind_for(63) == "rain" and Weather.kind_for(81) == "rain", "weather: codes to icons")
