@@ -13,6 +13,7 @@ const DEFAULTS := {
 	"theme_app_windows": true,
 	"alt_tab": true,
 	"favorites": [],
+	"custom_icons": ["explorer", "terminal"],
 	"auto_check_updates": true,
 	"ui_sounds": true,
 	"volume": 0.6,

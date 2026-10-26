@@ -13,7 +13,7 @@ func _ready() -> void:
 	_stack.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_stack.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_stack.offset_right = -24
-	_stack.offset_bottom = -(Taskbar.HEIGHT + Taskbar.MARGIN * 2.0 + 14.0)
+	_stack.offset_bottom = -(Taskbar.RESERVE + 14.0)
 	_stack.alignment = BoxContainer.ALIGNMENT_END
 	add_child(_stack)
 

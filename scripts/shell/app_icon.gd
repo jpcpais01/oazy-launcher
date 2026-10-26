@@ -56,6 +56,10 @@ func _ready() -> void:
 		if str(item.get("kind", "")) == "oazy":
 			refresh()
 	)
+	Settings.changed.connect(func(key: String, _v: Variant) -> void:
+		if key == "custom_icons":
+			refresh()
+	)
 	_sync()
 	refresh()
 
@@ -112,20 +116,77 @@ func refresh() -> void:
 	_letter.visible = true
 
 
-## Oazy's own icon for a few Windows staples whose stock icons clash with
-## the rest of the taskbar: [glyph, top colour, bottom colour], or [] for the
-## app's real icon.
-static func custom_look(it: Dictionary) -> Array:
+## Oazy's own icons for common Windows apps, in place of their stock ones.
+## Settings ("custom_icons") picks which are on; File Explorer and Terminal
+## are by default. Each one matches app ids / paths (lowercase, "/" slashes)
+## or exact display names.
+const CUSTOM := {
+	"explorer": {"name": "File Explorer", "glyph": "folder", "a": "f3c978", "b": "c27a35",
+		"ids": ["microsoft.windows.explorer", "/explorer.exe"], "names": ["file explorer"]},
+	"terminal": {"name": "Terminal", "glyph": "terminal", "a": "4a5869", "b": "161c26",
+		"ids": ["windowsterminal", "/wt.exe", "/cmd.exe", "powershell", "/pwsh.exe"], "names": ["terminal", "windows terminal", "command prompt", "windows powershell", "powershell"]},
+	"chrome": {"name": "Google Chrome", "glyph": "globe", "a": "7cb8f5", "b": "2d63b8",
+		"ids": ["chrome"], "names": ["google chrome"]},
+	"edge": {"name": "Microsoft Edge", "glyph": "compass", "a": "5fd6c0", "b": "1f6f8f",
+		"ids": ["msedge", "microsoftedge"], "names": ["microsoft edge"]},
+	"firefox": {"name": "Firefox", "glyph": "compass", "a": "ffab6b", "b": "c2445a",
+		"ids": ["firefox"], "names": ["firefox", "mozilla firefox"]},
+	"steam": {"name": "Steam", "glyph": "gamepad", "a": "6e8fb3", "b": "1b2a3d",
+		"ids": ["/steam.exe", "valve.steam"], "names": ["steam"]},
+	"discord": {"name": "Discord", "glyph": "chat", "a": "8e95f7", "b": "4a4fc4",
+		"ids": ["discord"], "names": ["discord"]},
+	"vscode": {"name": "Visual Studio Code", "glyph": "code", "a": "5aaef0", "b": "1d5c9e",
+		"ids": ["visualstudiocode", "vscode", "/code.exe"], "names": ["visual studio code"]},
+	"spotify": {"name": "Spotify", "glyph": "music", "a": "6fdc93", "b": "1f7a45",
+		"ids": ["spotify"], "names": ["spotify"]},
+	"notepad": {"name": "Notepad", "glyph": "edit", "a": "9fd3f0", "b": "3f7fa6",
+		"ids": ["windowsnotepad", "/notepad.exe"], "names": ["notepad"]},
+	"calculator": {"name": "Calculator", "glyph": "calculator", "a": "a9b4c4", "b": "4b5566",
+		"ids": ["windowscalculator", "calculatorapp", "/calc.exe"], "names": ["calculator"]},
+	"settings": {"name": "Windows Settings", "glyph": "settings", "a": "9aa7ba", "b": "3e4859",
+		"ids": ["windows.immersivecontrolpanel", "ms-settings:"], "names": ["windows settings"]},
+	"photos": {"name": "Photos", "glyph": "image", "a": "f59fb6", "b": "a8456e",
+		"ids": ["windows.photos"], "names": ["photos"]},
+	"paint": {"name": "Paint", "glyph": "palette", "a": "f6b37a", "b": "c25a4a",
+		"ids": ["microsoft.paint", "/mspaint.exe"], "names": ["paint"]},
+	"taskmgr": {"name": "Task Manager", "glyph": "cpu", "a": "7fd1d8", "b": "2b6d78",
+		"ids": ["/taskmgr.exe"], "names": ["task manager"]},
+}
+
+
+## Which CUSTOM entry an app matches ("" for none). Claude keeps its own look.
+static func custom_key(it: Dictionary) -> String:
+	if it.has("custom"):
+		return str(it["custom"])
 	var name := str(it.get("name", "")).to_lower().strip_edges()
-	var id := (str(it.get("ref", "")) + "|" + str(it.get("icon_key", ""))).to_lower().replace("\\", "/")
 	if name.contains("claude"):
+		return ""
+	var id := (str(it.get("ref", "")) + "|" + str(it.get("icon_key", "")) + "|").to_lower().replace("\\", "/")
+	for key in CUSTOM:
+		var c: Dictionary = CUSTOM[key]
+		if name in c["names"]:
+			return key
+		for part in c["ids"]:
+			# Paths must match whole file names ("/code.exe" isn't "/vscode.exe").
+			if str(part).ends_with(".exe") and not id.contains(str(part) + "|"):
+				continue
+			if id.contains(str(part)):
+				return key
+	return ""
+
+
+static func custom_enabled(key: String) -> bool:
+	var on: Variant = Settings.get_value("custom_icons")
+	return on is Array and (on as Array).has(key)
+
+
+## [glyph, top colour, bottom colour] when this app shows an Oazy icon, else [].
+static func custom_look(it: Dictionary) -> Array:
+	var key := custom_key(it)
+	if key == "" or not CUSTOM.has(key) or (not it.has("custom") and not custom_enabled(key)):
 		return []
-	if id.contains("microsoft.windows.explorer") or id.ends_with("/explorer.exe") or id.contains("/explorer.exe|") or name == "file explorer":
-		return ["folder", Color("f3c978"), Color("c27a35")]
-	if id.contains("windowsterminal") or id.contains("/wt.exe") or id.contains("/cmd.exe") or id.contains("powershell") or id.contains("/pwsh.exe") \
-			or name in ["terminal", "windows terminal", "command prompt", "windows powershell", "powershell"]:
-		return ["terminal", Color("4a5869"), Color("161c26")]
-	return []
+	var c: Dictionary = CUSTOM[key]
+	return [c["glyph"], Color(str(c["a"])), Color(str(c["b"]))]
 
 
 func _show_plate(a: Color, b: Color) -> void:

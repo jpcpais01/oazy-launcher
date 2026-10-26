@@ -8,8 +8,8 @@ signal middle_clicked(button: TaskbarButton)
 signal context(button: TaskbarButton, at: Vector2)
 signal hover_changed(button: TaskbarButton, on: bool)
 
-const SIZE := 54.0
-const ICON := 34.0
+const SIZE := 42.0
+const ICON := 28.0
 
 var ref := ""
 var item: Dictionary = {}
@@ -79,7 +79,7 @@ func set_state(is_running: bool, is_active: bool) -> void:
 	_dots.queue_redraw()
 	if not _hot:
 		var t := create_tween()
-		t.tween_property(_hover_bg, "modulate:a", 0.55 if active else 0.0, 0.25)
+		t.tween_property(_hover_bg, "modulate:a", 0.0, 0.25)
 
 
 func window_count() -> int:
@@ -92,7 +92,7 @@ func start_launching() -> void:
 	if _launch_tween and _launch_tween.is_valid():
 		_launch_tween.kill()
 	_launch_tween = create_tween().set_loops(6)
-	_launch_tween.tween_property(_icon, "position:y", _icon.position.y - 7.0, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_launch_tween.tween_property(_icon, "position:y", _icon.position.y - 5.0, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_launch_tween.tween_property(_icon, "position:y", (SIZE - ICON) / 2.0 - 2.0, 0.3).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 	_launch_tween.tween_interval(0.25)
 	_launch_tween.finished.connect(stop_launching)
@@ -118,7 +118,7 @@ func _style_hover() -> void:
 	var glow := Catalog.icon_color(str(item.get("icon_key", "")))
 	if glow.a <= 0.0:
 		glow = App.accent
-	var s := Kit.box(Color(glow, 0.16), 16, Color(1, 1, 1, 0.14), 1)
+	var s := Kit.box(Color(glow, 0.16), SIZE / 2.0 - 4.0, Color(1, 1, 1, 0.14), 1)
 	Kit.shadowed(s, Color(glow, 0.32), 14, Vector2.ZERO)
 	_hover_bg.add_theme_stylebox_override("panel", s)
 
@@ -127,18 +127,18 @@ func _draw_dots() -> void:
 	if not running and not launching:
 		return
 	var c := App.accent.lightened(0.25) if active else Color(1, 1, 1, 0.55)
-	var w := 18.0 if active else 6.0
-	var y := SIZE - 4.0
+	var w := 14.0 if active else 5.0
+	var y := SIZE - 3.0
 	var x := SIZE / 2.0
 	var n := mini(window_count(), 3)
 	if active or n <= 1:
-		_dots.draw_line(Vector2(x - w / 2.0, y), Vector2(x + w / 2.0, y), c, 3.0, true)
+		_dots.draw_line(Vector2(x - w / 2.0, y), Vector2(x + w / 2.0, y), c, 2.5, true)
 		if active:
 			_dots.draw_line(Vector2(x - w / 2.0, y), Vector2(x + w / 2.0, y), Color(c, 0.25), 8.0, true)
 	else:
 		for i in n:
-			var cx := x + (float(i) - float(n - 1) / 2.0) * 7.0
-			_dots.draw_circle(Vector2(cx, y), 1.8, c)
+			var cx := x + (float(i) - float(n - 1) / 2.0) * 6.0
+			_dots.draw_circle(Vector2(cx, y), 1.6, c)
 
 
 func _set_hot(on: bool) -> void:
@@ -149,7 +149,7 @@ func _set_hot(on: bool) -> void:
 	if _tween and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_tween.tween_property(_hover_bg, "modulate:a", 1.0 if on else (0.55 if active else 0.0), 0.25)
+	_tween.tween_property(_hover_bg, "modulate:a", 1.0 if on else 0.0, 0.25)
 	_tween.tween_property(_icon, "scale", Vector2.ONE * (1.1 if on else 1.0), 0.3).set_trans(Tween.TRANS_BACK)
 	if on:
 		Sfx.play(&"move", 1.25)

@@ -64,6 +64,7 @@ func _ready() -> void:
 	_swatch_row(look)
 	_light_row(look)
 	_effects_row(look)
+	_custom_icons_rows(look)
 	_toggle_row(look, "Interface sounds", "Soft clicks and chimes as you move around.", "ui_sounds")
 	_slider_row(look, "Sound volume", "volume")
 
@@ -207,6 +208,75 @@ func _toggle_row(list: VBoxContainer, title: String, desc: String, key: String, 
 	)
 	row.add_child(sw)
 	return sw
+
+
+## Oazy's own icons for common apps: All / None, then one chip per app.
+func _custom_icons_rows(list: VBoxContainer) -> void:
+	var row := _row(list, "Oazy app icons", "Swap the stock icons of everyday apps for Oazy-style ones on the taskbar and in Start.")
+	var chips: Array[Button] = []
+	var sync := func() -> void:
+		var on: Array = Settings.get_value("custom_icons")
+		for c in chips:
+			c.set_pressed_no_signal(on.has(str(c.get_meta("key"))))
+	for pair in [["All", true], ["None", false]]:
+		var b := FxButton.make(str(pair[0]), "", FxButton.Style.GHOST, 38)
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var all: bool = pair[1]
+		b.pressed.connect(func() -> void:
+			Settings.set_value("custom_icons", AppIcon.CUSTOM.keys() if all else [])
+			sync.call()
+		)
+		row.add_child(b)
+	var grid := GridContainer.new()
+	grid.name = "CustomIcons"
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_bottom", 18)
+	pad.add_child(grid)
+	list.add_child(pad)
+	for key in AppIcon.CUSTOM:
+		var c: Dictionary = AppIcon.CUSTOM[key]
+		var chip := Button.new()
+		chip.toggle_mode = true
+		chip.set_meta("key", key)
+		chip.custom_minimum_size = Vector2(0, 48)
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.focus_mode = Control.FOCUS_NONE
+		chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		chip.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.03), 14, Color(1, 1, 1, 0.06), 1))
+		chip.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.07), 14, Color(1, 1, 1, 0.12), 1))
+		chip.add_theme_stylebox_override("pressed", Kit.box(Color(App.accent, 0.16), 14, Color(App.accent, 0.55), 1))
+		chip.add_theme_stylebox_override("hover_pressed", Kit.box(Color(App.accent, 0.22), 14, Color(App.accent, 0.7), 1))
+		var inner := Kit.hbox(10)
+		inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		inner.offset_left = 8
+		inner.offset_right = -8
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		chip.add_child(inner)
+		var ic := AppIcon.new()
+		ic.custom_minimum_size = Vector2(30, 30)
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		ic.set_item({"name": c["name"], "kind": "app", "custom": key})
+		inner.add_child(ic)
+		var l := Kit.label(str(c["name"]), 14, 500, App.TEXT)
+		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.clip_text = true
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		inner.add_child(l)
+		chip.toggled.connect(func(on: bool) -> void:
+			var now: Array = (Settings.get_value("custom_icons") as Array).duplicate()
+			if on and not now.has(key):
+				now.append(key)
+			elif not on:
+				now.erase(key)
+			Settings.set_value("custom_icons", now)
+		)
+		grid.add_child(chip)
+		chips.append(chip)
+	sync.call()
 
 
 func _button_row(list: VBoxContainer, title: String, desc: String, label_text: String, icon_name: String, cb: Callable) -> FxButton:

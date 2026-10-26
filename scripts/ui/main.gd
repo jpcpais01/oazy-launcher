@@ -42,7 +42,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	App.set_accent(Color(str(Settings.get_value("accent"))))
-	Shell.setup(self, Shell.wanted(), Taskbar.HEIGHT + Taskbar.MARGIN * 2.0)
+	Shell.setup(self, Shell.wanted(), Taskbar.RESERVE)
 	_setup_window()
 	Shell.sync_metrics()
 
@@ -53,7 +53,7 @@ func _ready() -> void:
 	add_child(desktop)
 	layer = WindowLayer.new()
 	layer.main = self
-	layer.reserved_bottom = Taskbar.HEIGHT + Taskbar.MARGIN * 2.0 + 4.0
+	layer.reserved_bottom = Taskbar.RESERVE + 4.0
 	Shell.layer("apps", {"focus": true, "work": true}).add_child(layer)
 	preview = TaskPreview.new()
 	preview.main = self

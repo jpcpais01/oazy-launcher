@@ -1,15 +1,20 @@
 class_name Taskbar
 extends Control
-## The floating glass taskbar. Left: the Start orb and search. Middle: pinned
-## and running apps, real Windows windows and Oazy's own side by side. Right:
-## updates, sound (quick settings), the weather (forecast), the clock
-## (calendar) and a sliver that shows the desktop.
+## The glass taskbar. Left: the Start orb and search. Middle: pinned and
+## running apps, real Windows windows and Oazy's own side by side, with a
+## liquid "lens" that glides to whichever one is active. Right: updates, sound
+## (quick settings), the weather (forecast), the clock (calendar) and a sliver
+## that shows the desktop.
+## Over the desktop it floats as a capsule; when an app is maximised it melts
+## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
 signal start_pressed
 signal search_pressed
 
-const HEIGHT := 66.0
-const MARGIN := 10.0
+const HEIGHT := 48.0
+const MARGIN := 6.0
+## The strip at the bottom of the screen the taskbar keeps for itself.
+const RESERVE := HEIGHT + MARGIN * 2.0
 
 var main: Node
 var layer: WindowLayer
@@ -38,6 +43,12 @@ var _menu_btn: TaskbarButton
 var _rebuild_queued := false
 var _built_once := false
 var _last_minute := -1
+var _lens: Control
+var _lens_btn: TaskbarButton
+var _lens_x := 0.0
+var _lens_v := 0.0
+var _docked := false
+var _dock_tween: Tween
 
 
 func _ready() -> void:
@@ -50,16 +61,16 @@ func _ready() -> void:
 	mouse_entered.connect(func() -> void: App.pointer_on_bar = true)
 	mouse_exited.connect(func() -> void: App.pointer_on_bar = false)
 
-	_glass = GlassPanel.new(true, 22.0, GlassPanel.TINT_BAR)
+	_glass = GlassPanel.new(true, HEIGHT / 2.0, GlassPanel.TINT_BAR)
 	_glass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# A tight shadow: the strip above the taskbar belongs to apps in shell mode.
-	_glass.set_shadow_strength(0.4, 16, 6.0)
+	_glass.set_shadow_strength(0.4, 14, 5.0)
 	add_child(_glass)
 
-	var row := Kit.hbox(10)
+	var row := Kit.hbox(8)
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.offset_left = 8
-	row.offset_right = -6
+	row.offset_left = 5
+	row.offset_right = -8
 	add_child(row)
 
 	orb = StartOrb.new()
@@ -81,14 +92,14 @@ func _ready() -> void:
 	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_battery)
 
-	var desk := _tray_button(Vector2(44, 44), "Show desktop (Ctrl + Alt + D)")
-	desk.icon = Icons.tex("desktop", 20, Color(1, 1, 1, 0.85))
+	var desk := _tray_button(Vector2(36, 36), "Show desktop (Ctrl + Alt + D)")
+	desk.icon = Icons.tex("desktop", 18, Color(1, 1, 1, 0.85))
 	desk.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desk.pressed.connect(func() -> void: main.show_desktop())
 	row.add_child(desk)
 
-	_sound = _tray_button(Vector2(44, 44), "Sound and quick settings")
-	_sound.icon = Icons.tex("volume", 20, Color(1, 1, 1, 0.85))
+	_sound = _tray_button(Vector2(36, 36), "Sound and quick settings")
+	_sound.icon = Icons.tex("volume", 18, Color(1, 1, 1, 0.85))
 	_sound.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_sound.pressed.connect(func() -> void:
 		if quick:
@@ -102,7 +113,7 @@ func _ready() -> void:
 
 	row.add_child(_weather_chip())
 
-	_clock_btn = _tray_button(Vector2(104, 50), "")
+	_clock_btn = _tray_button(Vector2(88, 40), "")
 	_clock_btn.pressed.connect(func() -> void:
 		if calendar:
 			quick.close()
@@ -117,15 +128,22 @@ func _ready() -> void:
 	clock.offset_right = -6
 	clock.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_clock_btn.add_child(clock)
-	_clock = Kit.label("", 17, 700, App.TEXT, true)
+	_clock = Kit.label("", 15, 700, App.TEXT, true)
 	_clock.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_clock.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clock.add_child(_clock)
-	_date = Kit.label("", 12, 500, App.TEXT_DIM)
+	_date = Kit.label("", 11, 500, App.TEXT_DIM)
 	_date.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_date.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clock.add_child(_date)
 	row.add_child(_desktop_sliver())
+
+	_lens = Control.new()
+	_lens.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_lens.modulate.a = 0.0
+	_lens.draw.connect(_draw_lens)
+	add_child(_lens)
+	App.accent_changed.connect(func(_c: Color) -> void: _lens.queue_redraw())
 
 	# Apps sit dead centre regardless of what's on either side.
 	var center := CenterContainer.new()
@@ -179,15 +197,15 @@ func _timer(wait: float, cb: Callable, auto: bool = false) -> Timer:
 
 func _search_pill() -> Control:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(250, 44)
+	b.custom_minimum_size = Vector2(210, 34)
 	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	b.focus_mode = Control.FOCUS_NONE
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	b.text = "Search apps and games"
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.icon = Icons.tex("search", 18, Color(1, 1, 1, 0.75))
+	b.icon = Icons.tex("search", 16, Color(1, 1, 1, 0.75))
 	b.add_theme_font_override("font", Kit.font(500))
-	b.add_theme_font_size_override("font_size", 14)
+	b.add_theme_font_size_override("font_size", 13)
 	b.add_theme_color_override("font_color", Color(1, 1, 1, 0.62))
 	b.add_theme_color_override("font_hover_color", Color(1, 1, 1, 0.85))
 	b.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.07), 999, Color(1, 1, 1, 0.08), 1, 16, 0))
@@ -199,7 +217,7 @@ func _search_pill() -> Control:
 
 func _desktop_sliver() -> Control:
 	var s := Button.new()
-	s.custom_minimum_size = Vector2(12, 40)
+	s.custom_minimum_size = Vector2(10, 32)
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	s.focus_mode = Control.FOCUS_NONE
 	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -242,6 +260,7 @@ func rebuild() -> void:
 			g["item"]["name"] = Catalog.window_group_name(w)
 	var active_shell := layer.active_window()
 	var keep := {}
+	var lit: TaskbarButton = null
 	for i in order.size():
 		var ref := order[i]
 		var g: Dictionary = groups[ref]
@@ -270,6 +289,8 @@ func rebuild() -> void:
 				if int(w["hwnd"]) == Host.foreground:
 					active = true
 		btn.set_state(running, active)
+		if active:
+			lit = btn
 		keep[ref] = true
 	for ref in _buttons.keys():
 		if not keep.has(ref):
@@ -283,6 +304,8 @@ func rebuild() -> void:
 			t.chain().tween_callback(gone.queue_free)
 	if not _built_once and _apps.get_child_count() > 0:
 		_built_once = true
+	_aim_lens(lit)
+	_set_docked(_any_maximized())
 
 
 func _group(groups: Dictionary, order: Array[String], ref: String) -> Dictionary:
@@ -290,6 +313,91 @@ func _group(groups: Dictionary, order: Array[String], ref: String) -> Dictionary
 		groups[ref] = {"item": Catalog.item(ref), "windows": [], "shell": null}
 		order.append(ref)
 	return groups[ref]
+
+
+# --- Lens and dock -------------------------------------------------------------------
+
+## The lens: one drop of brighter glass behind the active app. It springs from
+## button to button and stretches with its speed, so switching apps feels fluid.
+func _aim_lens(btn: TaskbarButton) -> void:
+	if btn == _lens_btn:
+		return
+	var was := _lens_btn
+	_lens_btn = btn
+	var t := _lens.create_tween()
+	t.tween_property(_lens, "modulate:a", 1.0 if btn else 0.0, 0.22)
+	if btn and was == null:
+		# Appear in place rather than flying in from wherever it last was.
+		_lens_x = -1.0
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	if _lens_btn == null or not is_instance_valid(_lens_btn):
+		set_process(_lens.modulate.a > 0.0)
+		return
+	var r := _lens_btn.get_global_rect()
+	r.position -= get_global_position()
+	var goal := r.get_center().x
+	if _lens_x < 0.0:
+		_lens_x = goal
+		_lens_v = 0.0
+	# A slightly underdamped spring: a hint of wobble, then still.
+	var k := 260.0
+	var c := 24.0
+	_lens_v += ((goal - _lens_x) * k - _lens_v * c) * delta
+	_lens_x += _lens_v * delta
+	var stretch := minf(absf(_lens_v) * 0.035, 26.0)
+	var w := r.size.x + 4.0 + stretch
+	var h := r.size.y - 2.0 - stretch * 0.12
+	_lens.position = Vector2(_lens_x - w / 2.0, r.get_center().y - h / 2.0)
+	_lens.size = Vector2(w, h)
+	_lens.queue_redraw()
+	if absf(goal - _lens_x) < 0.3 and absf(_lens_v) < 1.0:
+		_lens_x = goal
+		set_process(false)
+
+
+func _draw_lens() -> void:
+	var r := Rect2(Vector2.ZERO, _lens.size)
+	var rad := minf(r.size.x, r.size.y) / 2.0 - 2.0
+	var tint := App.accent
+	var body := Kit.box(Color(tint.lightened(0.15), 0.2), rad, Color(1, 1, 1, 0.2), 1)
+	Kit.shadowed(body, Color(tint, 0.38), 12, Vector2.ZERO)
+	_lens.draw_style_box(body, r)
+	# The bright meniscus along the top edge, like light caught in a droplet.
+	var shine := Kit.box(Color(1, 1, 1, 0.13), rad)
+	_lens.draw_style_box(shine, Rect2(r.position + Vector2(5, 2), Vector2(r.size.x - 10.0, r.size.y * 0.42)))
+
+
+func _any_maximized() -> bool:
+	for w in Host.windows:
+		if bool(w.get("max", false)) and not bool(w.get("min", false)):
+			return true
+	return false
+
+
+## Floating capsule <-> full-width shelf. The glass grows out to the screen
+## edges and its bottom corners slide offscreen; the buttons never move.
+func _set_docked(on: bool) -> void:
+	if on == _docked:
+		return
+	_docked = on
+	if _dock_tween and _dock_tween.is_valid():
+		_dock_tween.kill()
+	var m := MARGIN if on else 0.0
+	var rad := HEIGHT / 2.0
+	_dock_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	_dock_tween.tween_property(_glass, "offset_left", -m, 0.4)
+	_dock_tween.tween_property(_glass, "offset_right", m, 0.4)
+	_dock_tween.tween_property(_glass, "offset_top", -m, 0.4)
+	_dock_tween.tween_property(_glass, "offset_bottom", m + (rad if on else 0.0), 0.4)
+	_dock_tween.tween_property(_glass, "radius", 14.0 if on else rad, 0.4)
+	_glass.set_shadow_strength(0.25 if on else 0.4, 10 if on else 14, 0.0 if on else 5.0)
+
+
+func is_docked() -> bool:
+	return _docked
 
 
 ## The part of the screen the taskbar's layer keeps (see Shell).
@@ -448,7 +556,7 @@ func attach_flyouts(q: QuickSettings, c: CalendarFlyout) -> void:
 
 ## The weather chip beside the clock: a colour icon and the temperature.
 func _weather_chip() -> Button:
-	_weather_btn = _tray_button(Vector2(0, 50), "")
+	_weather_btn = _tray_button(Vector2(0, 40), "")
 	_weather_btn.visible = false
 	_weather_btn.pressed.connect(func() -> void:
 		if weather:
@@ -463,10 +571,10 @@ func _weather_chip() -> Button:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_weather_btn.add_child(row)
-	_weather_icon = WeatherIcons.rect("partly", true, 30)
+	_weather_icon = WeatherIcons.rect("partly", true, 24)
 	_weather_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_weather_icon)
-	_weather_temp = Kit.label("", 16, 700, App.TEXT)
+	_weather_temp = Kit.label("", 14, 700, App.TEXT)
 	_weather_temp.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_weather_temp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(_weather_temp)
@@ -486,7 +594,7 @@ func _update_weather() -> void:
 	if now.is_empty():
 		return
 	var code := int(now["code"])
-	_weather_icon.texture = WeatherIcons.tex(Weather.kind_for(code), bool(now["day"]), 30)
+	_weather_icon.texture = WeatherIcons.tex(Weather.kind_for(code), bool(now["day"]), 24)
 	_weather_temp.text = Weather.temp(now["temp"])
 	var tip := Weather.describe(code)
 	if Weather.city() != "":
