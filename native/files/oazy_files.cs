@@ -1420,6 +1420,12 @@ namespace OazyFiles
 					base.WndProc(ref m);
 					if (view != null) try { view.NotifyParentWindowPositionChanged(); } catch { }
 					return;
+				case 0x86: // WM_NCACTIVATE
+					// Activating repaints the caption DWM keeps for the window; -1 skips
+					// that, so no dark title strip shows over the glass.
+					m.LParam = new IntPtr(-1);
+					base.WndProc(ref m);
+					return;
 				case WM_ACTIVATE:
 					base.WndProc(ref m);
 					active = (m.WParam.ToInt64() & 0xFFFF) != 0;
