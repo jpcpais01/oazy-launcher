@@ -15,6 +15,7 @@ const TIPS := [
 	"Tip: Oazy picks its colours from the game you are looking at.",
 ]
 const STEPS := ["Download", "Verify", "Restart"]
+const PROGRESS_WIDTH := 680.0
 
 var _notes_view: Control
 var _progress_view: Control
@@ -24,6 +25,8 @@ var _check: TextureRect
 var _steps: Array[Dictionary] = []
 var _dl_title: Label
 var _dl_stats: Label
+var _stats_row: HBoxContainer
+var _stat_values: Array[Label] = []
 var _tip: Label
 var _dl_buttons: HBoxContainer
 var _tip_index := 0
@@ -69,7 +72,7 @@ func _build_notes() -> Control:
 	left.custom_minimum_size.x = 300
 	view.add_child(left)
 
-	# A little glass orb with the logo floating in it, already part full.
+	# A little glass orb, already part full.
 	var art := Control.new()
 	art.custom_minimum_size = Vector2(170, 170)
 	art.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -80,17 +83,6 @@ func _build_notes() -> Control:
 	orb.mat.set_shader_parameter("waves", 0.7)
 	orb.mat.set_shader_parameter("ripples", 0.6)
 	art.add_child(orb)
-	var logo := TextureRect.new()
-	logo.texture = load("res://assets/icon.png")
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.position = Vector2(55, 55)
-	logo.size = Vector2(60, 60)
-	logo.pivot_offset = Vector2(30, 30)
-	art.add_child(logo)
-	var bob := logo.create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	bob.tween_property(logo, "position:y", 49.0, 1.8)
-	bob.tween_property(logo, "position:y", 55.0, 1.8)
 
 	left.add_child(Kit.spacer(0, 2))
 	left.add_child(Kit.label("UPDATE AVAILABLE", 13, 700, App.accent.lightened(0.35)))
@@ -136,20 +128,44 @@ func _build_notes() -> Control:
 
 
 func _build_progress() -> Control:
-	var view := Kit.vbox(10)
+	var view := Kit.vbox(0)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.alignment = BoxContainer.ALIGNMENT_CENTER
 	view.visible = false
 
+	# Where we are, as a quiet pill: Download, Verify, Restart.
+	var steps_holder := CenterContainer.new()
+	view.add_child(steps_holder)
+	var pill := PanelContainer.new()
+	pill.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.04), 999, Color(1, 1, 1, 0.07), 1, 18, 9))
+	steps_holder.add_child(pill)
+	var steps := Kit.hbox(12)
+	pill.add_child(steps)
+	for i in STEPS.size():
+		if i > 0:
+			var line := ColorRect.new()
+			line.color = Color(1, 1, 1, 0.12)
+			line.custom_minimum_size = Vector2(28, 1)
+			line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			steps.add_child(line)
+		var item := Kit.hbox(7)
+		var dot := Kit.icon_rect("dot", 16, App.TEXT_MUTE)
+		dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		item.add_child(dot)
+		var label := Kit.label(STEPS[i], 14, 700, App.TEXT_MUTE)
+		item.add_child(label)
+		steps.add_child(item)
+		_steps.append({"item": item, "dot": dot, "label": label, "state": -1})
+
 	var orb_holder := CenterContainer.new()
 	view.add_child(orb_holder)
 	var orb_box := Control.new()
-	orb_box.custom_minimum_size = Vector2(380, 380)
+	orb_box.custom_minimum_size = Vector2(340, 340)
 	orb_holder.add_child(orb_box)
-	_orb = UpdateOrb.new(380, 0.6)
+	_orb = UpdateOrb.new(340, 0.62)
 	_orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	orb_box.add_child(_orb)
-	_percent = Kit.label("0%", 58, 800, Color.WHITE, true)
+	_percent = Kit.label("0%", 54, 800, Color.WHITE, true)
 	_percent.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_percent.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_percent.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -157,49 +173,63 @@ func _build_progress() -> Control:
 	_percent.add_theme_constant_override("shadow_offset_y", 3)
 	_percent.add_theme_constant_override("shadow_outline_size", 14)
 	orb_box.add_child(_percent)
-	_check = Kit.icon_rect("check", 88, Color.WHITE)
+	_check = Kit.icon_rect("check", 80, Color.WHITE)
 	_check.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_check.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-	_check.pivot_offset = Vector2(190, 190)
+	_check.pivot_offset = Vector2(170, 170)
 	_check.visible = false
 	orb_box.add_child(_check)
 
-	var steps_holder := CenterContainer.new()
-	view.add_child(steps_holder)
-	var steps := Kit.hbox(14)
-	steps_holder.add_child(steps)
-	for i in STEPS.size():
-		if i > 0:
-			var line := ColorRect.new()
-			line.color = Color(1, 1, 1, 0.12)
-			line.custom_minimum_size = Vector2(46, 2)
-			line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			steps.add_child(line)
-		var item := Kit.hbox(8)
-		var dot := Kit.icon_rect("dot", 18, App.TEXT_MUTE)
-		dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		item.add_child(dot)
-		var label := Kit.label(STEPS[i], 15, 700, App.TEXT_MUTE)
-		item.add_child(label)
-		steps.add_child(item)
-		_steps.append({"item": item, "dot": dot, "label": label, "state": -1})
-
-	view.add_child(Kit.spacer(0, 8))
-	_dl_title = Kit.label("", 28, 800, Color.WHITE, true)
+	_dl_title = Kit.label("", 26, 800, Color.WHITE, true)
 	_dl_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	view.add_child(_dl_title)
-	_dl_stats = Kit.label("", 16, 500, App.TEXT_DIM)
+	view.add_child(Kit.spacer(0, 6))
+	# While downloading: three tidy figures. Otherwise: one line of text.
+	var stats_holder := CenterContainer.new()
+	view.add_child(stats_holder)
+	_stats_row = Kit.hbox(0)
+	stats_holder.add_child(_stats_row)
+	for i in 3:
+		if i > 0:
+			var sep := ColorRect.new()
+			sep.color = Color(1, 1, 1, 0.08)
+			sep.custom_minimum_size = Vector2(1, 30)
+			sep.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			_stats_row.add_child(sep)
+		var cell := Kit.vbox(2)
+		cell.custom_minimum_size.x = 150
+		var value := Kit.label("–", 19, 700, Color.WHITE, true)
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cell.add_child(value)
+		var caption := Kit.label(["DOWNLOADED", "SPEED", "TIME LEFT"][i], 11, 700, App.TEXT_MUTE)
+		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cell.add_child(caption)
+		_stats_row.add_child(cell)
+		_stat_values.append(value)
+	_dl_stats = Kit.label("", 15, 500, App.TEXT_DIM)
 	_dl_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_dl_stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_dl_stats.custom_minimum_size.x = 480
+	_dl_stats.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	view.add_child(_dl_stats)
-	_tip = Kit.label(TIPS[0], 14, 500, App.TEXT_MUTE)
-	_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	view.add_child(_tip)
-	view.add_child(Kit.spacer(0, 8))
+	view.add_child(Kit.spacer(0, 20))
 	_dl_buttons = Kit.hbox(12)
 	_dl_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	view.add_child(_dl_buttons)
+	view.add_child(Kit.spacer(0, 16))
+	_tip = Kit.label(TIPS[0], 13, 500, App.TEXT_MUTE)
+	_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	view.add_child(_tip)
 	return view
+
+
+## Downloading shows the three figures; every other state a line of text.
+func _show_figures(on: bool) -> void:
+	_stats_row.visible = on
+	_dl_stats.visible = not on
+	if on:
+		for v in _stat_values:
+			v.text = "–"
 
 
 ## 0 waiting, 1 active, 2 done.
@@ -255,6 +285,8 @@ func _show_progress_view() -> void:
 	t.tween_property(_progress_view, "modulate:a", 1.0, 0.45).set_delay(0.15)
 	t.tween_property(_orb, "scale", Vector2.ONE, 0.8).set_delay(0.1).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.chain().tween_callback(func() -> void: _notes_view.visible = false)
+	# The card narrows around the progress so it reads as one tidy column.
+	t.chain().tween_property(card, "custom_minimum_size:x", PROGRESS_WIDTH, 0.45).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 
 
 func _on_state(state: StringName) -> void:
@@ -264,6 +296,7 @@ func _on_state(state: StringName) -> void:
 	match state:
 		&"available":
 			if _progress_view.visible:
+				card.custom_minimum_size.x = width
 				_notes_view.visible = true
 				_notes_view.modulate.a = 0.0
 				var t := create_tween().set_parallel(true)
@@ -281,7 +314,7 @@ func _on_state(state: StringName) -> void:
 			_orb.set_look({"waves": 1.0, "error": 0.0, "ripples": 1.0, "swirl": 0.0}, 0.3)
 			_set_steps(0)
 			_dl_title.text = "Downloading Oazy %s" % v
-			_dl_stats.text = "Connecting…"
+			_show_figures(true)
 			_tip.visible = true
 			_set_buttons([["Cancel", "", FxButton.Style.GHOST, func() -> void: Updater.cancel_download()], ["Hide", "", FxButton.Style.PLAIN, close]])
 		&"ready":
@@ -293,7 +326,7 @@ func _on_state(state: StringName) -> void:
 			var fade := create_tween()
 			fade.tween_property(_percent, "modulate:a", 0.0, 0.2)
 			fade.tween_callback(func() -> void: _percent.visible = false)
-			_check.texture = Icons.tex("check", 88, Color.WHITE)
+			_check.texture = Icons.tex("check", 80, Color.WHITE)
 			_check.visible = true
 			_check.scale = Vector2.ONE * 0.3
 			_check.modulate.a = 0.0
@@ -302,6 +335,7 @@ func _on_state(state: StringName) -> void:
 			t.tween_property(_check, "modulate:a", 1.0, 0.3).set_delay(0.15)
 			Sfx.play(&"notify")
 			_dl_title.text = "Oazy %s is ready" % v
+			_show_figures(false)
 			_tip.visible = false
 			if Updater.can_install():
 				_dl_stats.text = "Downloaded and verified. Restart now to finish, it only takes a moment."
@@ -320,6 +354,7 @@ func _on_state(state: StringName) -> void:
 			var spin := create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 			spin.tween_property(_check, "scale", Vector2.ZERO, 0.35)
 			_dl_title.text = "Restarting into Oazy %s…" % v
+			_show_figures(false)
 			_dl_stats.text = "See you in a second."
 			_tip.visible = false
 			_set_buttons([])
@@ -329,18 +364,19 @@ func _on_state(state: StringName) -> void:
 			dismissable = true
 			_percent.visible = false
 			_check.visible = true
-			_check.texture = Icons.tex("alert", 88, App.WARNING)
+			_check.texture = Icons.tex("alert", 80, App.WARNING)
 			_check.scale = Vector2.ONE
 			_check.modulate.a = 1.0
 			_orb.set_look({"error": 1.0, "waves": 0.25, "ripples": 0.15, "swirl": 0.0}, 0.8)
 			_set_steps(-1)
 			_dl_title.text = "That didn't work"
+			_show_figures(false)
 			_dl_stats.text = Updater.error_text
 			_tip.visible = false
 			_set_buttons([["Try again", "refresh", FxButton.Style.PRIMARY, _retry], ["Close", "", FxButton.Style.GHOST, close]])
 
 
-## The screen settles into the same wallpaper and logo the boot screen opens
+## The screen settles into the same wallpaper and orb the boot screen opens
 ## with, so the restart reads as one continuous move.
 func _show_veil(version: String) -> void:
 	if _veil:
@@ -357,7 +393,7 @@ func _show_veil(version: String) -> void:
 
 
 func _retry() -> void:
-	_check.texture = Icons.tex("check", 88, Color.WHITE)
+	_check.texture = Icons.tex("check", 80, Color.WHITE)
 	_orb.snap(0.0)
 	if Updater.latest.is_empty():
 		Updater.check()
@@ -367,16 +403,13 @@ func _retry() -> void:
 
 
 func _on_progress(done: int, total: int, speed: float) -> void:
-	if total > 0 and Updater.state == &"downloading":
+	if Updater.state != &"downloading":
+		return
+	if total > 0:
 		_orb.target = clampf(float(done) / float(total), 0.0, 1.0)
-	var parts := PackedStringArray()
-	parts.append("%s of %s" % [Fmt.bytes(done), Fmt.bytes(total)] if total > 0 else Fmt.bytes(done))
-	if speed > 0.0:
-		parts.append("%s/s" % Fmt.bytes(speed))
-		if total > 0:
-			parts.append("%s left" % Fmt.duration(float(total - done) / speed))
-	if Updater.state == &"downloading":
-		_dl_stats.text = "  ·  ".join(parts)
+	_stat_values[0].text = "%s / %s" % [Fmt.bytes(done), Fmt.bytes(total)] if total > 0 else Fmt.bytes(done)
+	_stat_values[1].text = "%s/s" % Fmt.bytes(speed) if speed > 0.0 else "–"
+	_stat_values[2].text = Fmt.duration(float(total - done) / speed) if speed > 0.0 and total > 0 else "–"
 
 
 func _process(delta: float) -> void:

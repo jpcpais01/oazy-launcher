@@ -11,7 +11,6 @@ signal finished_early
 const MIN_TIME := 0.85
 
 var _orb: UpdateOrb
-var _logo: TextureRect
 var _word: Label
 var _word_font: FontVariation
 var _tag: Label
@@ -27,7 +26,6 @@ func _ready() -> void:
 	var stage := build_stage(self, "Welcome home", -1.0)
 	_mark = stage["mark"]
 	_orb = stage["orb"]
-	_logo = stage["logo"]
 	_word = stage["word"]
 	_word_font = stage["word_font"]
 	_tag = stage["tag"]
@@ -52,8 +50,7 @@ func _ready() -> void:
 
 
 ## The boot stage, shared with the update's restart screen so closing and
-## opening are one scene: wallpaper, the glass orb full of water with the logo
-## floating in it, the wordmark and a tag line. `swirl` > 0 turns the water
+## opening are one scene: wallpaper, the glass orb full of water, the wordmark and a tag line. `swirl` > 0 turns the water
 ## one way (restarting), < 0 the other (starting up).
 static func build_stage(root: Control, tag_text: String, swirl: float) -> Dictionary:
 	var bg := Wallpaper.new()
@@ -84,15 +81,6 @@ static func build_stage(root: Control, tag_text: String, swirl: float) -> Dictio
 	orb.mat.set_shader_parameter("swirl", swirl)
 	orb.mat.set_shader_parameter("waves", 0.4)
 	mark.add_child(orb)
-	var logo := TextureRect.new()
-	logo.texture = load("res://assets/icon.png")
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.position = Vector2(160, 160)
-	logo.size = Vector2(100, 100)
-	logo.pivot_offset = Vector2(50, 50)
-	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mark.add_child(logo)
 
 	var word := Kit.label("OAZY", 46, 800, Color.WHITE, true)
 	var word_font := FontVariation.new()
@@ -105,18 +93,15 @@ static func build_stage(root: Control, tag_text: String, swirl: float) -> Dictio
 	var tag := Kit.label(tag_text, 17, 500, Color(1, 1, 1, 0.66))
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(tag)
-	return {"mark": mark, "orb": orb, "logo": logo, "word": word, "word_font": word_font, "tag": tag}
+	return {"mark": mark, "orb": orb, "word": word, "word_font": word_font, "tag": tag}
 
 
-## The restart played backwards: the orb springs up full, its water turning
-## the opposite way to the restart screen, the logo surfaces and the wordmark
-## draws its letters together. the orb springs up with a shockwave, the logo bobs to the
-## surface and the wordmark draws its letters together.
+## The restart played backwards: the orb springs up full with a shockwave, its
+## water turning the opposite way to the restart screen, and the wordmark draws
+## its letters together.
 func _intro() -> void:
 	_mark.scale = Vector2.ONE * 0.6
 	_mark.modulate.a = 0.0
-	_logo.scale = Vector2.ONE * 0.4
-	_logo.modulate.a = 0.0
 	_word.modulate.a = 0.0
 	_tag.modulate.a = 0.0
 	_status.modulate.a = 0.0
@@ -125,15 +110,10 @@ func _intro() -> void:
 	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_property(_mark, "scale", Vector2.ONE, 0.6)
 	t.tween_property(_mark, "modulate:a", 1.0, 0.25).set_trans(Tween.TRANS_SINE)
-	t.tween_property(_logo, "scale", Vector2.ONE, 0.65).set_delay(0.08)
-	t.tween_property(_logo, "modulate:a", 1.0, 0.3).set_delay(0.08)
 	t.tween_property(_word, "modulate:a", 1.0, 0.45).set_delay(0.15).set_trans(Tween.TRANS_SINE)
 	t.tween_property(_word_font, "spacing_glyph", 14, 0.7).set_delay(0.1).set_trans(Tween.TRANS_EXPO)
 	t.tween_property(_tag, "modulate:a", 1.0, 0.45).set_delay(0.3).set_trans(Tween.TRANS_SINE)
 	t.tween_property(_status, "modulate:a", 1.0, 0.45).set_delay(0.4).set_trans(Tween.TRANS_SINE)
-	var bob := _logo.create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	bob.tween_property(_logo, "position:y", 152.0, 1.4)
-	bob.tween_property(_logo, "position:y", 160.0, 1.4)
 
 
 func _step(text: String, progress: float) -> void:

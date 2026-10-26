@@ -131,6 +131,10 @@ func _logic_tests() -> void:
 	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"cover").has(gd_dir.path_join("cover.jpg")), "own games: plain cover.jpg is art")
 	check(Art.sidecar_art(gd_dir.path_join("my_game.exe"), &"logo").is_empty(), "own games: another game's logo is ignored")
 
+	check(Art.brand_art("Claude Code", &"hero").ends_with("claudecode_hero.webp.bin") and Art.brand_art("Visual Studio Code", &"cover") != "" and Art.brand_art("Discord", &"logo") != "", "art: built-in app art by name")
+	check(Art.decode(FileAccess.get_file_as_bytes(Art.brand_art("Higgsfield", &"cover"))) != null, "art: built-in app art decodes")
+	check(Art.brand_art("Some Random Game", &"cover") == "", "art: no built-in art for unknown names")
+
 	var deduped := Library.dedupe_found([{"name": "Apex Legends", "kind": "game", "source": "ea", "path": "a"}, {"name": "Apex Legends™", "kind": "game", "source": "steam", "path": "b"}])
 	check(deduped.size() == 1 and deduped[0]["source"] == "steam", "discovery: one tile per game, best store wins")
 	check(not Catalog.is_clutter("Debugger Pro", "x") and Catalog.is_clutter("Game Setup", "x") and Catalog.is_clutter("Thing", "C:/Thing/unins000.exe"), "catalog: clutter matches whole words and helper exes")
@@ -505,7 +509,7 @@ func _ui_tests() -> void:
 	check(_menu_has(main.start._menu, "favourites"), "favourites: in Start's menu")
 	main.start._menu.hide()
 	main.start.close()
-	check(main.desktop._favs_glass.visible and main.desktop._favs.get_child_count() > 0, "favourites: on the desktop")
+	check(main.desktop._hero_id != "" and main.desktop._hero_glass.visible, "desktop: the game card shows a game")
 	for m in get_tree().get_nodes_in_group("modal"):
 		m.close()
 	await _wait(0.60)

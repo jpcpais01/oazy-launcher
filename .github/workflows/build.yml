@@ -208,7 +208,7 @@ jobs:
           path: browser-shots
           if-no-files-found: ignore
 
-      - name: Publish screenshots to the ci-browser-shots branch
+      - name: Publish screenshots to a ci-shots/<branch> branch
         if: always() && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main')
         shell: pwsh
         run: |
@@ -219,7 +219,7 @@ jobs:
           git checkout -q -b ci-browser-shots
           git add -A
           git -c user.name="oazy-ci" -c user.email="oazy-ci@users.noreply.github.com" commit -qm "Browser screenshots for ${{ github.sha }}"
-          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-browser-shots
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "ci-browser-shots:refs/heads/ci-shots/${{ github.head_ref || github.ref_name }}"
 
   terminal-selftest:
     name: Oazy Terminal on real ConPTY and WebView2

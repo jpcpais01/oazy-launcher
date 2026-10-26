@@ -1,5 +1,5 @@
 // A liquid glass orb that fills with water as an update downloads: two wave
-// layers for depth, caustics, rising bubbles, a bright meniscus and a curved
+// layers for depth, caustics, a bright meniscus and a curved
 // glass shell. Around it, slow ripples spread over still water, and `pulse`
 // sends one bright shockwave out when the download completes.
 shader_type canvas_item;
@@ -17,12 +17,14 @@ uniform float error : hint_range(0.0, 1.0) = 0.0;
 uniform float ripples : hint_range(0.0, 1.0) = 1.0;
 // Timeline of the completion shockwave, 0..1. Negative means off.
 uniform float pulse = -1.0;
+// How far the vortex has turned, in radians. Integrated on the CPU from swirl
+// each frame (UpdateOrb), so changing swirl changes the speed smoothly instead
+// of jumping the angle (swirl * TIME would leap when swirl moves).
+uniform float spin = 0.0;
+// The Browser's globe: lines of latitude and longitude on the glass, turning.
+uniform float globe : hint_range(0.0, 1.0) = 0.0;
 // Orb radius as a fraction of the rect's half size; the rest is ripples.
 uniform float orb = 0.56;
-
-float hash(float n) {
-	return fract(sin(n * 12.9898) * 43758.5453);
-}
 
 void fragment() {
 	vec2 p = UV * 2.0 - 1.0;
@@ -63,7 +65,7 @@ void fragment() {
 	// Through a curved shell the water bends towards the rim.
 	vec2 wq = q * (0.82 + 0.18 * z);
 	if (sw > 0.0) {
-		float ang = swirl * ((1.0 - qr) * 2.6 + t * 1.4);
+		float ang = swirl * (1.0 - qr) * 2.6 + spin;
 		float cs = cos(ang);
 		float sn = sin(ang);
 		wq = vec2(wq.x * cs - wq.y * sn, wq.x * sn + wq.y * cs);
@@ -87,21 +89,8 @@ void fragment() {
 		+ sin(cq.y * 2.6 - t * 0.9 + sin(cq.x * 1.3 + t * 0.6));
 	c = pow(clamp(1.0 - abs(c) * 0.55, 0.0, 1.0), 6.0);
 	water += vec3(0.85, 1.0, 1.0) * c * (0.16 + 0.2 * sw) * (1.0 - depth * 0.7);
-	// Bubbles rising from the bottom to the surface.
-	float bub = 0.0;
-	for (int i = 0; i < 6; i++) {
-		float fi = float(i);
-		float ph = fract(t * (0.16 + hash(fi + 3.1) * 0.22) + hash(fi));
-		vec2 bp = vec2(mix(-0.6, 0.6, hash(fi + 7.7)) + 0.05 * sin(t * 2.0 + fi * 3.0), mix(1.0, max(level, -1.0), ph));
-		float rad = 0.022 + hash(fi + 1.3) * 0.03;
-		float d = length(wq - bp);
-		float b = 1.0 - smoothstep(rad - aa, rad + aa, d);
-		bub += b * (0.25 + 0.75 * smoothstep(rad * 0.4, rad, d)) * (1.0 - ph * ph);
-	}
-	bub *= smoothstep(0.0, 0.08, progress);
 	col = mix(col, mid * 0.5 + vec3(0.02, 0.04, 0.05), in_back * (1.0 - in_front) * 0.9);
 	col = mix(col, water, in_front);
-	col += vec3(1.0) * bub * 0.3 * in_front;
 	// Meniscus: a bright line along the crest of the front wave.
 	float crest = exp(-pow((wq.y - front) / (aa * 1.5 + 0.01), 2.0));
 	col += mix(wa, vec3(1.0), 0.65) * crest * 0.6 * step(0.001, progress);
@@ -118,6 +107,14 @@ void fragment() {
 	float facing = dot(normalize(p + 0.0001), normalize(vec2(-0.55, -1.0)));
 	col += vec3(1.0) * line * mix(0.12, 0.6, facing * facing);
 	col += wa * sw * 0.18 * (1.0 - qr);
+	if (globe > 0.0) {
+		float lon = (atan(q.x, max(z, 0.001)) + t * 0.3) * 3.0 / 3.14159;
+		float lat = asin(clamp(q.y, -1.0, 1.0)) * 4.0 / 3.14159;
+		float dl = abs(fract(lon + 0.5) - 0.5) / max(fwidth(lon), 0.0001);
+		float dt = abs(fract(lat + 0.5) - 0.5) / max(fwidth(lat), 0.0001);
+		float grid = max(1.0 - smoothstep(0.4, 1.4, dl), 1.0 - smoothstep(0.4, 1.4, dt));
+		col += vec3(1.0) * grid * 0.28 * globe * smoothstep(0.05, 0.35, z);
+	}
 
 	float inside = 1.0 - outside;
 	vec3 rgb = mix(around_rgb, col, inside);

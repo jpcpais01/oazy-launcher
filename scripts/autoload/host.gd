@@ -90,7 +90,7 @@ static func build() -> Dictionary:
 		if not FileAccess.file_exists(csc):
 			continue
 		var out := []
-		var code := OS.execute(csc, ["/nologo", "/optimize+", "/target:winexe", "/r:System.Drawing.dll", "/out:" + exe.replace("/", "\\"), cs.replace("/", "\\")], out, true)
+		var code := OS.execute(csc, ["/nologo", "/optimize+", "/target:winexe", "/r:System.Drawing.dll", "/r:System.Management.dll", "/out:" + exe.replace("/", "\\"), cs.replace("/", "\\")], out, true)
 		if code == 0 and FileAccess.file_exists(exe):
 			for old in DirAccess.get_files_at(dir):
 				if old.begins_with("OazyHost-") and old.ends_with(".exe") and dir.path_join(old) != exe:
@@ -346,8 +346,11 @@ func list_apps(done: Callable) -> void:
 	request(["apps"], done)
 
 
-func stats(done: Callable) -> void:
-	request(["stats"], done)
+## CPU, memory and battery, plus clocks, GPU temperature and load once the
+## sensor thread has a reading (keys are -1 or missing until then). The CPU
+## temperature is only looked for when `cpu_temp` is on.
+func stats(done: Callable, cpu_temp: bool = false) -> void:
+	request(["stats", 1 if cpu_temp else 0], done)
 
 
 ## Shows a live DWM preview of `hwnd` inside `rect` (pixels of the window
