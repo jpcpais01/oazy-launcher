@@ -331,9 +331,10 @@ func stats(done: Callable) -> void:
 
 
 ## Shows a live DWM preview of `hwnd` inside `rect` (pixels of the window
-## `dest`, Oazy's main window when 0). `done` gets the fitted rect.
-func thumb(hwnd: int, rect: Rect2i, done: Callable = Callable(), dest: int = 0) -> void:
-	request(["thumb", hwnd, rect.position.x, rect.position.y, rect.size.x, rect.size.y, 255, dest], done)
+## `dest`, Oazy's main window when 0), at `opacity` (0 hides it). `done`
+## gets the fitted rect. Cheap enough to call every frame while it moves.
+func thumb(hwnd: int, rect: Rect2i, done: Callable = Callable(), dest: int = 0, opacity: int = 255) -> void:
+	request(["thumb", hwnd, rect.position.x, rect.position.y, rect.size.x, rect.size.y, opacity, dest], done)
 
 
 func thumb_clear() -> void:
