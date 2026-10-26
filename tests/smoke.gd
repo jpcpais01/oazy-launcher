@@ -366,6 +366,17 @@ func _ui_tests() -> void:
 	main.taskbar.rebuild()
 	check(main.taskbar.button_for("win:C:/Tools/mystery.exe") == null, "taskbar: closed windows disappear")
 
+	# The pointer moving where no Oazy window hears it lets go of hover.
+	App._unheard_at = Time.get_ticks_msec() - 200
+	App._unheard_frames = 5
+	await _wait(0.1)
+	check(App.pointer_away, "hover: pointer moving elsewhere lets go of hover")
+	var ev := InputEventMouseMotion.new()
+	ev.position = Vector2(5, 5)
+	App._on_window_input(ev)
+	await _wait(0.1)
+	check(not App.pointer_away, "hover: back as soon as an Oazy window hears the pointer")
+
 	# Oazy's own windows.
 	var lib: ShellWindow = main.open_app(&"library")
 	await _wait(0.6)
