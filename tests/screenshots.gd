@@ -174,6 +174,16 @@ func _ready() -> void:
 		await shot("06c-settings-pointers")
 		if sc:
 			(sc as ScrollContainer).scroll_vertical = 0
+	var st := settings.body.get_child(0) as SettingsApp
+	if st:
+		for spec in [["desktop", "06d-settings-desktop"], ["network", "06e-settings-network"], ["updates", "06f-settings-updates"]]:
+			st.open_page(spec[0])
+			await _wait(0.5)
+			await shot(spec[1])
+		st.search("sound")
+		await _wait(0.5)
+		await shot("06g-settings-search")
+		st.open_page("personalise")
 	var work: Rect2 = main.layer.work_rect()
 	lib.set_rect(Rect2(work.position + Vector2(40, 30), Vector2(work.size.x * 0.56, work.size.y * 0.8)))
 	settings.set_rect(Rect2(work.position + Vector2(work.size.x * 0.48, work.size.y * 0.12), Vector2(work.size.x * 0.48, work.size.y * 0.84)))
