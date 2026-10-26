@@ -8,7 +8,7 @@ signal pressed
 
 const SIZE := 40.0
 const CALM := {"swirl": -0.3, "waves": 0.4}
-const STIRRED := {"swirl": -1.0, "waves": 0.9}
+const STIRRED := {"swirl": -0.7, "waves": 0.7}
 
 var open := false: set = set_open
 var _halo: Panel
@@ -65,7 +65,8 @@ func _fade_halo() -> void:
 	t.tween_property(_halo, "modulate:a", 1.0 if (_hot or open) else 0.0, 0.25)
 	if _look:
 		_look.kill()
-	_look = _orb.set_look(STIRRED if (_hot or open) else CALM, 0.6)
+	# A slow, soft ease so the water gathers speed and settles back calmly.
+	_look = _orb.set_look(STIRRED if (_hot or open) else CALM, 1.1, Tween.TRANS_CUBIC, Tween.EASE_OUT)
 
 
 func _gui_input(event: InputEvent) -> void:

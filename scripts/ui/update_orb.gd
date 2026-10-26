@@ -6,12 +6,15 @@ extends ColorRect
 
 const SHADER := preload("res://shaders/update_orb.gdshader")
 const LOOK_DEFAULTS := {"waves": 1.0, "swirl": 0.0, "error": 0.0, "ripples": 1.0, "pulse": -1.0}
+## Radians per second the vortex turns at swirl 1.
+const SPIN_SPEED := 1.4
 
 var mat: ShaderMaterial
 var target := 0.0
 var shown := 0.0
 ## [color_a, color_b] in place of the accent pair (the Browser's sky).
 var colors: Array = []
+var _spin := 0.0
 
 
 func _init(px: float = 400.0, orb_size: float = 0.56) -> void:
@@ -37,6 +40,11 @@ func _process(delta: float) -> void:
 	if absf(shown - target) < 0.0005:
 		shown = target
 	mat.set_shader_parameter("progress", shown)
+	# Integrate the turn so speed changes ease in instead of jumping the angle.
+	var swirl: float = mat.get_shader_parameter("swirl")
+	if swirl != 0.0:
+		_spin = fposmod(_spin + swirl * SPIN_SPEED * minf(delta, 0.1), TAU)
+		mat.set_shader_parameter("spin", _spin)
 
 
 func snap(value: float) -> void:
@@ -46,8 +54,8 @@ func snap(value: float) -> void:
 
 
 ## Tweens shader looks: waves, swirl, error, ripples.
-func set_look(look: Dictionary, time: float = 0.6) -> Tween:
-	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+func set_look(look: Dictionary, time: float = 0.6, trans := Tween.TRANS_SINE, ease_type := Tween.EASE_IN_OUT) -> Tween:
+	var t := create_tween().set_parallel(true).set_trans(trans).set_ease(ease_type)
 	for key in look:
 		var from: float = mat.get_shader_parameter(key)
 		t.tween_method(func(v: float) -> void: mat.set_shader_parameter(key, v), from, float(look[key]), time)
