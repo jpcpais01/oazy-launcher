@@ -4,7 +4,7 @@ extends Control
 ## running apps, real Windows windows and Oazy's own side by side, with a
 ## liquid "lens" that glides to whichever one is active. Right: updates,
 ## the network (Wi-Fi and cable), sound (quick settings), the weather, the
-## clock (calendar) and a sliver that shows the desktop.
+## clock (calendar) and an invisible corner that shows the desktop.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
@@ -212,52 +212,34 @@ func _search_pill() -> Control:
 	return b
 
 
-## The pill at the far right that shows the desktop. What you see is a slim
-## pill at the end of the bar, but the button behind it runs out to the screen's
-## bottom-right corner, so throwing the mouse into the corner and clicking works.
+## The show desktop corner. Nothing is drawn: a button runs from the end of the
+## bar out to the screen's bottom-right corner, so throwing the mouse into the
+## corner and clicking shows the desktop.
 func _desktop_sliver() -> Control:
-	var pill := Panel.new()
-	pill.custom_minimum_size = Vector2(18, 34)
-	pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# A faint line, like the end of the bar, so it can be found.
-	var line := Kit.box(Color(0, 0, 0, 0), 9)
-	line.border_color = Color(1, 1, 1, 0.14)
-	line.border_width_left = 1
-	var hover := Kit.box(Color(1, 1, 1, 0.16), 9, Color(1, 1, 1, 0.2), 1)
-	var down := Kit.box(Color(1, 1, 1, 0.24), 9)
-	pill.add_theme_stylebox_override("panel", line)
+	# Keeps the corner's share of the bar; the button is placed from it.
+	var spot := Control.new()
+	spot.custom_minimum_size = Vector2(18, 34)
+	spot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	spot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var s := Button.new()
 	s.flat = true
 	s.focus_mode = Control.FOCUS_NONE
-	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	s.tooltip_text = "Show desktop (Ctrl + Alt + D)"
 	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
 		s.add_theme_stylebox_override(st, StyleBoxEmpty.new())
-	var restyle := func() -> void:
-		var box := line
-		if s.button_pressed or (s.is_hovered() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
-			box = down
-		elif s.is_hovered():
-			box = hover
-		pill.add_theme_stylebox_override("panel", box)
-	s.mouse_entered.connect(restyle)
-	s.mouse_exited.connect(func() -> void: pill.add_theme_stylebox_override("panel", line))
-	s.button_down.connect(func() -> void: pill.add_theme_stylebox_override("panel", down))
-	s.button_up.connect(restyle)
 	s.pressed.connect(func() -> void: main.show_desktop())
 	add_child(s)
 	_desk_hit = s
-	# Wherever the pill lands, the button covers it and everything to the
-	# right of it and below the top of the bar, down to the screen's corner.
+	# The button covers the spot and everything to the right of it and below
+	# the top of the bar, down to the screen's corner.
 	var place := func() -> void:
-		var x := pill.get_global_rect().position.x - get_global_rect().position.x - 4.0
+		var x := spot.get_global_rect().position.x - get_global_rect().position.x - 4.0
 		s.position = Vector2(x, 0)
 		s.size = Vector2(size.x + MARGIN - x, size.y + MARGIN)
-	pill.item_rect_changed.connect(place)
+	spot.item_rect_changed.connect(place)
 	resized.connect(place)
-	return pill
+	return spot
 
 
 # --- Groups -------------------------------------------------------------------------
