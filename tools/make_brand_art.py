@@ -4,17 +4,20 @@
 The .bin suffix keeps Godot from importing them, so they ship as small webp
 files inside the exe (see include_filter in export_presets.cfg).
 
-Original art in each app's brand colours: soft light blooms, a liquid-glass
-sheen and fine grain, with the name set in Outfit. No third-party logos.
-Run: python3 tools/make_brand_art.py  (needs Pillow, numpy, fonttools, brotli)
+Each app's mark and name centred over its brand colours: soft light blooms, a
+liquid-glass orb and fine grain, with the name set in Outfit. Marks come from
+tools/brand_src/marks (CC0: @iconify-json/logos, simple-icons). A finished
+cover in tools/brand_src/<slug>_cover.png is used as it is.
+Run: python3 tools/make_brand_art.py  (needs Pillow, numpy, fonttools, brotli, cairosvg)
 """
-import math, os, random, sys, tempfile, zlib
+import io, math, os, random, sys, tempfile, zlib
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from fontTools.ttLib import TTFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "assets", "brand")
+SRC = os.path.join(ROOT, "tools", "brand_src")
 TMP = os.path.join(tempfile.gettempdir(), "oazy-brand-fonts")
 
 # slug: (title, tagline, base, [bloom colours], ink)
@@ -37,6 +40,8 @@ APPS = {
     "slack": ("Slack", "Where work happens", "#2a0c2b", ["#36c5f0", "#2eb67d", "#ecb22e", "#e01e5a"], "#ffffff"),
     "flow": ("Flow", "Make images and video", "#0b0a1f", ["#7c6cff", "#265cd6", "#c58bff", "#2fd3e6"], "#f4f2ff"),
     "epicgameslauncher": ("Epic Games", "Play, free every week", "#0e0e10", ["#5a5a66", "#d8d8e2", "#2a2a34", "#0078f2"], "#ffffff"),
+    "arcgisearth": ("ArcGIS Earth", "The whole planet, in 3D", "#02050c", ["#1f6fd1", "#0b2a5c", "#5fb4ff", "#0a1630"], "#ffffff"),
+    "microsoftteams": ("Teams", "Meet, chat, call", "#14123a", ["#5b5fc7", "#7b83eb", "#4b53bc", "#c5c9ff"], "#ffffff"),
 }
 
 
@@ -115,34 +120,164 @@ def fit(text, weight, width, start):
     return font(weight, size)
 
 
+def noise3(p, seed, octaves=6):
+    """Fractal value noise at points p (N x 3), roughly 0..1."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros(len(p), np.float32)
+    amp, total, freq = 1.0, 0.0, 2.2
+    for _ in range(octaves):
+        n = 64
+        grid = rng.random((n, n, n)).astype(np.float32)
+        q = p * freq + rng.random(3) * 10 + 100
+        i = np.floor(q).astype(int)
+        f = q - i
+        f = f * f * (3 - 2 * f)
+        acc = 0
+        for dx in (0, 1):
+            for dy in (0, 1):
+                for dz in (0, 1):
+                    wgt = (f[:, 0] if dx else 1 - f[:, 0]) * (f[:, 1] if dy else 1 - f[:, 1]) * (f[:, 2] if dz else 1 - f[:, 2])
+                    acc = acc + wgt * grid[(i[:, 0] + dx) % n, (i[:, 1] + dy) % n, (i[:, 2] + dz) % n]
+        out += acc * amp
+        total += amp
+        amp *= 0.5
+        freq *= 2.1
+    return out / total
+
+
+def earth(w, h, cx, cy, r, seed):
+    """Earth from space: oceans, land, clouds, a thin blue atmosphere and stars."""
+    rnd = np.random.default_rng(seed)
+    img = np.zeros((h, w, 3), np.float32) + rgb("#02040a")
+    # Stars, a few brighter than the rest.
+    n = w * h // 900
+    sx, sy = rnd.integers(0, w, n), rnd.integers(0, h, n)
+    img[sy, sx] += (rnd.random(n) ** 6 * 0.9 + 0.08)[:, None] * rgb("#dfe9ff")
+    y, x = np.mgrid[0:h, 0:w].astype(np.float32)
+    nx, ny = (x - cx) / r, (y - cy) / r
+    d2 = nx * nx + ny * ny
+    on = d2 < 1
+    nz = np.sqrt(np.clip(1 - d2, 0, 1))
+    # Rotate the globe a little so the view isn't straight down the equator.
+    t = 0.45
+    px, py, pz = nx[on], ny[on] * math.cos(t) - nz[on] * math.sin(t), ny[on] * math.sin(t) + nz[on] * math.cos(t)
+    pts = np.stack([px, py, pz], 1)
+    land = noise3(pts, seed, 7)
+    cloud = noise3(pts * np.array([1.2, 3.0, 1.2]), seed + 1, 6)
+    lat = np.abs(py)
+    sea = rgb("#0a3a7a") * 0.6 + rgb("#1560b8") * 0.4
+    col = np.tile(sea, (len(pts), 1)) * (0.75 + 0.5 * land[:, None])
+    is_land = land > 0.535
+    green = rgb("#3d6b2f") * (1 - lat[:, None]) + rgb("#9a8a5c") * lat[:, None] * 0.6 + rgb("#3d6b2f") * lat[:, None] * 0.4
+    dry = rgb("#b59a6a")
+    mix = np.clip((noise3(pts * 2.0, seed + 2, 4) - 0.45) * 4, 0, 1)[:, None]
+    lc = green * (1 - mix) + dry * mix
+    col[is_land] = lc[is_land] * (0.8 + 0.4 * land[is_land, None])
+    ice = lat + (land - 0.5) * 0.3 > 0.975
+    col[ice] = rgb("#e8f0f8")
+    c = np.clip((cloud - 0.54) * 4.0, 0, 1)[:, None]
+    col = col * (1 - c * 0.85) + rgb("#f4f8ff") * c * 0.85
+    # Sunlight from the upper left, with a soft terminator.
+    light = np.array([-0.55, -0.45, 0.70])
+    light /= np.linalg.norm(light)
+    lam = nx[on] * light[0] + ny[on] * light[1] + nz[on] * light[2]
+    shade = np.clip(lam * 1.3 + 0.12, 0.02, 1.0)[:, None]
+    spec = (np.clip(lam, 0, 1) ** 40 * 0.35 * (~is_land))[:, None]
+    col = col * shade + spec
+    # Edge haze inside the globe.
+    col = col * (1 - (1 - nz[on])[:, None] ** 3 * 0.5) + rgb("#5fb4ff") * ((1 - nz[on]) ** 4 * 0.45 * np.clip(lam + 0.4, 0, 1))[:, None]
+    img[on] = col
+    # Atmosphere glow just outside the rim, brightest on the lit side.
+    dd = np.sqrt(d2)
+    lit = np.clip((nx * light[0] + ny * light[1]) / np.maximum(dd, 1e-3) * 0.8 + 0.5, 0.05, 1)
+    glow = np.exp(-((dd - 1.0) / 0.018) ** 2) * 0.55 + np.exp(-np.clip(dd - 1.0, 0, None) / 0.06) * (dd > 1) * 0.25
+    img += (glow * lit)[..., None] * rgb("#6cc0ff")
+    img += rnd.normal(0, 0.008, (h, w, 1)).astype(np.float32)
+    return Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
+
+
+SCENES = {
+    # slug: (cover globe, hero globe), each (cx, cy, r) as fractions of the width
+    "arcgisearth": ((0.5, 1.0, 0.64), (0.74, 0.50 * 1100 / 2560, 0.23)),
+}
+
+
+def mark(slug, size):
+    """The app's mark, about size px on its long side, or None."""
+    path = os.path.join(SRC, "marks", slug + ".svg")
+    if not os.path.exists(path):
+        return None
+    import cairosvg
+    png = cairosvg.svg2png(url=path, output_width=size * 4)
+    im = Image.open(io.BytesIO(png)).convert("RGBA")
+    im = im.crop(im.getbbox())
+    k = size / max(im.size)
+    return im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS)
+
+
+def paste_shadowed(im, layer, xy, blur):
+    """Pastes layer at xy over a soft drop shadow."""
+    shadow = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    a = layer.getchannel("A").point(lambda v: v * 0.55)
+    shadow.paste(Image.new("RGBA", layer.size, (0, 0, 0, 255)), (xy[0], xy[1] + blur // 2), a)
+    im.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(blur)))
+    im.alpha_composite(layer, xy)
+
+
+def centred_text(im, cy, text, fnt, ink, blur):
+    b = fnt.getbbox(text)
+    x = (im.width - (b[2] - b[0])) // 2 - b[0]
+    text_shadow(im, (x, cy - (b[3] - b[1]) // 2 - b[1]), text, fnt, ink, blur)
+
+
 def cover(slug, app):
+    given = os.path.join(SRC, slug + "_cover.png")
+    if os.path.exists(given):
+        im = Image.open(given).convert("RGB").resize((600, 900), Image.LANCZOS)
+        return im.filter(ImageFilter.UnsharpMask(2, 60, 2))
     title, tag, base, blooms, ink = app
     w, h = 600, 900
-    im = background(w, h, base, blooms, zlib.crc32(slug.encode()) & 0xFFFF, (0.58, 0.33), orb=0.26).convert("RGBA")
-    # Bottom scrim so the name always reads.
-    scrim = np.linspace(0, 1, h)[:, None] ** 2.2 * 0.55
-    shade = Image.fromarray((np.repeat(scrim, w, 1) * 255).astype(np.uint8), "L")
-    im.alpha_composite(Image.merge("RGBA", [Image.new("L", (w, h), 0)] * 3 + [shade]))
-    tf = fit(title, "title", w - 96, 104)
-    tb = tf.getbbox(title)
-    ty = h - 150 - (tb[3] - tb[1])
-    text_shadow(im, (48, ty - tb[1]), title, tf, ink, 10)
-    ImageDraw.Draw(im).text((50, h - 120), tag, font=font("tag", 30), fill=ink + "c0")
+    if slug in SCENES:
+        gx, gy, gr = SCENES[slug][0]
+        im = earth(w, h, gx * w, gy * w, gr * w, zlib.crc32(slug.encode()) & 0xFFFF).convert("RGBA")
+        centred_text(im, int(h * 0.11), title, fit(title, "title", w - 100, 92), ink, 12)
+        centred_text(im, int(h * 0.11) + 72, tag, font("tag", 28), ink + "b0", 6)
+        return im.convert("RGB")
+    im = background(w, h, base, blooms, zlib.crc32(slug.encode()) & 0xFFFF, (0.5, 0.40), orb=0.25).convert("RGBA")
+    m = mark(slug, 230)
+    if m:
+        paste_shadowed(im, m, ((w - m.width) // 2, int(h * 0.40) - m.height // 2), 18)
+        centred_text(im, int(h * 0.72), title, fit(title, "title", w - 120, 88), ink, 10)
+    else:
+        # No mark: the name is the mark.
+        centred_text(im, int(h * 0.40), title, fit(title, "title", w - 120, 120), ink, 12)
+        centred_text(im, int(h * 0.72), tag, font("tag", 30), ink + "c0", 6)
     return im.convert("RGB")
 
 
 def hero(slug, app):
     _, _, base, blooms, _ = app
+    if slug in SCENES:
+        gx, gy, gr = SCENES[slug][1]
+        return earth(2560, 1100, gx * 2560, gy * 2560, gr * 2560, zlib.crc32(slug.encode()) & 0xFFFF)
     return background(2560, 1100, base, blooms, (zlib.crc32(slug.encode()) & 0xFFFF) + 7, (0.72, 0.5), orb=0.13)
 
 
 def logo(slug, app):
+    """Mark and name side by side on transparency."""
     title, _, _, _, ink = app
     f = font("title", 200)
     b = f.getbbox(title)
+    tw, th = b[2] - b[0], b[3] - b[1]
+    m = mark(slug, int(th * 1.25))
+    gap = int(th * 0.35) if m else 0
+    mw, mh = (m.width, m.height) if m else (0, 0)
     pad = 40
-    im = Image.new("RGBA", (b[2] - b[0] + pad * 2, b[3] - b[1] + pad * 2), (0, 0, 0, 0))
-    text_shadow(im, (pad - b[0], pad - b[1]), title, f, ink, 14)
+    h = max(th, mh)
+    im = Image.new("RGBA", (mw + gap + tw + pad * 2, h + pad * 2), (0, 0, 0, 0))
+    if m:
+        paste_shadowed(im, m, (pad, pad + (h - mh) // 2), 14)
+    text_shadow(im, (pad + mw + gap - b[0], pad + (h - th) // 2 - b[1]), title, f, ink, 14)
     return im
 
 

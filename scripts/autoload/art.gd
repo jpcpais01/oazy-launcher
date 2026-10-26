@@ -78,7 +78,11 @@ const BRAND_ALIASES := {
 	"epicgames": "epicgameslauncher", "higgsfieldai": "higgsfield", "steamclient": "steam",
 	"googleflow": "flow", "flowbygoogle": "flow", "zoomworkplace": "zoom", "teams": "microsoftteams",
 	"bravebrowser": "brave", "vlcmediaplayer": "vlc", "chatgptdesktop": "chatgpt",
+	"msteams": "microsoftteams", "teamsforworkorschool": "microsoftteams", "teamsclassic": "microsoftteams",
+	"spotifymusic": "spotify", "slacktechnologies": "slack",
 }
+## Edition words after an app's name that don't change its art.
+const BRAND_TAILS := ["desktop", "beta", "preview", "canary", "ptb", "new", "classic"]
 ## File names (any image extension) that count as art when placed next to the exe.
 const SIDECAR_NAMES := {
 	&"cover": ["cover", "capsule", "boxart", "poster"],
@@ -170,6 +174,10 @@ func _start(id: String, kind: StringName) -> void:
 	if custom != "":
 		candidates.append(custom)
 	candidates.append_array(sidecar_art(str(e.get("path", "")), kind, str(e.get("name", ""))))
+	# Oazy's own art for the app beats anything fetched (and cached) from the web.
+	var brand := brand_art(str(e.get("name", "")), kind)
+	if brand != "":
+		candidates.append(brand)
 	for ext in ["jpg", "png", "webp"]:
 		candidates.append(_cache_file(id, kind, ext))
 	var steam_id := str(e.get("steam_appid", ""))
@@ -647,11 +655,19 @@ static func epic_ids(e: Dictionary) -> Dictionary:
 
 
 ## Oazy's own artwork for popular apps (tools/make_brand_art.py), by name.
+## "WhatsApp Beta" and "Discord PTB" are still WhatsApp and Discord.
 static func brand_art(name: String, kind: StringName) -> String:
-	var slug := norm_title(name)
-	slug = BRAND_ALIASES.get(slug, slug)
-	var path := "%s/%s_%s.webp.bin" % [BRAND_DIR, slug, kind]
-	return path if slug != "" and FileAccess.file_exists(path) else ""
+	var full := norm_title(name)
+	var slugs := [full]
+	for tail in BRAND_TAILS:
+		if full.length() > tail.length() + 2 and full.ends_with(tail):
+			slugs.append(full.trim_suffix(tail))
+	for slug: String in slugs:
+		slug = BRAND_ALIASES.get(slug, slug)
+		var path := "%s/%s_%s.webp.bin" % [BRAND_DIR, slug, kind]
+		if slug != "" and FileAccess.file_exists(path):
+			return path
+	return ""
 
 
 ## Images dropped next to a game's exe: cover.png, banner.jpg, logo.png, or the

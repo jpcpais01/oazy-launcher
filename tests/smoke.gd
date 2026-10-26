@@ -134,6 +134,7 @@ func _logic_tests() -> void:
 	check(Art.brand_art("Claude Code", &"hero").ends_with("claudecode_hero.webp.bin") and Art.brand_art("Visual Studio Code", &"cover") != "" and Art.brand_art("Discord", &"logo") != "", "art: built-in app art by name")
 	check(Art.decode(FileAccess.get_file_as_bytes(Art.brand_art("Higgsfield", &"cover"))) != null, "art: built-in app art decodes")
 	check(Art.brand_art("Some Random Game", &"cover") == "", "art: no built-in art for unknown names")
+	check(Art.brand_art("WhatsApp Beta", &"cover").ends_with("whatsapp_cover.webp.bin") and Art.brand_art("Discord PTB", &"hero").ends_with("discord_hero.webp.bin") and Art.brand_art("Microsoft Teams", &"cover") != "" and Art.brand_art("Teams", &"logo") != "" and Art.brand_art("ArcGIS Earth", &"hero") != "", "art: built-in art for app editions, Teams and ArcGIS Earth")
 
 	check(Art.share_image("<head><meta property=\"og:image\" content=\"https://cdn.x/og.jpg\"></head>", "https://x.com") == "https://cdn.x/og.jpg", "art: share image from og:image")
 	check(Art.share_image("<meta content='/img/s.png' name='twitter:image'>", "https://x.com/app") == "https://x.com/img/s.png", "art: share image, relative and reversed attributes")
