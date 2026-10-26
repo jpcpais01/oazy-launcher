@@ -44,6 +44,9 @@ var _by_id := {}
 var _items: Array[Dictionary] = []
 var _candidates: Array = []
 var _items_dirty := true
+## Library entries by normalised name, for canonical().
+var _lib_names := {}
+var _tidy_queued := false
 
 
 func _ready() -> void:
@@ -52,12 +55,15 @@ func _ready() -> void:
 		_load_cache()
 	Host.status_changed.connect(_on_host_status)
 	apps_changed.connect(_forget_items)
+	apps_changed.connect(_queue_tidy)
 	Library.changed.connect(_forget_items)
+	Library.changed.connect(_queue_tidy)
 	Library.entry_changed.connect(func(_id: String) -> void: _forget_items())
 
 
 func _forget_items() -> void:
 	_items_dirty = true
+	_lib_names.clear()
 
 
 # --- Installed apps -------------------------------------------------------------------
@@ -146,6 +152,125 @@ func find_app_by_name(name: String) -> Dictionary:
 	return {}
 
 
+# --- One thing, one ref ---------------------------------------------------------------------
+# A game you have in the Library can also be a Start shortcut, a running
+# window or an app you added. Wherever it turns up it is its library entry,
+# so it has one icon, one favourite, one pin and one menu.
+
+## The ref everything else should use for `ref`: an installed app or a
+## program that's in your Library (added from Start, or the same name / exe as
+## an entry) becomes that entry; anything else stays as it is.
+func canonical(ref: String) -> String:
+	var id := ""
+	if ref.begins_with("app:"):
+		var app_id := ref.substr(4)
+		id = library_entry_for_app(app_id)
+		if id == "":
+			var a := find_app(app_id)
+			if not a.is_empty():
+				id = library_entry_named(str(a["name"]))
+	elif ref.begins_with("win:"):
+		id = library_entry_for_exe(ref.substr(4))
+	return "lib:" + id if id != "" else ref
+
+
+## The library entry called `name` (ignoring case, symbols and ™), or "".
+func library_entry_named(name: String) -> String:
+	if _lib_names.is_empty():
+		for e in Library.entries:
+			var key := Art.norm_title(str(e["name"]))
+			# Games win over apps, the first one found over later ones.
+			if key != "" and (not _lib_names.has(key) or (e["kind"] == "game" and Library.get_entry(_lib_names[key])["kind"] != "game")):
+				_lib_names[key] = str(e["id"])
+		_lib_names[""] = ""
+	return str(_lib_names.get(Art.norm_title(name), ""))
+
+
+## The library entry an exe belongs to (its own path, or inside a store
+## game's folder), or "".
+func library_entry_for_exe(exe: String) -> String:
+	exe = exe.replace("\\", "/").to_lower()
+	var file := exe.get_file()
+	if not file.ends_with(".exe") or file in SHELLS:
+		return ""
+	for e in Library.entries:
+		var path := str(e["path"]).replace("\\", "/").to_lower()
+		if path == "" or path.contains("://") or path.get_file() in SHELLS:
+			continue
+		if path == exe or (e["source"] != "custom" and exe.begins_with(path.trim_suffix("/") + "/")):
+			return str(e["id"])
+		if path.get_file() == file:
+			return str(e["id"])
+	return ""
+
+
+## The installed app a library entry stands for (added from Start, or the
+## Start shortcut with its name), or {}.
+func app_for_entry(id: String) -> Dictionary:
+	var e := Library.get_entry(id)
+	if e.is_empty():
+		return {}
+	var a := find_app(str(e.get("app_id", "")))
+	if a.is_empty():
+		a = find_app_by_norm_name(str(e["name"]))
+	return a
+
+
+func find_app_by_norm_name(name: String) -> Dictionary:
+	var n := Art.norm_title(name)
+	if n == "":
+		return {}
+	for a in apps:
+		if Art.norm_title(str(a["name"])) == n:
+			return a
+	return {}
+
+
+## `list` with every ref made canonical, without repeats or missing entries.
+func _canonical_list(list: Array) -> Array:
+	var out: Array = []
+	for r in list:
+		var ref := canonical(str(r))
+		if out.has(ref) or (ref.begins_with("lib:") and not Library.has_entry(ref.substr(4))):
+			continue
+		out.append(ref)
+	return out
+
+
+func _queue_tidy() -> void:
+	if not _tidy_queued:
+		_tidy_queued = true
+		_tidy.call_deferred()
+
+
+## Rewrites saved pins, favourites and recents to canonical refs, so a game
+## favourited as its Start shortcut (or from the taskbar while it ran) is the
+## same favourite as the Library's heart.
+func _tidy() -> void:
+	_tidy_queued = false
+	var pins_now: Array = Settings.get_value("pins")
+	var pins_new := _canonical_list(pins_now)
+	if pins_new != pins_now:
+		Settings.set_value("pins", pins_new)
+		pins_changed.emit()
+	var recent_now: Array = Settings.get_value("recent_apps")
+	var recent_new := _canonical_list(recent_now)
+	if recent_new != recent_now:
+		Settings.set_value("recent_apps", recent_new)
+	var favs_now: Array = Settings.get_value("favorites")
+	var favs_new := _canonical_list(favs_now)
+	var hearts := false
+	for r in favs_now:
+		# A favourite that turned out to be a library entry wears its heart.
+		var ref := canonical(str(r))
+		if ref != str(r) and ref.begins_with("lib:") and Library.has_entry(ref.substr(4)) and not bool(Library.get_entry(ref.substr(4))["favorite"]):
+			Library.update_entry(ref.substr(4), {"favorite": true})
+			hearts = true
+	if favs_new != favs_now or hearts:
+		Settings.set_value("favorites", favs_new)
+		favorites_changed.emit()
+
+
 # --- Items --------------------------------------------------------------------------------
 
 ## Describes a ref: {ref, name, kind (oazy|app|game|libapp|window), glyph,
@@ -232,6 +357,7 @@ func launch_app(id: String) -> bool:
 
 
 func note_recent(ref: String) -> void:
+	ref = canonical(ref)
 	var list: Array = Settings.get_value("recent_apps").duplicate()
 	list.erase(ref)
 	list.push_front(ref)
@@ -240,7 +366,7 @@ func note_recent(ref: String) -> void:
 
 func recent_apps() -> Array[String]:
 	var out: Array[String] = []
-	for r in Settings.get_value("recent_apps"):
+	for r in _canonical_list(Settings.get_value("recent_apps")):
 		var ref := str(r)
 		if ref.begins_with("app:") and not apps_loaded:
 			out.append(ref)
@@ -263,15 +389,10 @@ func _build_items() -> void:
 	var list: Array[Dictionary] = []
 	for ref in OAZY_APPS.keys():
 		list.append(item(ref))
-	var games := {}
-	for e in Library.entries:
-		if e["kind"] == "game":
-			games[Art.norm_title(str(e["name"]))] = true
-	var in_library := library_app_ids()
 	for a in apps:
-		# A game's Start shortcut would duplicate its library tile, and an app
-		# in the library shows as its library entry.
-		if games.has(Art.norm_title(str(a["name"]))) or in_library.has(str(a["id"]).to_lower()):
+		# Anything in the library (a game's Start shortcut, an app you added)
+		# shows as its library entry instead.
+		if canonical("app:" + str(a["id"])).begins_with("lib:"):
 			continue
 		list.append(item("app:" + str(a["id"])))
 	for e in Library.entries:
@@ -346,12 +467,7 @@ static func match_score(name: String, needle: String) -> int:
 
 ## Which item a running window belongs to (so it groups with its pin).
 func ref_for_window(w: Dictionary) -> String:
-	var ref := _window_ref(w)
-	if ref.begins_with("app:"):
-		var entry := library_entry_for_app(ref.substr(4))
-		if entry != "":
-			return "lib:" + entry
-	return ref
+	return canonical(_window_ref(w))
 
 
 func _window_ref(w: Dictionary) -> String:
@@ -375,18 +491,14 @@ func _window_ref(w: Dictionary) -> String:
 	var exe := str(w.get("exe", "")).replace("\\", "/")
 	var file := exe.get_file().to_lower()
 	var title := str(w.get("title", "")).to_lower()
-	for e in Library.entries:
-		var path := str(e["path"]).replace("\\", "/").to_lower()
-		if path == "" or path.contains("://"):
-			continue
-		if path.get_file() in SHELLS:
-			if file in SHELLS and title.contains(str(e["name"]).to_lower().get_slice(" ", 0)):
+	if file in SHELLS:
+		for e in Library.entries:
+			var path := str(e["path"]).replace("\\", "/").to_lower()
+			if path.get_file() in SHELLS and title.contains(str(e["name"]).to_lower().get_slice(" ", 0)):
 				return "lib:" + str(e["id"])
-			continue
-		if path == exe.to_lower() or (e["source"] != "custom" and exe.to_lower().begins_with(path.trim_suffix("/") + "/")):
-			return "lib:" + str(e["id"])
-		if path.get_file() == file and file.ends_with(".exe"):
-			return "lib:" + str(e["id"])
+	var entry := library_entry_for_exe(exe)
+	if entry != "":
+		return "lib:" + entry
 	if file != "" and file != "applicationframehost.exe":
 		for a in apps:
 			var id := str(a["id"]).replace("\\", "/").to_lower()
@@ -448,20 +560,17 @@ func window_group_name(w: Dictionary) -> String:
 
 func pins() -> Array[String]:
 	var out: Array[String] = []
-	for p in Settings.get_value("pins"):
-		var ref := str(p)
-		if ref.begins_with("lib:") and not Library.has_entry(ref.substr(4)):
-			continue
-		out.append(ref)
+	out.assign(_canonical_list(Settings.get_value("pins")))
 	return out
 
 
 func is_pinned(ref: String) -> bool:
-	return pins().has(ref)
+	return pins().has(canonical(ref))
 
 
 func set_pinned(ref: String, on: bool) -> void:
-	var list: Array = Settings.get_value("pins").duplicate()
+	ref = canonical(ref)
+	var list: Array = _canonical_list(Settings.get_value("pins"))
 	if on and not list.has(ref):
 		list.append(ref)
 	elif not on:
@@ -471,7 +580,8 @@ func set_pinned(ref: String, on: bool) -> void:
 
 
 func move_pin(ref: String, to_index: int) -> void:
-	var list: Array = Settings.get_value("pins").duplicate()
+	ref = canonical(ref)
+	var list: Array = _canonical_list(Settings.get_value("pins"))
 	if not list.has(ref):
 		return
 	list.erase(ref)
@@ -563,16 +673,6 @@ func _pin_flow() -> void:
 # taskbar), so its pins, favourites and recents move over with it, and back
 # again if it leaves.
 
-## Start ids of the apps already in the library, lowercase.
-func library_app_ids() -> Dictionary:
-	var out := {}
-	for e in Library.entries:
-		var id := str(e.get("app_id", ""))
-		if id != "":
-			out[id.to_lower()] = str(e["id"])
-	return out
-
-
 ## The library entry an installed app became, or "".
 func library_entry_for_app(id: String) -> String:
 	var l := id.to_lower()
@@ -583,8 +683,10 @@ func library_entry_for_app(id: String) -> String:
 
 
 func can_add_to_library(ref: String) -> bool:
+	if canonical(ref) != ref:
+		return false
 	if ref.begins_with("app:"):
-		return library_entry_for_app(ref.substr(4)) == ""
+		return true
 	if ref.begins_with("win:"):
 		var exe := ref.substr(4)
 		return exe.to_lower().ends_with(".exe") and FileAccess.file_exists(exe)
@@ -605,56 +707,51 @@ func app_entry_fields(id: String) -> Dictionary:
 ## Adds an installed app (or a running program) to the library and returns
 ## the entry id ("" if it can't be added).
 func add_to_library(ref: String) -> String:
+	var have := canonical(ref)
+	if have.begins_with("lib:"):
+		return have.substr(4)
 	var fields := {}
+	var fav := is_favorite(ref)
 	if ref.begins_with("app:"):
-		var have := library_entry_for_app(ref.substr(4))
-		if have != "":
-			return have
 		fields = app_entry_fields(ref.substr(4))
 	elif can_add_to_library(ref):
 		fields = Library.infer_from_path(ref.substr(4).replace("\\", "/"))
 	else:
 		return ""
 	var id := Library.add_entry(fields)
-	_move_ref(ref, "lib:" + id)
+	_move_ref(ref, "lib:" + id, fav)
 	return id
 
 
-## Call before an entry leaves the library: an installed app takes its pins
-## and favourites back, anything else just loses them.
-func forget_entry(id: String) -> void:
-	var app_id := str(Library.get_entry(id).get("app_id", ""))
-	if app_id != "" and not find_app(app_id).is_empty():
-		_move_ref("lib:" + id, "app:" + app_id)
-	else:
-		set_pinned("lib:" + id, false)
+## Takes an entry out of the library. The installed app it stood for (added
+## from Start, or the Start shortcut with its name) takes its pins,
+## favourites and recents back; anything else loses them.
+func remove_from_library(id: String) -> void:
+	var from := "lib:" + id
+	var app := app_for_entry(id)
+	var fav := is_favorite(from)
+	Library.remove_entry(id)
+	if not app.is_empty():
+		_move_ref(from, "app:" + str(app["id"]), fav)
 
 
-func _move_ref(from: String, to: String) -> void:
-	var pins_list: Array = Settings.get_value("pins").duplicate()
-	var at := pins_list.find(from)
-	if at >= 0:
-		pins_list[at] = to
-		Settings.set_value("pins", pins_list)
-		pins_changed.emit()
-	var recent: Array = Settings.get_value("recent_apps").duplicate()
-	at = recent.find(from)
-	if at >= 0:
-		recent[at] = to
-		Settings.set_value("recent_apps", recent)
-	if is_favorite(from):
-		var favs: Array = Settings.get_value("favorites").duplicate()
-		at = favs.find(from)
-		if at >= 0:
-			favs[at] = to
-		else:
-			favs.append(to)
-		Settings.set_value("favorites", favs)
-		if to.begins_with("lib:"):
-			var eid := to.substr(4)
-			if not bool(Library.get_entry(eid).get("favorite", false)):
-				Library.toggle_favorite(eid)
-		favorites_changed.emit()
+func _move_ref(from: String, to: String, favorite: bool) -> void:
+	for key in ["pins", "recent_apps", "favorites"]:
+		var list: Array = Settings.get_value(key).duplicate()
+		var at := list.find(from)
+		if key == "favorites" and not favorite:
+			list.erase(from)
+		elif at >= 0:
+			list[at] = to
+		elif key == "favorites":
+			list.append(to)
+		Settings.set_value(key, _canonical_list(list))
+	if favorite and to.begins_with("lib:"):
+		var eid := to.substr(4)
+		if Library.has_entry(eid) and not bool(Library.get_entry(eid)["favorite"]):
+			Library.update_entry(eid, {"favorite": true})
+	pins_changed.emit()
+	favorites_changed.emit()
 
 
 # --- Favourites ---------------------------------------------------------------------------
@@ -663,19 +760,22 @@ func _move_ref(from: String, to: String) -> void:
 # Settings list, which also remembers the order they were added in.
 
 func can_favorite(ref: String) -> bool:
+	ref = canonical(ref)
 	return ref.begins_with("lib:") or ref.begins_with("app:") or OAZY_APPS.has(ref) or (ref.begins_with("win:") and ref.length() > 4)
 
 
 func is_favorite(ref: String) -> bool:
+	ref = canonical(ref)
 	if ref.begins_with("lib:"):
 		return bool(Library.get_entry(ref.substr(4)).get("favorite", false))
 	return Settings.get_value("favorites").has(ref)
 
 
 func set_favorite(ref: String, on: bool) -> void:
+	ref = canonical(ref)
 	if not can_favorite(ref):
 		return
-	var list: Array = Settings.get_value("favorites").duplicate()
+	var list: Array = _canonical_list(Settings.get_value("favorites"))
 	list.erase(ref)
 	if on:
 		list.append(ref)
@@ -697,7 +797,7 @@ func toggle_favorite(ref: String) -> bool:
 ## the list existed come last).
 func favorites() -> Array[String]:
 	var out: Array[String] = []
-	for r in Settings.get_value("favorites"):
+	for r in _canonical_list(Settings.get_value("favorites")):
 		var ref := str(r)
 		if ref.begins_with("lib:"):
 			if not is_favorite(ref):

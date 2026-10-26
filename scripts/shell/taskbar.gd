@@ -61,6 +61,7 @@ var _lens_v := 0.0
 var _docked := false
 var _dock_tween: Tween
 var _desk_hit: Button
+var _start_hit: CornerHit
 
 
 func _ready() -> void:
@@ -89,6 +90,7 @@ func _ready() -> void:
 	orb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	orb.pressed.connect(func() -> void: start_pressed.emit())
 	row.add_child(orb)
+	_start_corner()
 	row.add_child(_search_pill())
 	row.add_child(Kit.spacer(0, 0, true))
 
@@ -247,6 +249,40 @@ func _desktop_sliver() -> Control:
 	spot.item_rect_changed.connect(place)
 	resized.connect(place)
 	return spot
+
+
+## An invisible button for a screen corner. It leaves a hole where a real
+## control sits, so that control keeps its own hover and clicks.
+class CornerHit extends Button:
+	var hole := Rect2()
+
+	func _init() -> void:
+		flat = true
+		focus_mode = Control.FOCUS_NONE
+		for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+			add_theme_stylebox_override(st, StyleBoxEmpty.new())
+
+	func _has_point(point: Vector2) -> bool:
+		return Rect2(Vector2.ZERO, size).has_point(point) and not hole.has_point(point)
+
+
+## The Start corner, like the show desktop one on the right: throwing the mouse
+## into the screen's bottom-left corner and clicking opens Start. The button
+## covers the orb's end of the bar out to the corner, minus the orb itself.
+func _start_corner() -> void:
+	var s := CornerHit.new()
+	s.tooltip_text = "Start (Ctrl + Alt + O)"
+	s.pressed.connect(func() -> void: start_pressed.emit())
+	add_child(s)
+	_start_hit = s
+	var place := func() -> void:
+		var orb_r := orb.get_global_rect()
+		var w := orb_r.end.x - get_global_rect().position.x + MARGIN
+		s.position = Vector2(-MARGIN, 0)
+		s.size = Vector2(w, size.y + MARGIN)
+		s.hole = Rect2(orb_r.position - s.get_global_rect().position, orb_r.size)
+	orb.item_rect_changed.connect(place)
+	resized.connect(place)
 
 
 # --- Groups -------------------------------------------------------------------------
@@ -566,6 +602,8 @@ func shell_shape() -> Array[Rect2]:
 	var shape: Array[Rect2] = [_glass.shadow_rect()]
 	if _desk_hit:
 		shape.append(_desk_hit.get_global_rect())
+	if _start_hit:
+		shape.append(_start_hit.get_global_rect())
 	return shape
 
 
@@ -646,14 +684,13 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 	var running := btn.window_count() > 0
 	if btn.ref.begins_with("oazy:") and not Catalog.is_own_window_app(btn.ref):
 		_menu.add_icon_item(Icons.tex("window", 18), "Open", 0)
+	elif str(btn.item.get("kind", "")) == "game":
+		# A game runs once: Play while it's closed, nothing to add while it runs.
+		if not running:
+			_menu.add_icon_item(Icons.tex("play", 18), "Play", 0)
 	else:
 		_menu.add_icon_item(Icons.tex("plus" if running else "play", 18), "New window" if running else "Open", 0)
-	if btn.ref.begins_with("lib:"):
-		_menu.add_icon_item(Icons.tex("info", 18), "Details", 4)
-	main.add_favorite_item(_menu, btn.ref, 5)
-	var pinned := Catalog.is_pinned(btn.ref)
-	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 1)
-	main.add_library_item(_menu, btn.ref, 6)
+	main.add_ref_actions(_menu, btn.ref, false)
 	if running:
 		_menu.add_separator()
 		_menu.add_icon_item(Icons.tex("close", 18, App.DANGER.lightened(0.2)), "Close all windows" if btn.window_count() > 1 else "Close window", 2)
@@ -674,19 +711,13 @@ func _on_menu(id: int) -> void:
 				main.focus_shell_window(btn.shell_window)
 			else:
 				_launch(btn)
-		1:
-			Catalog.set_pinned(btn.ref, not Catalog.is_pinned(btn.ref))
 		2:
 			for w in btn.windows:
 				Host.close_window(int(w["hwnd"]))
 			if btn.shell_window:
 				btn.shell_window.close()
-		4:
-			main.focus_entry(btn.ref.substr(4))
-		5:
-			main.toggle_favorite(btn.ref)
-		6:
-			main.toggle_library(btn.ref)
+		_:
+			main.run_ref_action(btn.ref, id)
 
 
 # --- Tray ----------------------------------------------------------------------------------

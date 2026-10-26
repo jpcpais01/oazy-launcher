@@ -14,6 +14,7 @@ const DEFAULTS := {
 	"alt_tab": true,
 	"cpu_temp": false,
 	"favorites": [],
+	"fav_icon_size": "medium",
 	"custom_icons": ["explorer", "terminal", "claude", "whatsapp"],
 	## Default custom icons already offered, so new defaults reach old installs once.
 	"custom_icons_offered": [],

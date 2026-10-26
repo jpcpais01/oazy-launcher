@@ -45,6 +45,7 @@ var _swatches: Array[Button] = []
 var _effects := {}
 var _lights := {}
 var _units := {}
+var _fav_sizes := {}
 var _hotkey_status: Label
 var _pointer_status: Label
 var _pointer_cards: Array[PointerCard] = []
@@ -172,6 +173,8 @@ func _on_setting(key: String, value: Variant) -> void:
 			_sync_effects()
 		"accent":
 			_sync_swatches()
+		"fav_icon_size":
+			_select(_fav_sizes, str(value))
 
 
 # --- Sidebar ---------------------------------------------------------------------------
@@ -579,6 +582,9 @@ func _build_personalise() -> void:
 	var you := _group("personalise", "Pointer and icons")
 	_pointer_rows(you)
 	_custom_icons_rows(you)
+	_chips_row(you, "Favourite icon size", "How big your favourites are on the desktop.", [["small", "Small"], ["medium", "Medium"], ["large", "Large"]], _fav_sizes,
+		func(v: String) -> void: Settings.set_value("fav_icon_size", v), "favourites favorites desktop icons big small large")
+	_select(_fav_sizes, str(Settings.get_value("fav_icon_size")))
 
 	var sound := _group("personalise", "Sound")
 	_toggle_row(sound, "Interface sounds", "Soft clicks and chimes as you move around.", "ui_sounds", Callable(), "audio sfx click chime mute")

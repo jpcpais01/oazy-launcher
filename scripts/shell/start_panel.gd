@@ -720,33 +720,20 @@ func _show_menu(ref: String, at: Vector2) -> void:
 		return
 	_menu_ref = ref
 	_menu.clear()
-	_menu.add_icon_item(Icons.tex("play", 18), "Open", 0)
-	main.add_favorite_item(_menu, ref, 3)
-	var pinned := Catalog.is_pinned(ref)
-	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 1)
-	if ref.begins_with("lib:"):
-		_menu.add_icon_item(Icons.tex("info", 18), "Details", 2)
-	main.add_library_item(_menu, ref, 4)
+	main.add_ref_actions(_menu, ref)
 	_menu.reset_size()
 	_menu.position = Vector2i(at)
 	Shell.popup(_menu)
 
 
 func _on_menu(id: int) -> void:
-	match id:
-		0:
-			_launch(_menu_ref)
-		1:
-			Catalog.set_pinned(_menu_ref, not Catalog.is_pinned(_menu_ref))
-		2:
-			close()
-			main.focus_entry(_menu_ref.substr(4))
-		3:
-			main.toggle_favorite(_menu_ref)
-		4:
-			if _menu_ref.begins_with("lib:"):
-				close()
-			main.toggle_library(_menu_ref)
+	if id == main.ACT_OPEN:
+		_launch(_menu_ref)
+		return
+	# Details, Edit and Remove open over Start, so it steps aside for them.
+	if id in [main.ACT_DETAILS, main.ACT_EDIT, main.ACT_FOLDER] or (id == main.ACT_LIBRARY and _menu_ref.begins_with("lib:")):
+		close()
+	main.run_ref_action(_menu_ref, id)
 
 
 func _open_power(btn: Control) -> void:

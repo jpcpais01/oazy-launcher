@@ -11,7 +11,12 @@ const RECENT_MAX := 5
 const RECENT_GAP := 14.0
 const FAV_COLS := 6
 const FAV_MAX := 12
-const FAV_TILE := Vector2(100, 104)
+## Favourite tile sizes (setting fav_icon_size): tile, icon, label size, gap.
+const FAV_SIZES := {
+	"small": {"tile": Vector2(84, 88), "icon": 44, "font": 12, "gap": 7},
+	"medium": {"tile": Vector2(100, 104), "icon": 56, "font": 13, "gap": 9},
+	"large": {"tile": Vector2(124, 130), "icon": 74, "font": 14, "gap": 10},
+}
 ## How far the desktop eases back while Start is open.
 const DIM_SCALE := 0.97
 const CLOCK := preload("res://shaders/clock.gdshader")
@@ -93,6 +98,8 @@ func _ready() -> void:
 		elif key == "effects":
 			_sync_clock_fx()
 			_drift()
+		elif key == "fav_icon_size":
+			_fill_favorites()
 	)
 	App.accent_changed.connect(func(_c: Color) -> void: _sync_clock_fx())
 	resized.connect(_layout)
@@ -451,11 +458,17 @@ func _fill_favorites() -> void:
 	_layout()
 
 
+static func fav_spec() -> Dictionary:
+	return FAV_SIZES.get(str(Settings.get_value("fav_icon_size")), FAV_SIZES["medium"])
+
+
 func _fav_tile(it: Dictionary) -> Control:
 	var ref := str(it.get("ref", ""))
+	var spec := fav_spec()
+	var tile: Vector2 = spec["tile"]
 	var b := Button.new()
-	b.custom_minimum_size = FAV_TILE
-	b.pivot_offset = FAV_TILE / 2.0
+	b.custom_minimum_size = tile
+	b.pivot_offset = tile / 2.0
 	b.focus_mode = Control.FOCUS_NONE
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	b.tooltip_text = str(it["name"]) if ref != "" else "Right-click any app or game and choose Add to favourites"
@@ -463,7 +476,7 @@ func _fav_tile(it: Dictionary) -> Control:
 	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.07), 18, Color(1, 1, 1, 0.1), 1))
 	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.12), 18, Color(1, 1, 1, 0.12), 1))
 	b.add_theme_stylebox_override("hover_pressed", Kit.box(Color(1, 1, 1, 0.12), 18, Color(1, 1, 1, 0.12), 1))
-	var c := Kit.vbox(9)
+	var c := Kit.vbox(int(spec["gap"]))
 	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	c.alignment = BoxContainer.ALIGNMENT_CENTER
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -472,22 +485,22 @@ func _fav_tile(it: Dictionary) -> Control:
 	if ref == "":
 		ic = Panel.new()
 		ic.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.05), 16, Color(1, 1, 1, 0.22), 1))
-		var plus := Kit.icon_rect("plus", 24, Color(1, 1, 1, 0.7))
+		var plus := Kit.icon_rect("plus", int(spec["icon"]) * 3 / 7, Color(1, 1, 1, 0.7))
 		plus.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 		plus.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		ic.add_child(plus)
 	else:
 		ic = AppIcon.new()
 		(ic as AppIcon).set_item(it)
-	ic.custom_minimum_size = Vector2(56, 56)
+	ic.custom_minimum_size = Vector2.ONE * float(spec["icon"])
 	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	c.add_child(ic)
-	var l := Kit.label(str(it["name"]), 13, 600, Color(1, 1, 1, 0.9 if ref != "" else 0.6))
+	var l := Kit.label(str(it["name"]), int(spec["font"]), 600, Color(1, 1, 1, 0.9 if ref != "" else 0.6))
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.clip_text = true
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	l.custom_minimum_size.x = FAV_TILE.x - 10.0
+	l.custom_minimum_size.x = tile.x - 10.0
 	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_shadow(l, 3)
@@ -717,7 +730,8 @@ func _layout() -> void:
 	inner.size = Vector2(ins.x, 50.0)
 	_system.position = Vector2(LEFT, _date_row.position.y + 50.0)
 	var room := hero_x - LEFT - 48.0
-	_favs.columns = clampi(floori((room + 4.0) / (FAV_TILE.x + 4.0)), 2, FAV_COLS)
+	var tile_w: float = (fav_spec()["tile"] as Vector2).x
+	_favs.columns = clampi(floori((room + 4.0) / (tile_w + 4.0)), 2, FAV_COLS + 2)
 	_favs_title.position = Vector2(LEFT + 4.0, _recent_title.position.y)
 	_favs.position = Vector2(LEFT - 10.0, _recent.position.y - 6.0)
 	_favs.size = _favs.get_combined_minimum_size()

@@ -188,12 +188,12 @@ func _logic_tests() -> void:
 	var chrome := Catalog.add_to_library("app:Chrome")
 	check(chrome != "" and Library.get_entry(chrome)["kind"] == "app", "library apps: added as an app")
 	check(Catalog.add_to_library("app:Chrome") == chrome and not Catalog.can_add_to_library("app:Chrome"), "library apps: added once")
-	check(Catalog.is_pinned("lib:" + chrome) and not Catalog.is_pinned("app:Chrome"), "library apps: pin moves to the entry")
+	check(Catalog.is_pinned("lib:" + chrome) and Settings.get_value("pins").has("lib:" + chrome) and not Settings.get_value("pins").has("app:Chrome"), "library apps: pin moves to the entry")
+	check(Catalog.canonical("app:Chrome") == "lib:" + chrome and Catalog.is_pinned("app:Chrome"), "one ref: the Start app is its library entry")
 	check(Catalog.ref_for_window({"exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "aumid": "Chrome"}) == "lib:" + chrome, "library apps: windows group with the entry")
 	check(FindAppsDialog.candidates().size() == before - 1, "library apps: Find apps skips what's in the library")
 	check(not Catalog.all_items().any(func(it: Dictionary) -> bool: return it["ref"] == "app:Chrome"), "library apps: no duplicate in All apps")
-	Catalog.forget_entry(chrome)
-	Library.remove_entry(chrome)
+	Catalog.remove_from_library(chrome)
 	check(Catalog.is_pinned("app:Chrome") and Catalog.can_add_to_library("app:Chrome"), "library apps: pin goes back on removal")
 
 	# Oazy Browser: an Oazy app whose windows are real ones.
@@ -295,6 +295,20 @@ func _logic_tests() -> void:
 	check(not Catalog.is_favorite(lib_ref) and not Catalog.favorites().has(lib_ref), "favourites: follow the library's heart")
 	Catalog.set_favorite("app:Chrome", true)
 
+	# One thing, one ref: a game's Start shortcut, or its window, is the game.
+	Catalog.set_mock_apps(_mock_apps() + [{"name": "Smoke Game™", "id": "C:/Games/Smoke Launcher.exe"}])
+	var game_ref := "lib:" + str(Library.entries[0]["id"])
+	check(Catalog.canonical("app:C:/Games/Smoke Launcher.exe") == game_ref, "one ref: a game's Start shortcut is the game")
+	check(Catalog.canonical("win:C:/Games/smoke.exe") == game_ref and Catalog.ref_for_window({"exe": "C:\\Games\\smoke.exe"}) == game_ref, "one ref: a game's window is the game")
+	check(not Catalog.all_items().any(func(it: Dictionary) -> bool: return it["ref"] == "app:C:/Games/Smoke Launcher.exe"), "one ref: no Start duplicate of a game")
+	Catalog.set_favorite(game_ref, false)
+	Settings.set_value("favorites", ["app:C:/Games/Smoke Launcher.exe", "app:Chrome"])
+	Catalog._tidy()
+	check(Settings.get_value("favorites") == [game_ref, "app:Chrome"] and bool(Library.get_entry(game_ref.substr(4))["favorite"]), "one ref: an old Start-shortcut favourite becomes the game's heart")
+	Catalog.set_favorite("win:C:/Games/smoke.exe", true)
+	check(Catalog.favorites().count(game_ref) == 1 and Catalog.is_favorite("app:C:/Games/Smoke Launcher.exe"), "one ref: favourited anywhere, one favourite")
+	Catalog.set_mock_apps(_mock_apps())
+
 	# Weather: codes, units and reading the forecast offline.
 	check(Weather.kind_for(0) == "clear" and Weather.kind_for(2) == "partly" and Weather.kind_for(63) == "rain" and Weather.kind_for(81) == "rain", "weather: codes to icons")
 	check(Weather.kind_for(73) == "snow" and Weather.kind_for(96) == "storm" and Weather.kind_for(45) == "fog", "weather: more codes")
@@ -382,6 +396,15 @@ func _ui_tests() -> void:
 		{"hwnd": 102, "title": "Docs - Google Chrome", "exe": "C:/Program Files/Google/Chrome/Application/chrome.exe", "aumid": "Chrome", "name": "Google Chrome"},
 		{"hwnd": 103, "title": "Mystery", "exe": "C:/Tools/mystery.exe"},
 	], 101)
+	# Both bottom corners of the screen are click targets, and the orb keeps its own.
+	var vp := main.get_viewport().get_visible_rect().size
+	var tb: Taskbar = main.taskbar
+	var corner_l := tb._start_hit.get_global_rect()
+	var corner_r := tb._desk_hit.get_global_rect()
+	check(corner_l.has_point(Vector2(0.5, vp.y - 0.5)), "taskbar: bottom-left corner opens Start")
+	check(corner_r.has_point(Vector2(vp.x - 0.5, vp.y - 0.5)), "taskbar: bottom-right corner shows the desktop")
+	var orb_c := tb.orb.get_global_rect().get_center()
+	check(not tb._start_hit._has_point(orb_c - corner_l.position), "taskbar: the orb keeps its own clicks")
 	main.taskbar.rebuild()
 	var chrome: TaskbarButton = main.taskbar.button_for("app:Chrome")
 	check(chrome != null and chrome.window_count() == 2, "taskbar: groups windows under their pin")
@@ -463,6 +486,12 @@ func _ui_tests() -> void:
 	st.search("")
 	check(st.page_visible("desktop") and not st.page_visible("personalise"), "settings: clearing search goes back to the page")
 	st.open_page("personalise")
+	var favs := main.desktop.get("_favs") as GridContainer
+	for size_id in ["large", "small", "medium"]:
+		Settings.set_value("fav_icon_size", size_id)
+		await _wait(0.1)
+		var tile := favs.get_child(0) as Control
+		check(tile.custom_minimum_size == Desktop.FAV_SIZES[size_id]["tile"] and favs.position.x >= 0.0, "desktop: %s favourite icons" % size_id)
 	settings.toggle_maximize()
 	await _wait(0.5)
 	check(settings.maximized and main.layer.work_rect().grow(1.0).encloses(settings.get_rect()), "windows: maximise fills the work area")

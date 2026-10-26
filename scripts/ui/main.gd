@@ -26,7 +26,6 @@ var loaded := false
 var _chrome: Control
 var _max_btn: FxButton
 var _menu: PopupMenu
-var _menu_id := ""
 var _menu_ref := ""
 var _desk_menu: PopupMenu
 var _grips: Array[Control] = []
@@ -467,8 +466,7 @@ func confirm_remove(id: String) -> void:
 	d.confirm_text = "Remove"
 	d.danger = true
 	d.on_confirm = func() -> void:
-		Catalog.forget_entry(id)
-		Library.remove_entry(id)
+		Catalog.remove_from_library(id)
 		Art.forget(id)
 		App.toast("Removed %s" % e["name"])
 	overlay_layer.add_child(d)
@@ -589,24 +587,18 @@ func _add_claude_code(fields: Dictionary) -> void:
 # --- Context menus -------------------------------------------------------------------------
 
 func show_entry_menu(id: String, at: Vector2) -> void:
-	var e := Library.get_entry(id)
-	if e.is_empty():
+	show_ref_menu("lib:" + id, at)
+
+
+## The right-click menu for anything you can open: a game, an app, one of
+## Oazy's own. Same actions, same order, same words everywhere.
+func show_ref_menu(ref: String, at: Vector2) -> void:
+	ref = Catalog.canonical(ref)
+	if ref.begins_with("lib:") and not Library.has_entry(ref.substr(4)):
 		return
-	_menu_id = id
-	_menu_ref = ""
+	_menu_ref = ref
 	_menu.clear()
-	var is_game: bool = e["kind"] == "game"
-	_menu.add_icon_item(Icons.tex("play", 18), "Play" if is_game else "Open", 0)
-	add_favorite_item(_menu, "lib:" + id, 1)
-	var pinned := Catalog.is_pinned("lib:" + id)
-	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 5)
-	_menu.add_separator()
-	_menu.add_icon_item(Icons.tex("edit", 18), "Edit details", 2)
-	var path := str(e["path"])
-	if path != "" and not path.contains("://") and (FileAccess.file_exists(path) or DirAccess.dir_exists_absolute(path)):
-		_menu.add_icon_item(Icons.tex("folder", 18), "Show in folder", 3)
-	_menu.add_separator()
-	_menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from Library", 4)
+	add_ref_actions(_menu, ref)
 	popup_menu(_menu, at)
 	Sfx.play(&"open")
 
@@ -626,70 +618,74 @@ func popup_menu(menu: PopupMenu, at: Vector2) -> void:
 
 
 func _on_menu(item: int) -> void:
-	if item >= 10:
-		var ref := _menu_ref
-		match item:
-			10:
-				Catalog.launch(ref)
-			11:
-				toggle_favorite(ref)
-			12:
-				Catalog.set_pinned(ref, not Catalog.is_pinned(ref))
-			13:
-				toggle_library(ref)
-		return
-	var id := _menu_id
-	var e := Library.get_entry(id)
-	if e.is_empty():
-		return
-	match item:
-		0:
-			launch(id)
-		1:
-			toggle_favorite("lib:" + id)
-		2:
-			open_edit(id)
-		3:
-			OS.shell_show_in_file_manager(str(e["path"]))
-		4:
-			confirm_remove(id)
-		5:
-			Catalog.set_pinned("lib:" + id, not Catalog.is_pinned("lib:" + id))
+	run_ref_action(_menu_ref, item)
 
 
-## The menu for anything else you can open (installed apps, Oazy's apps).
-func show_ref_menu(ref: String, at: Vector2) -> void:
-	if ref.begins_with("lib:"):
-		show_entry_menu(ref.substr(4), at)
-		return
-	_menu_id = ""
-	_menu_ref = ref
-	_menu.clear()
-	_menu.add_icon_item(Icons.tex("play", 18), "Open", 10)
-	add_favorite_item(_menu, ref, 11)
+# One set of actions for every menu (here, Start's and the taskbar's), so
+# a game offers the same things wherever you right-click it. Callers can add
+# their own items around them with ids below ACT_OPEN.
+const ACT_OPEN := 100
+const ACT_DETAILS := 101
+const ACT_FAVORITE := 102
+const ACT_PIN := 103
+const ACT_EDIT := 104
+const ACT_FOLDER := 105
+const ACT_LIBRARY := 106
+
+
+## Adds the shared actions for `ref` to `menu`: Play/Open, Details, favourite,
+## pin, then the Library's own (Edit, Show in folder, Add to / Remove from).
+## `with_open` false leaves Open to the caller (the taskbar's New window).
+static func add_ref_actions(menu: PopupMenu, ref: String, with_open: bool = true) -> void:
+	ref = Catalog.canonical(ref)
+	var e := Library.get_entry(ref.substr(4)) if ref.begins_with("lib:") else {}
+	if with_open:
+		menu.add_icon_item(Icons.tex("play", 18), "Play" if str(e.get("kind", "")) == "game" else "Open", ACT_OPEN)
+	if not e.is_empty():
+		menu.add_icon_item(Icons.tex("info", 18), "Details", ACT_DETAILS)
+	if Catalog.can_favorite(ref):
+		var fav := Catalog.is_favorite(ref)
+		menu.add_icon_item(Icons.tex("heart_fill" if fav else "heart", 18), "Remove from favourites" if fav else "Add to favourites", ACT_FAVORITE)
 	var pinned := Catalog.is_pinned(ref)
-	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 12)
-	add_library_item(_menu, ref, 13)
-	popup_menu(_menu, at)
-	Sfx.play(&"open")
-
-
-## Adds "Add to favourites" or "Remove from favourites" for `ref`, if it can
-## be one. Shared by every right-click menu.
-static func add_favorite_item(menu: PopupMenu, ref: String, id: int) -> void:
-	if not Catalog.can_favorite(ref):
-		return
-	var fav := Catalog.is_favorite(ref)
-	menu.add_icon_item(Icons.tex("heart_fill" if fav else "heart", 18), "Remove from favourites" if fav else "Add to favourites", id)
-
-
-## Adds "Add to Library" (installed apps, running programs) or "Remove from
-## Library" (library entries) for `ref`. Shared by every right-click menu.
-static func add_library_item(menu: PopupMenu, ref: String, id: int) -> void:
-	if ref.begins_with("lib:"):
-		menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from Library", id)
+	menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", ACT_PIN)
+	if not e.is_empty():
+		menu.add_separator()
+		menu.add_icon_item(Icons.tex("edit", 18), "Edit details", ACT_EDIT)
+		var path := str(e["path"])
+		if path != "" and not path.contains("://") and (FileAccess.file_exists(path) or DirAccess.dir_exists_absolute(path)):
+			menu.add_icon_item(Icons.tex("folder", 18), "Show in folder", ACT_FOLDER)
+		menu.add_separator()
+		menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from Library", ACT_LIBRARY)
 	elif Catalog.can_add_to_library(ref):
-		menu.add_icon_item(Icons.tex("grid", 18), "Add to Library", id)
+		menu.add_separator()
+		menu.add_icon_item(Icons.tex("grid", 18), "Add to Library", ACT_LIBRARY)
+
+
+## Runs one of add_ref_actions' items. False for ids that aren't one.
+func run_ref_action(ref: String, act: int) -> bool:
+	ref = Catalog.canonical(ref)
+	var id := ref.substr(4) if ref.begins_with("lib:") else ""
+	match act:
+		ACT_OPEN:
+			if id != "":
+				launch(id)
+			else:
+				Catalog.launch(ref)
+		ACT_DETAILS:
+			focus_entry(id)
+		ACT_FAVORITE:
+			toggle_favorite(ref)
+		ACT_PIN:
+			Catalog.set_pinned(ref, not Catalog.is_pinned(ref))
+		ACT_EDIT:
+			open_edit(id)
+		ACT_FOLDER:
+			OS.shell_show_in_file_manager(str(Library.get_entry(id).get("path", "")))
+		ACT_LIBRARY:
+			toggle_library(ref)
+		_:
+			return false
+	return true
 
 
 func toggle_library(ref: String) -> void:
