@@ -406,6 +406,9 @@ func _build_sources(e: Dictionary) -> Dictionary:
 			urls.append_array(await _epic_urls(str(epic.get("item", "")), name, kind))
 		if str(epic.get("app", "")) != "":
 			urls.append(LAZY + "gamesdb/epic/" + str(epic["app"]))
+		var other := gamesdb_ref(e)
+		if other != "":
+			urls.append(LAZY + "gamesdb/" + other)
 		if gog_id != "":
 			urls.append(LAZY + "gamesdb/gog/" + gog_id)
 			if kind == &"hero":
@@ -585,6 +588,25 @@ static func epic_ids(e: Dictionary) -> Dictionary:
 		if parts.size() >= 3:
 			out = {"ns": parts[0], "item": parts[1], "app": parts[2]}
 	return out
+
+
+## GOG Galaxy's platform/id for games from other launchers ("" if unknown).
+static func gamesdb_ref(e: Dictionary) -> String:
+	var path := str(e.get("path", ""))
+	match str(e.get("source", "")):
+		"riot":
+			var m := RegEx.create_from_string("--launch-product=(\\S+)").search(str(e.get("args", "")))
+			if m:
+				return "riot/" + m.get_string(1)
+		"ubisoft":
+			var id := path.trim_prefix("uplay://launch/").get_slice("/", 0)
+			if id.is_valid_int():
+				return "uplay/" + id
+		"amazon":
+			var id := path.trim_prefix("amazon-games://play/")
+			if id != "" and id != path:
+				return "amazon/" + id
+	return ""
 
 
 ## GOG games ship a goggame-<id>.info next to the executable.

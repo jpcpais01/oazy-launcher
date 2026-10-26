@@ -69,6 +69,9 @@ func refresh() -> void:
 	var tex := Art.get_art(entry_id, kind)
 	if tex == null and kind == &"cover" and Art.is_resolved(entry_id, &"cover"):
 		tex = Art.get_art(entry_id, &"hero")
+	# No wide art anywhere: the cover, cropped to fill, beats a pattern.
+	if tex == null and kind == &"hero" and Art.is_resolved(entry_id, &"hero"):
+		tex = Art.get_art(entry_id, &"cover")
 	if tex != null:
 		_mat.set_shader_parameter("art", tex)
 		_mat.set_shader_parameter("has_art", true)

@@ -30,6 +30,16 @@ const STORE_SKIP_NAMES := [
 	"riot client", "battle.net", "ea app", "origin", "ubisoft connect", "uplay", "amazon games",
 	"easyanticheat", "easy anti-cheat", "battleye", "vanguard", "directx", "visual c++", "redistributable",
 ]
+## Publishers whose installed programs are games (standalone installs with no store).
+const GAME_PUBLISHERS := [
+	"mojang", "hoyoverse", "mihoyo", "cognosphere", "wargaming", "roblox", "rockstar games", "bethesda",
+	"cd projekt", "square enix", "bandai namco", "krafton", "garena", "level infinite", "gaijin",
+	"grinding gear", "digital extremes", "jagex", "hi-rez", "smilegate", "ncsoft", "nexon", "pearl abyss",
+	"kakao games", "innersloth", "activision", "sega", "capcom", "konami", "2k games", "warner bros. games",
+	"kuro games", "netease games", "playstation pc", "sony interactive", "paradox interactive", "embark studios",
+]
+## Launchers and tools those publishers also install.
+const NOT_GAME_WORDS := ["launcher", "game center", "hoyoplay", "social club", "anti-cheat", "anticheat", "redistributable", "editor", "toolkit", "sdk", "server", "benchmark"]
 const SOURCE_LABELS := {
 	"steam": "Steam", "epic": "Epic Games", "gog": "GOG", "ea": "EA app", "ubisoft": "Ubisoft Connect",
 	"battlenet": "Battle.net", "riot": "Riot Games", "amazon": "Amazon Games", "xbox": "Xbox",
@@ -780,9 +790,54 @@ static func uninstall_item(b: Dictionary) -> Dictionary:
 			return {}
 		item["source"] = "ea"
 		item["path"] = icon_exe
+	elif key.begins_with("Steam App "):
+		return {}
+	elif _looks_like_game(b):
+		var exe := icon_exe if icon_exe != "" and not Catalog.is_clutter("x", icon_exe) else ""
+		if exe == "":
+			exe = _guess_exe(str(b.get("InstallLocation", "")).replace("\\", "/"))
+		if exe == "":
+			return {}
+		item["source"] = "custom"
+		item["path"] = exe
 	else:
 		return {}
 	return item
+
+
+## A standalone install (no launcher): a known game publisher, or a program
+## living in a "Games" folder.
+static func _looks_like_game(b: Dictionary) -> bool:
+	var name := " " + str(b.get("DisplayName", "")).to_lower() + " "
+	for w in NOT_GAME_WORDS:
+		if name.contains(w):
+			return false
+	var publisher := str(b.get("Publisher", "")).to_lower()
+	for p in GAME_PUBLISHERS:
+		if publisher.begins_with(p):
+			return true
+	var where := (str(b.get("InstallLocation", "")) + "|" + str(b.get("DisplayIcon", ""))).replace("\\", "/").to_lower()
+	return where.contains("/games/") and not where.contains("/windowsapps/")
+
+
+## The main executable in an install folder: the biggest .exe that isn't a helper.
+static func _guess_exe(dir: String) -> String:
+	if dir == "" or not DirAccess.dir_exists_absolute(dir):
+		return ""
+	var best := ""
+	var best_size := 0
+	for f in DirAccess.get_files_at(dir):
+		if not f.to_lower().ends_with(".exe") or Catalog.is_clutter(f.get_basename(), f):
+			continue
+		var fa := FileAccess.open(dir.path_join(f), FileAccess.READ)
+		if fa == null:
+			continue
+		var size := fa.get_length()
+		fa.close()
+		if size > best_size:
+			best_size = size
+			best = dir.path_join(f)
+	return best
 
 
 ## The executable in a quoted or unquoted command line / icon path ("x.exe,0").
