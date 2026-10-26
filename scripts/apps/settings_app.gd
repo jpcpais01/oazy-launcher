@@ -63,6 +63,7 @@ func _ready() -> void:
 	_hotkey_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hk.add_child(_hotkey_status)
 	_toggle_row(you, "Minimise Oazy when a game starts", "Off keeps your desktop right behind the game.", "minimize_for_games")
+	_toggle_row(you, "Show CPU temperature", "On the desktop's This PC card. Comes from HWiNFO or LibreHardwareMonitor while one is running, otherwise from your motherboard's sensor (less exact).", "cpu_temp")
 
 	var look := _section("Appearance", "palette")
 	_swatch_row(look)
