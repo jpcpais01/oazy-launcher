@@ -323,10 +323,10 @@ func _below(main: Node) -> void:
 	below.markets.refresh(true)
 	below.news.refresh(true)
 	var waited := 0.0
-	while waited < 12.0 and (below.markets.busy or below.news.busy):
+	while waited < 25.0 and (below.markets.busy or below.news.busy):
 		await _wait(0.25)
 		waited += 0.25
-	print("  markets live: %d of %d, news live: %d" % [below.markets.quotes.size(), Markets.symbols().size(), below.news.items().size()])
+	print("  markets live: %d of %d, news live: %d" % [below.markets.quotes.size(), Markets.symbols().size(), below.news.items().size()], "  (", below.markets.last_error, " / ", below.news.last_error, ")")
 	if below.markets.quotes.size() < Markets.symbols().size():
 		below.markets.set_mock(_mock_quotes())
 	if below.news.items().is_empty():

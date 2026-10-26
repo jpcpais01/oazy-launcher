@@ -26,6 +26,8 @@ const MONTHS := ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", 
 ## topic -> {"at": unix, "items": [{title, source, link, at}]}
 var feeds := {}
 var busy := false
+## Why the last request failed (for logs), "" when it worked.
+var last_error := ""
 var _last_try := {}
 
 
@@ -78,8 +80,13 @@ func _fetch(url: String) -> Array:
 	var out := []
 	if http.request(url, ["User-Agent: %s/%s" % [App.USER_AGENT, App.version], "Accept: application/rss+xml, application/xml"]) == OK:
 		var res: Array = await http.request_completed
-		if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200:
+		last_error = "" if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200 else "result %d, HTTP %d" % [int(res[0]), int(res[1])]
+		if last_error == "":
 			out = parse_rss(res[3])
+			if out.is_empty():
+				last_error = "no headlines in %d bytes" % (res[3] as PackedByteArray).size()
+	else:
+		last_error = "request not sent"
 	http.queue_free()
 	return out
 

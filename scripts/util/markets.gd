@@ -27,6 +27,8 @@ const NAMES := {
 ## symbol -> {symbol, name, price, prev, currency, points, at}
 var quotes := {}
 var busy := false
+## Why the last request failed (for logs), "" when it worked.
+var last_error := ""
 var offline := false
 var _last_try := 0
 
@@ -101,9 +103,12 @@ func _fetch(sym: String) -> Dictionary:
 		var out := {}
 		if http.request(host + CHART % sym.uri_encode(), ["User-Agent: " + UA, "Accept: application/json"]) == OK:
 			var res: Array = await http.request_completed
-			if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200:
+			last_error = "" if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200 else "result %d, HTTP %d" % [int(res[0]), int(res[1])]
+			if last_error == "":
 				out = parse_chart(JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8()))
 		http.queue_free()
+		if out.is_empty() and last_error == "":
+			last_error = "nothing usable in the answer"
 		if not out.is_empty():
 			out["at"] = _now()
 			return out
