@@ -580,6 +580,10 @@ namespace Oazy
 					return "\"ok\":true";
 				case "stats":
 					return "\"ok\":true," + StatsJson() + Sensors.Read(Arg(p, 2) == "1");
+				case "procs":
+					return Procs.List(ParentPid);
+				case "kill":
+					return Procs.Kill(Arg(p, 2), ParentPid);
 				case "lock":
 					return "\"ok\":" + Json.Bool(Native.LockWorkStation());
 				case "sleep":
@@ -764,7 +768,7 @@ namespace Oazy
 			return sb.ToString();
 		}
 
-		static string ExePath(uint pid)
+		internal static string ExePath(uint pid)
 		{
 			IntPtr proc = Native.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
 			if (proc == IntPtr.Zero) return "";
@@ -777,7 +781,7 @@ namespace Oazy
 			finally { Native.CloseHandle(proc); }
 		}
 
-		static string Description(string exe)
+		internal static string Description(string exe)
 		{
 			if (exe == "") return "";
 			lock (CacheLock)
@@ -2022,6 +2026,179 @@ namespace Oazy
 
 	// --- Sensors ------------------------------------------------------------------
 	//
+	// Every process with its CPU and memory, for Oazy's task manager. One
+	// NtQuerySystemInformation call reads them all without opening a single
+	// process (so it is cheap, and works for elevated and system ones too);
+	// only processes seen for the first time are opened, once, for their path.
+	// CPU is the share of all processor time since the previous call, so the
+	// first call after a while reads zero.
+	static class Procs
+	{
+		const int SystemProcessInformation = 5;
+		const uint STATUS_INFO_LENGTH_MISMATCH = 0xC0000004;
+		const uint PROCESS_TERMINATE = 0x1;
+		static readonly object Lock = new object();
+		static IntPtr Buf = IntPtr.Zero;
+		static int BufLen;
+		// pid -> create time + CPU time at the previous call.
+		static Dictionary<long, long[]> Last = new Dictionary<long, long[]>();
+		// "pid:create" -> exe path.
+		static readonly Dictionary<string, string> Paths = new Dictionary<string, string>();
+		static readonly Dictionary<long, string> Names = new Dictionary<long, string>();
+		// Never ended from Oazy, whatever asks (the UI hides End for these too).
+		static readonly string[] Critical = { "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe", "lsass.exe", "lsaiso.exe", "memory compression", "secure system", "dwm.exe", "fontdrvhost.exe", "svchost.exe" };
+
+		[DllImport("ntdll.dll")] static extern uint NtQuerySystemInformation(int cls, IntPtr buf, int len, out int ret);
+		[DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+		[DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr h, uint code);
+		[DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+		static bool Query()
+		{
+			for (int tries = 0; tries < 6; tries++)
+			{
+				if (Buf == IntPtr.Zero)
+				{
+					BufLen = Math.Max(BufLen, 1 << 20);
+					Buf = Marshal.AllocHGlobal(BufLen);
+				}
+				int need;
+				uint st = NtQuerySystemInformation(SystemProcessInformation, Buf, BufLen, out need);
+				if (st == 0) return true;
+				if (st != STATUS_INFO_LENGTH_MISMATCH) return false;
+				Marshal.FreeHGlobal(Buf);
+				Buf = IntPtr.Zero;
+				BufLen = Math.Max(need, BufLen) + (256 << 10);
+			}
+			return false;
+		}
+
+		public static string List(int parentPid)
+		{
+			lock (Lock)
+			{
+				if (!Query()) return "\"ok\":false,\"error\":\"process list unavailable\"";
+				bool x64 = IntPtr.Size == 8;
+				int oName = 0x38, oNameBuf = x64 ? 0x40 : 0x3C;
+				int oPid = x64 ? 0x50 : 0x44, oParent = x64 ? 0x58 : 0x48, oSession = x64 ? 0x64 : 0x50;
+				var rows = new List<long[]>();
+				var names = new List<string>();
+				var now = new Dictionary<long, long[]>();
+				long den = 0, idle = 0;
+				int off = 0;
+				while (true)
+				{
+					IntPtr e = new IntPtr(Buf.ToInt64() + off);
+					int next = Marshal.ReadInt32(e, 0);
+					long priv = Marshal.ReadInt64(e, 0x08);
+					long created = Marshal.ReadInt64(e, 0x20);
+					long cpuTime = Marshal.ReadInt64(e, 0x28) + Marshal.ReadInt64(e, 0x30);
+					long pid = Marshal.ReadIntPtr(e, oPid).ToInt64();
+					long ppid = Marshal.ReadIntPtr(e, oParent).ToInt64();
+					int session = Marshal.ReadInt32(e, oSession);
+					int nameLen = Marshal.ReadInt16(e, oName) & 0xFFFF;
+					IntPtr nameBuf = Marshal.ReadIntPtr(e, oNameBuf);
+					string name = pid == 0 ? "Idle" : (nameBuf != IntPtr.Zero && nameLen > 0 ? Marshal.PtrToStringUni(nameBuf, nameLen / 2) : "System");
+					long[] prev;
+					long delta = 0;
+					if (Last.TryGetValue(pid, out prev) && prev[0] == created) delta = Math.Max(0, cpuTime - prev[1]);
+					now[pid] = new long[] { created, cpuTime };
+					den += delta;
+					if (pid == 0) idle = delta;
+					else
+					{
+						rows.Add(new long[] { pid, ppid, session, priv, delta, created });
+						names.Add(name);
+					}
+					if (next == 0) break;
+					off += next;
+				}
+				// Paths of processes that are gone are forgotten.
+				var alive = new HashSet<string>();
+				Names.Clear();
+				var sb = new StringBuilder(rows.Count * 160);
+				var ci = System.Globalization.CultureInfo.InvariantCulture;
+				for (int i = 0; i < rows.Count; i++)
+				{
+					long[] r = rows[i];
+					string key = r[0] + ":" + r[5];
+					alive.Add(key);
+					Names[r[0]] = names[i].ToLowerInvariant();
+					string exe;
+					if (!Paths.TryGetValue(key, out exe))
+					{
+						exe = r[0] == 4 ? "" : Host.ExePath((uint)r[0]);
+						Paths[key] = exe;
+					}
+					if (sb.Length > 0) sb.Append(',');
+					sb.Append("{\"pid\":").Append(r[0])
+						.Append(",\"ppid\":").Append(r[1])
+						.Append(",\"s\":").Append(r[2])
+						.Append(",\"t\":").Append(r[5])
+						.Append(",\"n\":").Append(Json.Str(names[i]))
+						.Append(",\"exe\":").Append(Json.Str(exe))
+						.Append(",\"d\":").Append(Json.Str(Host.Description(exe)))
+						.Append(",\"cpu\":").Append((den > 0 ? (double)r[4] / den : 0.0).ToString("0.0000", ci))
+						.Append(",\"mem\":").Append(r[3])
+						.Append('}');
+				}
+				var stale = new List<string>();
+				foreach (string k in Paths.Keys) if (!alive.Contains(k)) stale.Add(k);
+				foreach (string k in stale) Paths.Remove(k);
+				Last = now;
+				Native.MEMORYSTATUSEX mem = new Native.MEMORYSTATUSEX();
+				mem.dwLength = (uint)Marshal.SizeOf(typeof(Native.MEMORYSTATUSEX));
+				ulong total = 0, avail = 0;
+				if (Native.GlobalMemoryStatusEx(ref mem)) { total = mem.ullTotalPhys; avail = mem.ullAvailPhys; }
+				double busy = den > 0 ? 1.0 - (double)idle / den : -1;
+				return "\"ok\":true,\"self\":" + parentPid + ",\"cpu\":" + busy.ToString("0.000", ci)
+					+ ",\"mem_total\":" + total + ",\"mem_used\":" + (total - avail)
+					+ ",\"cores\":" + Environment.ProcessorCount
+					+ ",\"procs\":[" + sb.ToString() + "]";
+			}
+		}
+
+		// "kill <pid>,<pid>...": ends each one. Ones Windows refuses (elevated,
+		// another user's, protected) come back in "denied" so Oazy can offer to
+		// ask for admin rights; ones already gone count as ended.
+		public static string Kill(string pids, int parentPid)
+		{
+			int ended = 0;
+			var denied = new List<string>();
+			var refused = new List<string>();
+			int self = Process.GetCurrentProcess().Id;
+			foreach (string part in pids.Split(','))
+			{
+				uint pid;
+				if (!uint.TryParse(part.Trim(), out pid)) continue;
+				string name;
+				lock (Lock) { Names.TryGetValue(pid, out name); }
+				if (pid <= 4 || pid == (uint)parentPid || pid == (uint)self || (name != null && Array.IndexOf(Critical, name) >= 0))
+				{
+					refused.Add(pid.ToString());
+					continue;
+				}
+				IntPtr h = OpenProcess(PROCESS_TERMINATE, false, pid);
+				if (h == IntPtr.Zero)
+				{
+					int err = Marshal.GetLastWin32Error();
+					if (err == 87) ended++;
+					else denied.Add(pid.ToString());
+					continue;
+				}
+				try
+				{
+					if (TerminateProcess(h, 1)) ended++;
+					else if (Marshal.GetLastWin32Error() == 5) denied.Add(pid.ToString());
+					else ended++;
+				}
+				finally { CloseHandle(h); }
+			}
+			return "\"ok\":" + Json.Bool(denied.Count == 0 && refused.Count == 0) + ",\"ended\":" + ended
+				+ ",\"denied\":[" + string.Join(",", denied.ToArray()) + "],\"refused\":[" + string.Join(",", refused.ToArray()) + "]";
+		}
+	}
+
 	// Clocks, temperatures and GPU load for the desktop's This PC widget, all
 	// read without admin rights or a driver of Oazy's own: the CPU clock from
 	// the counters Task Manager uses, NVIDIA GPUs through NVML (part of every

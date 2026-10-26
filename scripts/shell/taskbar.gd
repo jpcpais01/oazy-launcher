@@ -6,6 +6,8 @@ extends Control
 ## reorder; its neighbours ease aside and the order is kept. Right: updates,
 ## the network (Wi-Fi and cable), sound (quick settings), the weather, the
 ## clock (calendar) and an invisible corner that shows the desktop.
+## The task manager always has a button among the apps; it opens as a card
+## rising from that button rather than as a window.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
@@ -25,6 +27,7 @@ var quick: QuickSettings
 var calendar: CalendarFlyout
 var weather: WeatherFlyout
 var network: NetworkFlyout
+var tasks: TasksFlyout
 var orb: StartOrb
 var _glass: GlassPanel
 var _apps: Control
@@ -182,6 +185,7 @@ func _ready() -> void:
 	_menu = PopupMenu.new()
 	_menu.id_pressed.connect(_on_menu)
 	add_child(_menu)
+	gui_input.connect(_on_bar_input)
 
 	Catalog.pins_changed.connect(queue_rebuild)
 	Catalog.apps_changed.connect(queue_rebuild)
@@ -323,7 +327,12 @@ func rebuild() -> void:
 		if btn == null:
 			btn = TaskbarButton.new().setup(ref, g["item"])
 			btn.clicked.connect(_on_click)
-			btn.middle_clicked.connect(func(b: TaskbarButton) -> void: _launch(b))
+			btn.middle_clicked.connect(func(b: TaskbarButton) -> void:
+				if b.ref == TasksFlyout.REF:
+					toggle_tasks()
+				else:
+					_launch(b)
+			)
 			btn.context.connect(_on_context)
 			btn.hover_changed.connect(_on_hover)
 			btn.drag_started.connect(_on_drag_started)
@@ -347,6 +356,9 @@ func rebuild() -> void:
 			for w in btn.windows:
 				if int(w["hwnd"]) == Host.foreground:
 					active = true
+		if ref == TasksFlyout.REF:
+			# Lit while its card is up: the lens joins the button to it.
+			active = tasks != null and tasks.is_open
 		btn.set_state(running, active)
 		if active:
 			lit = btn
@@ -651,6 +663,10 @@ func intro() -> void:
 # --- Interaction --------------------------------------------------------------------------
 
 func _on_click(btn: TaskbarButton) -> void:
+	if btn.ref == TasksFlyout.REF:
+		_close_preview(btn)
+		toggle_tasks()
+		return
 	if btn.shell_window != null and btn.windows.is_empty():
 		_close_preview(btn)
 		main.toggle_shell_window(btn.shell_window)
@@ -698,8 +714,10 @@ const SWITCH_REST := 0.12
 
 
 func _step_preview(delta: float) -> bool:
-	if _drag_btn or _menu.visible or not is_visible_in_tree():
+	if _drag_btn or _menu.visible or not is_visible_in_tree() or (tasks and tasks.is_open):
 		_hover_btn = null
+		if preview.open and tasks and tasks.is_open:
+			_close_preview()
 		return false
 	var p := get_global_mouse_position()
 	var moved := _last_pointer == Vector2.INF or p.distance_to(_last_pointer) > 2.0
@@ -791,6 +809,11 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 	_menu.set_item_disabled(0, true)
 	_menu.add_separator()
 	var running := btn.window_count() > 0
+	if btn.ref == TasksFlyout.REF:
+		_menu.add_icon_item(Icons.tex("activity", 18), "Open", 0)
+		_menu.add_icon_item(Icons.tex("external", 18), "Windows Task Manager", 3)
+		_popup_menu(at)
+		return
 	if btn.ref.begins_with("oazy:") and not Catalog.is_own_window_app(btn.ref):
 		_menu.add_icon_item(Icons.tex("window", 18), "Open", 0)
 	elif str(btn.item.get("kind", "")) == "game":
@@ -803,6 +826,10 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 	if running:
 		_menu.add_separator()
 		_menu.add_icon_item(Icons.tex("close", 18, App.DANGER.lightened(0.2)), "Close all windows" if btn.window_count() > 1 else "Close window", 2)
+	_popup_menu(at)
+
+
+func _popup_menu(at: Vector2) -> void:
 	_menu.reset_size()
 	var vp := Shell.view_size()
 	_menu.position = Vector2i(int(clampf(at.x - _menu.size.x / 2.0, 8.0, vp.x - _menu.size.x - 8.0)), int(get_global_rect().position.y - _menu.size.y - 10.0))
@@ -810,13 +837,40 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 	Sfx.play(&"open")
 
 
+## Right-clicking the bar itself (between its buttons): the task manager and
+## the taskbar's settings.
+func _on_bar_input(e: InputEvent) -> void:
+	if not (e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_RIGHT):
+		return
+	accept_event()
+	_close_preview()
+	_menu_btn = null
+	_menu.clear()
+	_menu.add_icon_item(Icons.tex("activity", 18), "Task manager", 10)
+	_menu.add_icon_item(Icons.tex("settings", 18), "Taskbar settings", 11)
+	_popup_menu(get_global_mouse_position())
+
+
 func _on_menu(id: int) -> void:
+	match id:
+		10:
+			open_tasks()
+			return
+		11:
+			main.open_settings("desktop")
+			return
+		3:
+			if App.is_windows():
+				OS.create_process("taskmgr.exe", [])
+			return
 	var btn := _menu_btn
 	if btn == null or not is_instance_valid(btn):
 		return
 	match id:
 		0:
-			if btn.ref.begins_with("oazy:") and btn.shell_window:
+			if btn.ref == TasksFlyout.REF:
+				open_tasks()
+			elif btn.ref.begins_with("oazy:") and btn.shell_window:
 				main.focus_shell_window(btn.shell_window)
 			else:
 				_launch(btn)
@@ -929,9 +983,36 @@ func open_network() -> void:
 			network.toggle(_net)
 
 
+## The task manager card lives in Start's layer with the tray's flyouts.
+func attach_tasks(t: TasksFlyout) -> void:
+	tasks = t
+	tasks.opened_changed.connect(func(_open: bool) -> void: queue_rebuild())
+
+
+func toggle_tasks() -> void:
+	if tasks == null:
+		return
+	if tasks.is_open:
+		tasks.close()
+	else:
+		open_tasks()
+
+
+## Opens the task manager over its button (from Start, search, a right-click).
+func open_tasks() -> void:
+	if tasks == null:
+		return
+	_close_flyouts(tasks)
+	if tasks.is_open:
+		return
+	if _rebuild_queued:
+		rebuild()
+	tasks.open(_buttons.get(TasksFlyout.REF))
+
+
 ## Every tray flyout but `keep` closes, so only one is ever up.
 func _close_flyouts(keep: Flyout) -> void:
-	for f in [quick, calendar, weather, network]:
+	for f in [quick, calendar, weather, network, tasks]:
 		if f and f != keep:
 			f.close()
 

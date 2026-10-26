@@ -100,6 +100,10 @@ func _ready() -> void:
 			{"id": "4d454f", "ssid": "MEO-Office", "signal": 22, "secure": true, "auth": "enterprise", "known": false, "connected": false, "connectable": true},
 		]})
 	await _wait(2.5)
+	if OS.get_environment("OAZY_SHOTS_ONLY") == "tasks":
+		await _tasks_shots(main)
+		get_tree().quit()
+		return
 	await shot("01-desktop")
 	for size_id in ["small", "large"]:
 		Settings.set_value("fav_icon_size", size_id)
@@ -137,6 +141,7 @@ func _ready() -> void:
 	await shot("01d-network-key")
 	main.network.close()
 	await _wait(0.3)
+	await _tasks_shots(main)
 	Account.set_mock({"name": "João Pais", "email": "joao.pais@gmail.com"}, _mock_photo(Color("2b6f8f"), Color("f2b27a")))
 	main.start.open()
 	await _wait(0.9)
@@ -435,6 +440,32 @@ func _close_modals() -> void:
 	for m in get_tree().get_nodes_in_group("modal"):
 		if m.has_method("close"):
 			m.close()
+
+
+## The task manager over its taskbar button: apps, then Background unfolded
+## with a row asking before it ends something.
+func _tasks_shots(main: Node) -> void:
+	var tf: TasksFlyout = main.tasks
+	main.open_tasks()
+	await _wait(3.4)
+	await shot("01t-tasks")
+	tf._folded["background"] = false
+	var chrome: Dictionary = tf._data["apps"][0]
+	for g in tf._data["apps"]:
+		if g["ref"] == "app:Chrome":
+			chrome = g
+	tf.toggle_details(chrome["key"])
+	var sys: Array = tf._data["system"]
+	for g in tf._data["apps"]:
+		if str(g["name"]).contains("Claude"):
+			tf._confirm[g["key"]] = Time.get_ticks_msec() + 60000
+	await _wait(1.6)
+	await shot("01u-tasks-more")
+	tf._folded["background"] = true
+	tf._confirm.clear()
+	tf.toggle_details(chrome["key"])
+	tf.close()
+	await _wait(0.3)
 
 
 ## A stand-in profile photo: a soft sky with a figure, like a portrait.

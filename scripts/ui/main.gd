@@ -37,6 +37,7 @@ var quick: QuickSettings
 var calendar: CalendarFlyout
 var weather: WeatherFlyout
 var network: NetworkFlyout
+var tasks: TasksFlyout
 
 
 func _ready() -> void:
@@ -81,6 +82,10 @@ func _ready() -> void:
 	network = NetworkFlyout.new()
 	start_layer.add_child(network)
 	taskbar.attach_network(network)
+	tasks = TasksFlyout.new()
+	tasks.main = self
+	start_layer.add_child(tasks)
+	taskbar.attach_tasks(tasks)
 	taskbar.start_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
@@ -94,6 +99,7 @@ func _ready() -> void:
 			calendar.close()
 			weather.close()
 			network.close()
+			tasks.close()
 	)
 
 	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})
@@ -121,7 +127,12 @@ func _ready() -> void:
 		Shell.set_layer_visible("bar", false)
 
 	App.toast_requested.connect(func(text: String, kind: StringName) -> void: toasts.show_toast(text, kind))
-	App.open_page.connect(func(page: StringName) -> void: open_app(page))
+	App.open_page.connect(func(page: StringName) -> void:
+		if page == &"tasks":
+			open_tasks()
+		else:
+			open_app(page)
+	)
 	App.launch_requested.connect(launch)
 	Library.import_finished.connect(_on_import_finished)
 	Updater.state_changed.connect(_on_update_state)
@@ -534,6 +545,12 @@ func show_shortcuts() -> void:
 	overlay_layer.add_child(ShortcutsSheet.dialog())
 
 
+## The task manager rises from its button on the taskbar.
+func open_tasks() -> void:
+	start.close()
+	taskbar.open_tasks()
+
+
 ## Opens Settings on one of its sections (SettingsApp.PAGES).
 func open_settings(page: String) -> void:
 	var win := open_app(&"settings")
@@ -649,7 +666,9 @@ static func add_ref_actions(menu: PopupMenu, ref: String, with_open: bool = true
 		var fav := Catalog.is_favorite(ref)
 		menu.add_icon_item(Icons.tex("heart_fill" if fav else "heart", 18), "Remove from favourites" if fav else "Add to favourites", ACT_FAVORITE)
 	var pinned := Catalog.is_pinned(ref)
-	menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", ACT_PIN)
+	# The task manager can't leave the taskbar.
+	if ref != TasksFlyout.REF:
+		menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", ACT_PIN)
 	if not e.is_empty():
 		menu.add_separator()
 		menu.add_icon_item(Icons.tex("edit", 18), "Edit details", ACT_EDIT)

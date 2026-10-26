@@ -11,6 +11,10 @@ var width := 1.5
 var fill := 0.16
 ## Quiet the tick-by-tick jitter with a short moving average (0 = raw).
 var smooth := 1
+## The scale always reaches down to `floor` and up to `ceil` (NAN: just the
+## data), so a meter like CPU load doesn't blow small wiggles up into peaks.
+var floor_v := NAN
+var ceil_v := NAN
 
 
 func _init() -> void:
@@ -48,6 +52,10 @@ func _draw() -> void:
 	if not is_nan(base):
 		lo = minf(lo, base)
 		hi = maxf(hi, base)
+	if not is_nan(floor_v):
+		lo = minf(lo, floor_v)
+	if not is_nan(ceil_v):
+		hi = maxf(hi, ceil_v)
 	var span := maxf(hi - lo, absf(hi) * 0.002 + 0.0001)
 	var pad := 4.0
 	var right := 4.0

@@ -82,6 +82,17 @@ func set_glow(v: float) -> void:
 		mat.set_shader_parameter("glow_color", App.accent.lightened(0.2))
 
 
+## A tail hanging from the bottom edge, its tip `x` pixels from the left,
+## pointing at whatever opened the pane. The tail takes the bottom `h` pixels of
+## the panel's rect (the pane above it is that much shorter). x < 0 removes it.
+func set_tail(x: float, h: float = 10.0, half_w: float = 11.0) -> void:
+	mat.set_shader_parameter("tail_x", x)
+	mat.set_shader_parameter("tail_h", h if x >= 0.0 else 0.0)
+	mat.set_shader_parameter("tail_w", half_w)
+	if _shadow:
+		_shadow.offset_bottom = -h if x >= 0.0 else 0.0
+
+
 func set_shadow_strength(a: float, spread: int = 34, offset_y: float = 14.0) -> void:
 	if _shadow == null:
 		return
