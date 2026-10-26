@@ -67,6 +67,13 @@ func _ready() -> void:
 	while not main.loaded and waited < 8.0:
 		await _wait(0.2)
 		waited += 0.2
+	if OS.get_environment("OAZY_SHOTS_ONLY") == "assistant":
+		# Dev runs: just the Claude popup.
+		Account.set_mock({"name": "João Pais", "email": "joao.pais@gmail.com"}, null)
+		await _wait(1.5)
+		await _assistant(main)
+		get_tree().quit()
+		return
 	# Give artwork a moment to arrive from Steam.
 	waited = 0.0
 	while waited < 15.0:
@@ -146,6 +153,7 @@ func _ready() -> void:
 	await shot("03-search")
 	main.start.close()
 	await _wait(0.5)
+	await _assistant(main)
 	# Signing in: the picker with the accounts Chrome knows.
 	Account.set_mock({})
 	Account.set_mock_chrome([
@@ -422,6 +430,73 @@ static func _mock_news() -> Array:
 	for it in list:
 		out.append({"title": it[0], "source": it[1], "link": "https://example.com", "at": now - int(it[2]) * 60})
 	return out
+
+
+## The Start orb's Claude popup: empty, mid-conversation and asking. With
+## OAZY_SHOTS_LIVE=1 (a dev run on a PC with Claude Code signed in) it talks
+## to the real claude instead.
+func _assistant(main: Node) -> void:
+	var a: AssistantPanel = main.assistant
+	var live := OS.get_environment("OAZY_SHOTS_LIVE") == "1"
+	a.mock = not live
+	a.open()
+	await _wait(0.9)
+	await shot("02d-assistant")
+	if live:
+		a.submit("In two short sentences: what is in my home folder?")
+		var waited := 0.0
+		while a.running and waited < 90.0:
+			await _wait(0.5)
+			waited += 0.5
+			if waited == 3.0:
+				await shot("02e-assistant-live-working")
+		await _wait(0.6)
+		await shot("02e-assistant-live")
+		a.submit("Create a file called oazy-hello.txt in my home folder with the word hi in it.")
+		waited = 0.0
+		while a.running and a._asks.is_empty() and waited < 90.0:
+			await _wait(0.5)
+			waited += 0.5
+		await _wait(0.6)
+		await shot("02f-assistant-live-ask")
+		for id in a._asks.keys():
+			a._answer(str(id), false)
+		waited = 0.0
+		while a.running and waited < 60.0:
+			await _wait(0.5)
+			waited += 0.5
+		await _wait(0.4)
+		await shot("02g-assistant-live-denied")
+		a.new_chat()
+		a.close()
+		await _wait(0.4)
+		return
+	a.submit("What's taking up the most space in my Downloads folder?")
+	a.handle_message({"type": "stream_event", "event": {"type": "message_start", "message": {"id": "m1"}}})
+	a.handle_message({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t1", "name": "Bash"}}})
+	a.handle_message({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"command\": \"du -sh ~/Downloads/*\", \"description\": \"Measure what's in Downloads\"}"}}})
+	a.handle_message({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}})
+	await _wait(0.5)
+	await shot("02e-assistant-working")
+	a.handle_message({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}})
+	a.handle_message({"type": "stream_event", "event": {"type": "message_start", "message": {"id": "m2"}}})
+	a.handle_message({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}})
+	var reply := "Your **Downloads** folder is using about **18.4 GB**, and most of it is three big installers:\n\n| File | Size |\n|---|---|\n| `Cyberpunk2077_setup.exe` | 9.1 GB |\n| `DaVinci_Resolve_19.zip` | 3.4 GB |\n| `Win11_23H2.iso` | 2.9 GB |\n\nThe rest is small stuff: PDFs, screenshots and a few zips from this month.\n\nWant me to move the installers you've already used into a folder called **Old installers**, so you can check before deleting anything?"
+	a.handle_message({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": reply}}})
+	a.handle_message({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}})
+	a.handle_message({"type": "result", "subtype": "success"})
+	await _wait(0.6)
+	await shot("02f-assistant-reply")
+	a.submit("Yes please")
+	a.handle_message({"type": "stream_event", "event": {"type": "message_start", "message": {"id": "m3"}}})
+	a.handle_message({"type": "assistant", "message": {"id": "m3", "content": [{"type": "tool_use", "id": "t2", "name": "PowerShell", "input": {"command": "New-Item -ItemType Directory \"$HOME\\Downloads\\Old installers\"\nMove-Item \"$HOME\\Downloads\\Cyberpunk2077_setup.exe\", \"$HOME\\Downloads\\Win11_23H2.iso\" \"$HOME\\Downloads\\Old installers\"", "description": "Move the used installers into Old installers"}}]}})
+	a.handle_message({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "PowerShell", "tool_use_id": "t2", "input": {"command": "New-Item -ItemType Directory \"$HOME\\Downloads\\Old installers\"\nMove-Item \"$HOME\\Downloads\\Cyberpunk2077_setup.exe\", \"$HOME\\Downloads\\Win11_23H2.iso\" \"$HOME\\Downloads\\Old installers\"", "description": "Move the used installers into Old installers"}}})
+	await _wait(0.6)
+	await shot("02g-assistant-ask")
+	a.close()
+	await _wait(0.4)
+	a.new_chat()
+	a.mock = false
 
 
 func _wait_for_hero(id: String) -> void:

@@ -19,10 +19,12 @@
 // Framework csc.exe that comes with Windows, so it must stay C# 5.
 //
 // Usage: OazyClaude.exe --data <dir> [--accent <hex>] [--cwd <dir>]
+//                       [--resume <session id> [--title <text>]]
 //                       [--terminal <OazyTerminal.exe> --terminal-data <dir>]
 //        OazyClaude.exe --selftest <out dir>
 //        OazyClaude.exe --mock-claude      (a stand-in for claude, for the self-test)
-// A second launch hands its folder to the running window over a named pipe.
+// A second launch hands its folder (or the conversation to resume, from the
+// Start orb's Claude popup) to the running window over a named pipe.
 
 using System;
 using System.Collections.Generic;
@@ -189,7 +191,7 @@ namespace OazyClaude
 		[STAThread]
 		static int Main(string[] args)
 		{
-			string data = "", accent = "", selftest = "", cwd = "", terminal = "", terminalData = "";
+			string data = "", accent = "", selftest = "", cwd = "", terminal = "", terminalData = "", resume = "", title = "";
 			for (int i = 0; i < args.Length; i++)
 			{
 				string a = args[i];
@@ -199,6 +201,8 @@ namespace OazyClaude
 				else if (a == "--accent" && more) accent = args[++i];
 				else if (a == "--selftest" && more) selftest = args[++i];
 				else if (a == "--cwd" && more) cwd = args[++i];
+				else if (a == "--resume" && more) resume = args[++i];
+				else if (a == "--title" && more) title = args[++i];
 				else if (a == "--terminal" && more) terminal = args[++i];
 				else if (a == "--terminal-data" && more) terminalData = args[++i];
 			}
@@ -211,7 +215,7 @@ namespace OazyClaude
 			Mutex single = new Mutex(true, "Local\\" + pipe, out first);
 			if (!first && selftest == "")
 			{
-				if (Forward(pipe, cwd)) return 0;
+				if (Forward(pipe, cwd, resume, title)) return 0;
 			}
 			try { if (!Native.SetProcessDpiAwarenessContext(new IntPtr(-4))) Native.SetProcessDPIAware(); }
 			catch { try { Native.SetProcessDPIAware(); } catch { } }
@@ -219,6 +223,8 @@ namespace OazyClaude
 			Application.SetCompatibleTextRenderingDefault(false);
 			App.TerminalExe = terminal;
 			App.TerminalData = terminalData;
+			App.StartResume = resume;
+			App.StartTitle = title;
 			int code = App.Run(data, accent, pipe, cwd, selftest);
 			GC.KeepAlive(single);
 			// As in Oazy Terminal: leave before CLR shutdown finalizes WebView2's
@@ -228,7 +234,7 @@ namespace OazyClaude
 			return code;
 		}
 
-		static bool Forward(string pipe, string cwd)
+		static bool Forward(string pipe, string cwd, string resume, string title)
 		{
 			for (int attempt = 0; attempt < 3; attempt++)
 			{
@@ -238,7 +244,7 @@ namespace OazyClaude
 					{
 						c.Connect(1000);
 						try { Native.AllowSetForegroundWindow(-1); } catch { }
-						byte[] bytes = Encoding.UTF8.GetBytes(Json.S.Serialize(Json.Obj("cwd", cwd)) + "\n");
+						byte[] bytes = Encoding.UTF8.GetBytes(Json.S.Serialize(Json.Obj("cwd", cwd, "resume", resume, "title", title)) + "\n");
 						c.Write(bytes, 0, bytes.Length);
 						c.Flush();
 						return true;
@@ -262,6 +268,8 @@ namespace OazyClaude
 		public static CoreWebView2Environment Env;
 		public static SynchronizationContext Sync;
 		public static ChatWindow Window;
+		// A conversation to open at start (--resume), with its title.
+		public static string StartResume = "", StartTitle = "";
 		public static Dictionary<string, object> Prefs;
 		public static Selftest Test;
 		public static bool Quitting { get { return quitting; } }
@@ -413,7 +421,8 @@ namespace OazyClaude
 				Dictionary<string, object> m = Json.Parse(line);
 				if (m == null) continue;
 				Window.BringUp();
-				if (Json.Str(m, "cwd") != "") Window.Post(Json.Obj("t", "open", "cwd", Json.Str(m, "cwd")));
+				if (Json.Str(m, "resume") != "") Window.Post(Json.Obj("t", "open", "cwd", Json.Str(m, "cwd"), "resume", Json.Str(m, "resume"), "title", Json.Str(m, "title")));
+				else if (Json.Str(m, "cwd") != "") Window.Post(Json.Obj("t", "open", "cwd", Json.Str(m, "cwd")));
 			}
 		}
 
@@ -1332,7 +1341,7 @@ namespace OazyClaude
 					{
 						string exe = App.Test != null ? Application.ExecutablePath : Cli.Find();
 						Post(Json.Obj("t", "init", "glass", glass, "accent", App.Accent, "nativeDrag", nativeDrag, "version", App.Version,
-							"prefs", App.Prefs, "home", App.Home(), "claude", exe, "cwd", startCwd,
+							"prefs", App.Prefs, "home", App.Home(), "claude", exe, "cwd", startCwd, "resume", App.StartResume, "title", App.StartTitle,
 							"terminal", App.TerminalExe != "" && File.Exists(App.TerminalExe), "selftest", App.Test != null));
 					}
 					foreach (object o in outbox) Post(o);

@@ -1,16 +1,21 @@
 class_name StartOrb
 extends Control
-## The Start button: Oazy's icon, live. The water in the orb turns slowly,
-## stirs faster on hover and while Start is open, and sends a ripple out when
-## pressed, with a soft halo in the accent colour behind it.
+## The Start button: Oazy's icon, live. Clicking it opens Claude (the
+## assistant popup), right-clicking it opens Start. The water in the orb turns
+## slowly, stirs faster on hover, while its popup is open and while Claude is
+## working, and sends a ripple out when pressed, with a soft halo in the accent
+## colour behind it.
 
 signal pressed
+signal alt_pressed
 
 const SIZE := 40.0
 const CALM := {"swirl": -0.3, "waves": 0.4}
 const STIRRED := {"swirl": -0.7, "waves": 0.7}
 
 var open := false: set = set_open
+## Claude is working on something.
+var busy := false: set = set_busy
 var _halo: Panel
 var _orb: UpdateOrb
 var _look: Tween
@@ -21,7 +26,7 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(SIZE, SIZE)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	tooltip_text = "Start"
+	tooltip_text = "Claude  ·  right-click for Start"
 	pivot_offset = Vector2(SIZE, SIZE) / 2.0
 	_halo = Panel.new()
 	_halo.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -42,6 +47,20 @@ func set_open(v: bool) -> void:
 	open = v
 	if _halo:
 		_fade_halo()
+
+
+func set_busy(v: bool) -> void:
+	if busy == v:
+		return
+	busy = v
+	if _halo:
+		_fade_halo()
+
+
+## A ripple out of the orb: something finished while you were away.
+func ping() -> void:
+	if _orb:
+		_orb.shockwave(0.9)
 
 
 func _restyle() -> void:
@@ -66,7 +85,7 @@ func _fade_halo() -> void:
 	if _look:
 		_look.kill()
 	# A slow, soft ease so the water gathers speed and settles back calmly.
-	_look = _orb.set_look(STIRRED if (_hot or open) else CALM, 1.1, Tween.TRANS_CUBIC, Tween.EASE_OUT)
+	_look = _orb.set_look(STIRRED if (_hot or open or busy) else CALM, 1.1, Tween.TRANS_CUBIC, Tween.EASE_OUT)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -76,4 +95,8 @@ func _gui_input(event: InputEvent) -> void:
 		t.tween_property(self, "scale", Vector2.ONE * (1.04 if _hot else 1.0), 0.24).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 		_orb.shockwave(0.6)
 		pressed.emit()
+		accept_event()
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		_orb.shockwave(0.6)
+		alt_pressed.emit()
 		accept_event()
