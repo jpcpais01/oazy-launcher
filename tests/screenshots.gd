@@ -182,6 +182,27 @@ func _ready() -> void:
 	await shot("08-add")
 	_close_modals()
 	await _wait(0.5)
+	main.find_apps()
+	await _wait(0.6)
+	var finder: FindAppsDialog = main.overlay_layer.get_children().filter(func(c: Node) -> bool: return c is FindAppsDialog)[0]
+	for r in finder._rows.slice(0, 3):
+		finder._toggle(r)
+	await _wait(0.5)
+	await shot("08b-find-apps")
+	finder._add_picked()
+	Catalog.add_to_library("app:Microsoft.WindowsNotepad_8wekyb3d8bbwe!App")
+	await _wait(0.5)
+	var lib_app: LibraryApp = lib.body.get_child(0)
+	main.focus_shell_window(lib)
+	lib_app.set_filter("apps")
+	await _wait(1.2)
+	await shot("08c-library-apps")
+	lib_app.set_filter("all")
+	main.show_ref_menu("app:Microsoft.Paint_8wekyb3d8bbwe!App", Vector2(900, 500))
+	await _wait(0.5)
+	await shot("08d-app-menu")
+	main._menu.hide()
+	await _wait(0.3)
 	Updater.apply_releases([
 		{"tag_name": "v2.0.0", "published_at": "2026-10-25T10:00:00Z", "body": "### Oazy is your desktop now\n- **A real taskbar** with everything that's open.\n- Glass windows you can snap, resize and minimise.\n- Start opens any app, game, folder or website.", "assets": [{"name": "OazyLauncher.exe", "size": 97000000, "browser_download_url": "https://x"}]},
 		{"tag_name": "v1.0.8", "published_at": "2026-10-20T10:00:00Z", "body": "### Controller support\n- Shoulder buttons switch pages.", "assets": [{"name": "OazyLauncher.exe", "size": 96000000, "browser_download_url": "https://x"}]},

@@ -58,6 +58,10 @@ func _ready() -> void:
 	var scan := FxButton.make("Find games", "sparkles", FxButton.Style.GHOST, 38)
 	scan.pressed.connect(func() -> void: main.scan_stores())
 	side.add_child(scan)
+	side.add_child(Kit.spacer(0, 4))
+	var find_apps := FxButton.make("Find apps", "apps", FxButton.Style.GHOST, 38)
+	find_apps.pressed.connect(func() -> void: main.find_apps())
+	side.add_child(find_apps)
 
 	# Content: grid and details page share the space.
 	var content := Control.new()
@@ -178,7 +182,7 @@ func refresh(animate: bool) -> void:
 	_empty.visible = list.is_empty() and _grid_view.visible
 	if list.is_empty():
 		if Library.entries.is_empty():
-			_empty.text = "Your library is empty.\nFind your games or add one with + Add."
+			_empty.text = "Your library is empty.\nFind your games and apps, or add one with + Add."
 		elif _search.text.strip_edges() != "":
 			_empty.text = "Nothing matches “%s”." % _search.text.strip_edges()
 		else:

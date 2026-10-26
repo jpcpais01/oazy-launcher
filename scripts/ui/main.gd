@@ -467,9 +467,9 @@ func confirm_remove(id: String) -> void:
 	d.confirm_text = "Remove"
 	d.danger = true
 	d.on_confirm = func() -> void:
+		Catalog.forget_entry(id)
 		Library.remove_entry(id)
 		Art.forget(id)
-		Catalog.set_pinned("lib:" + id, false)
 		App.toast("Removed %s" % e["name"])
 	overlay_layer.add_child(d)
 
@@ -494,6 +494,17 @@ func scan_stores() -> void:
 		return
 	Library.import_stores()
 	App.toast("Looking for Steam, Epic Games and GOG games…")
+
+
+## Pick installed apps to bring into the library.
+func find_apps() -> void:
+	start.close()
+	for c in overlay_layer.get_children():
+		if c is FindAppsDialog:
+			return
+	if Host.available:
+		Catalog.refresh_apps()
+	overlay_layer.add_child(FindAppsDialog.new())
 
 
 func show_update() -> void:
@@ -570,7 +581,7 @@ func show_entry_menu(id: String, at: Vector2) -> void:
 	if path != "" and not path.contains("://") and (FileAccess.file_exists(path) or DirAccess.dir_exists_absolute(path)):
 		_menu.add_icon_item(Icons.tex("folder", 18), "Show in folder", 3)
 	_menu.add_separator()
-	_menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from library", 4)
+	_menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from Library", 4)
 	popup_menu(_menu, at)
 	Sfx.play(&"open")
 
@@ -599,6 +610,8 @@ func _on_menu(item: int) -> void:
 				toggle_favorite(ref)
 			12:
 				Catalog.set_pinned(ref, not Catalog.is_pinned(ref))
+			13:
+				toggle_library(ref)
 		return
 	var id := _menu_id
 	var e := Library.get_entry(id)
@@ -631,6 +644,7 @@ func show_ref_menu(ref: String, at: Vector2) -> void:
 	add_favorite_item(_menu, ref, 11)
 	var pinned := Catalog.is_pinned(ref)
 	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 12)
+	add_library_item(_menu, ref, 13)
 	popup_menu(_menu, at)
 	Sfx.play(&"open")
 
@@ -642,6 +656,24 @@ static func add_favorite_item(menu: PopupMenu, ref: String, id: int) -> void:
 		return
 	var fav := Catalog.is_favorite(ref)
 	menu.add_icon_item(Icons.tex("heart_fill" if fav else "heart", 18), "Remove from favourites" if fav else "Add to favourites", id)
+
+
+## Adds "Add to Library" (installed apps, running programs) or "Remove from
+## Library" (library entries) for `ref`. Shared by every right-click menu.
+static func add_library_item(menu: PopupMenu, ref: String, id: int) -> void:
+	if ref.begins_with("lib:"):
+		menu.add_icon_item(Icons.tex("trash", 18, App.DANGER.lightened(0.2)), "Remove from Library", id)
+	elif Catalog.can_add_to_library(ref):
+		menu.add_icon_item(Icons.tex("grid", 18), "Add to Library", id)
+
+
+func toggle_library(ref: String) -> void:
+	if ref.begins_with("lib:"):
+		confirm_remove(ref.substr(4))
+		return
+	var name := str(Catalog.item(ref).get("name", ""))
+	if Catalog.add_to_library(ref) != "":
+		App.toast("Added %s to your Library" % name, &"success")
 
 
 func toggle_favorite(ref: String) -> void:
