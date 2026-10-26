@@ -1,0 +1,14 @@
+15:46:52.042 runtime 155.0.4283.62, Windows build 26100
+15:46:52.043 profile pwsh: "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo
+15:46:52.043 profile powershell: C:\Windows\system32\WindowsPowerShell\v1.0\powershell.exe -NoLogo
+15:46:52.043 profile cmd: C:\Windows\system32\cmd.exe
+15:46:52.043 profile gitbash: "C:\Program Files\Git\bin\bash.exe" --login -i
+15:46:55.802 page ready
+15:46:59.809 typing into pane 1
+15:47:03.619 echo True, unicode True
+15:47:03.672 saved terminal-powershell.png
+15:47:06.715 saved terminal-split.png
+15:47:07.952 saved terminal-menu.png
+15:47:09.184 saved terminal-find.png
+15:47:09.184 page=True echo=True unicode=True -> PASS
+15:47:09.420 message loop ended, exiting with 0
