@@ -54,11 +54,30 @@ const GOG_PRODUCT := "https://api.gog.com/products/%s"
 const WIKI_SEARCH := "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrlimit=5&prop=pageimages&piprop=thumbnail&pithumbsize=640&gsrsearch=%s"
 const LAZY := "lazy:"
 const BRAND_DIR := "res://assets/brand"
+## Official sites whose share image (og:image) becomes an app's background and cover.
+const APP_SITES := {
+	"claude": "https://claude.ai", "claudecode": "https://www.anthropic.com/claude-code",
+	"discord": "https://discord.com", "higgsfield": "https://higgsfield.ai", "flow": "https://labs.google/flow/about",
+	"whatsapp": "https://www.whatsapp.com", "spotify": "https://www.spotify.com", "chrome": "https://www.google.com/chrome/",
+	"visualstudiocode": "https://code.visualstudio.com", "obsstudio": "https://obsproject.com",
+	"steam": "https://store.steampowered.com", "firefox": "https://www.mozilla.org/firefox/", "telegram": "https://telegram.org",
+	"figma": "https://www.figma.com", "notion": "https://www.notion.com", "blender": "https://www.blender.org",
+	"slack": "https://slack.com", "epicgameslauncher": "https://store.epicgames.com", "chatgpt": "https://chatgpt.com",
+	"netflix": "https://www.netflix.com", "youtube": "https://www.youtube.com", "capcut": "https://www.capcut.com",
+	"canva": "https://www.canva.com", "midjourney": "https://www.midjourney.com", "runway": "https://runwayml.com",
+	"obsidian": "https://obsidian.md", "cursor": "https://cursor.com", "zoom": "https://zoom.us",
+	"microsoftteams": "https://www.microsoft.com/microsoft-teams", "brave": "https://brave.com", "opera": "https://www.opera.com",
+	"vlc": "https://www.videolan.org/vlc/", "githubdesktop": "https://desktop.github.com", "postman": "https://www.postman.com",
+}
+## Pages that hide their share image from non-browsers.
+const BROWSER_UA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 ## Other names the built-in app art answers to (normalised titles).
 const BRAND_ALIASES := {
 	"claudeai": "claude", "claudedesktop": "claude", "code": "visualstudiocode", "vscode": "visualstudiocode",
 	"obs": "obsstudio", "googlechrome": "chrome", "mozillafirefox": "firefox", "telegramdesktop": "telegram",
 	"epicgames": "epicgameslauncher", "higgsfieldai": "higgsfield", "steamclient": "steam",
+	"googleflow": "flow", "flowbygoogle": "flow", "zoomworkplace": "zoom", "teams": "microsoftteams",
+	"bravebrowser": "brave", "vlcmediaplayer": "vlc", "chatgptdesktop": "chatgpt",
 }
 ## File names (any image extension) that count as art when placed next to the exe.
 const SIDECAR_NAMES := {
@@ -151,9 +170,6 @@ func _start(id: String, kind: StringName) -> void:
 	if custom != "":
 		candidates.append(custom)
 	candidates.append_array(sidecar_art(str(e.get("path", "")), kind, str(e.get("name", ""))))
-	var brand := brand_art(str(e.get("name", "")), kind)
-	if brand != "":
-		candidates.append(brand)
 	for ext in ["jpg", "png", "webp"]:
 		candidates.append(_cache_file(id, kind, ext))
 	var steam_id := str(e.get("steam_appid", ""))
@@ -324,6 +340,18 @@ func _missing(id: String, kind: StringName) -> void:
 		_queue.append({"id": id, "kind": kind})
 		_pump()
 		return
+	_fallback(id, kind)
+
+
+## Last stop: Oazy's own built-in art for the app, else nothing.
+func _fallback(id: String, kind: StringName) -> void:
+	var brand := brand_art(str(Library.get_entry(id).get("name", "")), kind)
+	if brand != "":
+		var e := Library.get_entry(id)
+		var want_accent := kind == &"cover" and not e.is_empty() and str(e.get("color", "")) == ""
+		WorkerThreadPool.add_task(_load_worker.bind(id, kind, PackedStringArray([brand]), "", "", want_accent), false, "Load artwork")
+		return
+	var key := _key(id, kind)
 	_pending.erase(key)
 	_cache[key] = null
 	art_ready.emit(id, kind)
@@ -342,6 +370,7 @@ func _download(job: Dictionary) -> void:
 	var sources := await _sources_for(id)
 	var urls: PackedStringArray = sources.get(kind, PackedStringArray())
 	for url in urls:
+		var from_site := url.begins_with(LAZY + "site/")
 		if url.begins_with(LAZY):
 			url = await _resolve_lazy(url, kind)
 			if url == "":
@@ -350,6 +379,13 @@ func _download(job: Dictionary) -> void:
 		var ext := _image_ext(body)
 		if ext == "" or body.size() <= 2048:
 			continue
+		if from_site and kind == &"cover":
+			# Share images are wide; frame one on a blurred copy of itself.
+			var poster := poster_from_wide(decode(body))
+			if poster == null:
+				continue
+			body = poster.save_png_to_buffer()
+			ext = "png"
 		if kind == &"logo" and not _is_cutout(body):
 			continue
 		var f := FileAccess.open(_cache_file(id, kind, ext), FileAccess.WRITE)
@@ -368,10 +404,7 @@ func _download(job: Dictionary) -> void:
 		_remember(_miss_key(id, kind), "")
 	_active -= 1
 	_pump()
-	var key := _key(id, kind)
-	_pending.erase(key)
-	_cache[key] = null
-	art_ready.emit(id, kind)
+	_fallback(id, kind)
 
 
 ## Logos sit on top of the hero, so only images with transparency will do.
@@ -433,6 +466,9 @@ func _build_sources(e: Dictionary) -> Dictionary:
 		if steam_id != "":
 			urls.append(LAZY + "gamesdb/steam/" + steam_id)
 			urls.append_array(await _steam_fallback_urls(steam_id, kind))
+		var site_slug: String = BRAND_ALIASES.get(norm_title(name), norm_title(name))
+		if APP_SITES.has(site_slug) and kind != &"logo":
+			urls.append(LAZY + "site/" + site_slug)
 		if game and kind == &"cover":
 			urls.append(LAZY + "wiki/" + name)
 		out[kind] = urls
@@ -448,6 +484,9 @@ func _resolve_lazy(url: String, kind: StringName) -> String:
 	if rest.begins_with("gog/"):
 		var gid := rest.trim_prefix("gog/")
 		return str(await _once("gog:" + gid, _fetch_gog_background.bind(gid)))
+	if rest.begins_with("site/"):
+		var slug := rest.trim_prefix("site/")
+		return str(await _once("site:" + slug, _fetch_share_image.bind(str(APP_SITES.get(slug, "")))))
 	if rest.begins_with("wiki/"):
 		return await _wiki_cover(rest.trim_prefix("wiki/"))
 	return ""
@@ -712,6 +751,57 @@ func _fetch_gog_background(gog_id: String) -> String:
 	return ""
 
 
+## The share image a site shows when linked (og:image / twitter:image).
+func _fetch_share_image(page: String) -> String:
+	if page == "":
+		return ""
+	var html := (await _http_get(page, BROWSER_UA)).get_string_from_utf8()
+	return share_image(html, page)
+
+
+static func share_image(html: String, page: String) -> String:
+	for pat in [
+		"<meta[^>]+(?:property|name)=[\"'](?:og:image|og:image:url|twitter:image)[\"'][^>]*content=[\"']([^\"']+)",
+		"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]*(?:property|name)=[\"'](?:og:image|og:image:url|twitter:image)[\"']",
+	]:
+		var m := RegEx.create_from_string(pat).search(html)
+		if m:
+			var url := m.get_string(1).replace("&amp;", "&").strip_edges()
+			if url.begins_with("//"):
+				return "https:" + url
+			if url.begins_with("/"):
+				var origin := page.get_slice("/", 0) + "//" + page.get_slice("/", 2)
+				return origin + url
+			return url
+	return ""
+
+
+## A 2:3 poster from a wide image: the whole picture across the middle, over a
+## heavily blurred, darkened copy filling the frame.
+static func poster_from_wide(img: Image) -> Image:
+	if img == null or img.is_empty():
+		return null
+	if img.is_compressed():
+		img.decompress()
+	img.convert(Image.FORMAT_RGBA8)
+	var w := 600
+	var h := 900
+	var bg := img.duplicate() as Image
+	var s := maxf(float(w) / bg.get_width(), float(h) / bg.get_height())
+	bg.resize(maxi(1, int(bg.get_width() * s)), maxi(1, int(bg.get_height() * s)), Image.INTERPOLATE_BILINEAR)
+	bg = bg.get_region(Rect2i((bg.get_width() - w) / 2, (bg.get_height() - h) / 2, w, h))
+	bg.resize(20, 30, Image.INTERPOLATE_BILINEAR)
+	bg.resize(w, h, Image.INTERPOLATE_CUBIC)
+	bg.adjust_bcs(0.62, 1.15, 1.0)
+	var fg := img.duplicate() as Image
+	var fw := w - 40
+	fg.resize(fw, maxi(1, int(float(fw) * fg.get_height() / fg.get_width())), Image.INTERPOLATE_LANCZOS)
+	if fg.get_height() > h - 40:
+		fg = fg.get_region(Rect2i(0, (fg.get_height() - (h - 40)) / 2, fw, h - 40))
+	bg.blend_rect(fg, Rect2i(Vector2i.ZERO, fg.get_size()), Vector2i(20, int((h - fg.get_height()) * 0.42)))
+	return bg
+
+
 ## Last resort for a cover: the game's Wikipedia infobox image.
 func _wiki_cover(name: String) -> String:
 	var norm := norm_title(name)
@@ -762,13 +852,14 @@ static func norm_title(s: String) -> String:
 
 # --- Requests and lookups ----------------------------------------------------------
 
-func _http_get(url: String) -> PackedByteArray:
+func _http_get(url: String, user_agent: String = "") -> PackedByteArray:
 	var http := HTTPRequest.new()
 	http.timeout = 15.0
 	http.use_threads = true
 	add_child(http)
 	var body := PackedByteArray()
-	if http.request(url, ["User-Agent: %s/%s" % [App.USER_AGENT, App.version]]) == OK:
+	var ua := user_agent if user_agent != "" else "%s/%s" % [App.USER_AGENT, App.version]
+	if http.request(url, ["User-Agent: " + ua, "Accept-Language: en-US,en;q=0.9"]) == OK:
 		var res: Array = await http.request_completed
 		if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200:
 			body = res[3]
@@ -799,8 +890,9 @@ func _once(key: String, fn: Callable) -> Variant:
 	return v
 
 
+## v2: misses recorded before apps had web sources must not block them.
 func _miss_key(id: String, kind: StringName) -> String:
-	return "miss:%s:%s:%s" % [id, kind, norm_title(str(Library.get_entry(id).get("name", "")))]
+	return "miss2:%s:%s:%s" % [id, kind, norm_title(str(Library.get_entry(id).get("name", "")))]
 
 
 ## A remembered lookup, or null if unknown. Misses ("") expire so we retry.
