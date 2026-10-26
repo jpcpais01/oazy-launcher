@@ -363,7 +363,7 @@ func _fill_pinned() -> void:
 			break
 		if not refs.has(ref):
 			refs.append(ref)
-	for ref in ["oazy:library", Browser.REF, Terminal.REF, "oazy:settings", "oazy:cleaner"]:
+	for ref in ["oazy:library", Browser.REF, Terminal.REF, "oazy:flow", "oazy:settings", "oazy:cleaner"]:
 		if not refs.has(ref):
 			refs.append(ref)
 	refs = refs.slice(0, COLS * rows)

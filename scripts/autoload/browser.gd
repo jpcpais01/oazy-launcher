@@ -8,11 +8,21 @@ extends Node
 ## Oazy stays a single exe. The browser runs as its own process (closing or
 ## updating Oazy never takes your tabs with it) and keeps its profile in
 ## user://browser/data. A second launch hands the url to the running one.
+##
+## It also runs web apps (WebApps in oazy_browser.cs): a site in a window of its
+## own with a slim title bar and Oazy's look laid over the page (ui/apps), like
+## Flow. They share the browser's profile, so you're signed in to both at once.
 
 ## Emitted when the WebView2 runtime is missing, so the shell can explain.
 signal runtime_missing
 
 const REF := "oazy:browser"
+## Web apps: Oazy ref -> {id: the browser's web app id, url: where it lives
+## (for when the browser can't run here)}. The window keeps the app's name as
+## its title, which is how its windows find their taskbar button.
+const APPS := {
+	"oazy:flow": {"id": "flow", "name": "Flow", "url": "https://flow.google.com/u/0/"},
+}
 const SRC := "res://native/browser"
 const EXE := "OazyBrowser.exe"
 ## Everything the browser needs next to its exe, relative to SRC.
@@ -28,6 +38,12 @@ const FILES := [
 	"ui/common.css",
 	"ui/icons.js",
 	"ui/newtab.html",
+	"ui/app.html",
+	"ui/app.css",
+	"ui/app.js",
+	"ui/apps/flow.js",
+	"ui/apps/flow.css",
+	"ui/apps/flow-mock.html",
 ]
 const RUNTIME_URL := "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 
@@ -56,6 +72,24 @@ func open(url: String = "", new_window: bool = false) -> bool:
 		else:
 			App.toast("Oazy Browser runs on Windows")
 		return false
+	_launch(url, new_window, "")
+	return true
+
+
+## Opens a web app (a ref in APPS), or brings its window up if it's open.
+func open_app(ref: String) -> bool:
+	var a: Dictionary = APPS.get(ref, {})
+	if a.is_empty():
+		return false
+	if not App.is_windows():
+		OS.shell_open(str(a["url"]))
+		return false
+	_launch("", false, str(a["id"]))
+	return true
+
+
+## Checks once that WebView2 is there, then starts or forwards to the browser.
+func _launch(url: String, new_window: bool, app: String) -> void:
 	if not _runtime_checked and Host.available:
 		Host.request(["webview2"], func(d: Dictionary) -> void:
 			_runtime_checked = d.get("ok", false)
@@ -63,11 +97,19 @@ func open(url: String = "", new_window: bool = false) -> bool:
 				_runtime_checked = false
 				runtime_missing.emit()
 			else:
-				_open_now(url, new_window)
+				_open_now(url, new_window, app)
 		)
-		return true
-	_open_now(url, new_window)
-	return true
+		return
+	_open_now(url, new_window, app)
+
+
+## The web app ref a window of the browser belongs to ("" for the browser itself).
+static func app_for_window(w: Dictionary) -> String:
+	var title := str(w.get("title", ""))
+	for ref in APPS:
+		if title == str(APPS[ref]["name"]):
+			return ref
+	return ""
 
 
 ## Whether web links from Start should open here rather than the default browser.
@@ -75,8 +117,8 @@ func handles_links() -> bool:
 	return App.is_windows() and bool(Settings.get_value("browser_links"))
 
 
-func _open_now(url: String, new_window: bool) -> void:
-	_queue.append([url, new_window])
+func _open_now(url: String, new_window: bool, app := "") -> void:
+	_queue.append([url, new_window, app])
 	if _exe != "":
 		_flush()
 		return
@@ -110,7 +152,9 @@ func _flush() -> void:
 		var args := PackedStringArray(["--data", data_dir(), "--accent", "#" + App.accent.to_html(false)])
 		if q[1]:
 			args.append("--new-window")
-		if str(q[0]) != "":
+		if str(q[2]) != "":
+			args.append_array(["--app", str(q[2])])
+		elif str(q[0]) != "":
 			args.append(str(q[0]))
 		if OS.create_process(_exe, args) <= 0:
 			App.toast("Couldn't start Oazy Browser", &"error")

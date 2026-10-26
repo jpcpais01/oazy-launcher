@@ -12,6 +12,7 @@
 // WebView2Loader.dll next to the compiled exe.
 //
 // Usage: OazyBrowser.exe --data <dir> [--accent <hex>] [--new-window] [url]
+//        OazyBrowser.exe --data <dir> --app <id>     (a web app, see WebApps)
 //        OazyBrowser.exe --selftest <out dir>
 // A second launch hands its url to the running browser over a named pipe.
 
@@ -134,7 +135,7 @@ namespace OazyBrowser
 		[STAThread]
 		static int Main(string[] args)
 		{
-			string data = "", accent = "", selftest = "";
+			string data = "", accent = "", selftest = "", app = "";
 			bool newWindow = false;
 			List<string> urls = new List<string>();
 			for (int i = 0; i < args.Length; i++)
@@ -143,6 +144,7 @@ namespace OazyBrowser
 				if (a == "--data" && i + 1 < args.Length) data = args[++i];
 				else if (a == "--accent" && i + 1 < args.Length) accent = args[++i];
 				else if (a == "--selftest" && i + 1 < args.Length) selftest = args[++i];
+				else if (a == "--app" && i + 1 < args.Length) app = args[++i];
 				else if (a == "--new-window") newWindow = true;
 				else if (a.Trim() != "") urls.Add(a.Trim());
 			}
@@ -155,7 +157,7 @@ namespace OazyBrowser
 			Mutex single = new Mutex(true, "Local\\" + pipe, out first);
 			if (!first && selftest == "")
 			{
-				if (Forward(pipe, newWindow, urls)) return 0;
+				if (Forward(pipe, newWindow, urls, app)) return 0;
 				// The running copy isn't answering; carry on as a second one.
 			}
 			try { if (!Native.SetProcessDpiAwarenessContext(new IntPtr(-4))) Native.SetProcessDPIAware(); }
@@ -163,7 +165,7 @@ namespace OazyBrowser
 			try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11; } catch { }
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			int code = App.Run(data, accent, pipe, urls, newWindow, selftest);
+			int code = App.Run(data, accent, pipe, urls, newWindow, selftest, app);
 			GC.KeepAlive(single);
 			// Everything is saved and every WebView closed. Leave now rather than
 			// let CLR shutdown finalize WebView2's COM objects off their STA
@@ -173,7 +175,7 @@ namespace OazyBrowser
 			return code;
 		}
 
-		static bool Forward(string pipe, bool newWindow, List<string> urls)
+		static bool Forward(string pipe, bool newWindow, List<string> urls, string app)
 		{
 			for (int attempt = 0; attempt < 3; attempt++)
 			{
@@ -185,7 +187,8 @@ namespace OazyBrowser
 						// Let the running browser bring its window to the front.
 						try { Native.AllowSetForegroundWindow(-1); } catch { }
 						StringBuilder sb = new StringBuilder();
-						if (urls.Count == 0) sb.Append(newWindow ? "window\t\n" : "open\t\n");
+						if (app != "") sb.Append("app\t").Append(app).Append('\n');
+						else if (urls.Count == 0) sb.Append(newWindow ? "window\t\n" : "open\t\n");
 						foreach (string u in urls) sb.Append(newWindow ? "window\t" : "open\t").Append(u.Replace("\n", " ")).Append('\n');
 						byte[] bytes = Encoding.UTF8.GetBytes(sb.ToString());
 						c.Write(bytes, 0, bytes.Length);
@@ -207,6 +210,7 @@ namespace OazyBrowser
 		public const string MediaHost = "media.oazy.example";
 		public const string ChromeUrl = "https://oazy.example/chrome.html";
 		public const string NewTabUrl = "https://oazy.example/newtab.html";
+		public const string AppChromeUrl = "https://oazy.example/app.html";
 		public const string Name = "Oazy Browser";
 
 		public static string Data, Ui, Media, Accent = "#38d6c4", Version = "";
@@ -231,7 +235,7 @@ namespace OazyBrowser
 			new string[] { "brave", "Brave", "https://search.brave.com/search?q=", "https://search.brave.com/api/suggest?q=" },
 		};
 
-		public static int Run(string data, string accent, string pipe, List<string> urls, bool newWindow, string selftest)
+		public static int Run(string data, string accent, string pipe, List<string> urls, bool newWindow, string selftest, string app)
 		{
 			Data = data;
 			pipeName = pipe;
@@ -274,14 +278,14 @@ namespace OazyBrowser
 			saveTimer.Start();
 			if (selftest != "") Test = new Selftest(selftest);
 			else StartPipe();
-			Start(urls, newWindow);
+			Start(urls, newWindow, app);
 			Application.Run(ctx);
 			SaveNow();
 			if (Test != null) Test.Exited();
 			return Test != null ? Test.ExitCode : 0;
 		}
 
-		static async void Start(List<string> urls, bool newWindow)
+		static async void Start(List<string> urls, bool newWindow, string app)
 		{
 			try
 			{
@@ -300,10 +304,55 @@ namespace OazyBrowser
 				Test.Begin();
 				return;
 			}
+			// A web app opens on its own; your browser tabs wait until you open the browser.
+			if (WebApps.Find(app) != null) { OpenApp(WebApps.Find(app)); return; }
+			OpenBrowser(urls, newWindow);
+		}
+
+		static bool sessionLoaded;
+
+		static void OpenBrowser(List<string> urls, bool newWindow)
+		{
 			bool restored = false;
-			if (!newWindow && Json.Bool(Prefs, "no_restore") == false) restored = RestoreSession();
+			if (!sessionLoaded && !newWindow && Json.Bool(Prefs, "no_restore") == false) restored = RestoreSession();
+			sessionLoaded = true;
 			if (!restored) OpenWindow(urls.Count > 0 ? urls : new List<string> { "" }, 0, null, false);
 			else foreach (string u in urls) LastActive.AddTab(FixUrl(u), true, -1);
+		}
+
+		// The window of a web app, brought up if it's already open.
+		public static BrowserWindow OpenApp(WebAppDef a)
+		{
+			foreach (BrowserWindow w in Windows)
+				if (w.WebApp == a) { w.BringUp(); return w; }
+			Rectangle? bounds = null;
+			bool max = false;
+			Dictionary<string, object> saved = Prefs.ContainsKey("app_" + a.Id) ? Prefs["app_" + a.Id] as Dictionary<string, object> : null;
+			if (saved != null)
+			{
+				object[] b = saved.ContainsKey("bounds") ? saved["bounds"] as object[] : null;
+				if (b != null && b.Length == 4)
+					try { bounds = new Rectangle(Convert.ToInt32(b[0]), Convert.ToInt32(b[1]), Convert.ToInt32(b[2]), Convert.ToInt32(b[3])); } catch { }
+				max = Json.Bool(saved, "max");
+			}
+			return OpenWindow(new List<string> { a.Url }, 0, bounds, max, a);
+		}
+
+		// The most recent ordinary browser window, if any.
+		public static BrowserWindow LastBrowser()
+		{
+			if (LastActive != null && LastActive.WebApp == null) return LastActive;
+			for (int i = Windows.Count - 1; i >= 0; i--) if (Windows[i].WebApp == null) return Windows[i];
+			return null;
+		}
+
+		// Opens a url in the browser proper (from a web app's window).
+		public static void OpenInBrowser(string url)
+		{
+			BrowserWindow w = LastBrowser();
+			if (w == null) { OpenBrowser(new List<string> { url }, false); return; }
+			w.AddTab(FixUrl(url), true, -1);
+			w.BringUp();
 		}
 
 		static bool RestoreSession()
@@ -311,6 +360,7 @@ namespace OazyBrowser
 			Dictionary<string, object> s = Json.Load(Path.Combine(Data, "session.json"));
 			object[] wins = s.ContainsKey("windows") ? s["windows"] as object[] : null;
 			if (wins == null || wins.Length == 0) return false;
+			int before = Windows.Count;
 			int opened = 0;
 			foreach (object o in wins)
 			{
@@ -329,12 +379,17 @@ namespace OazyBrowser
 				OpenWindow(list, Json.Int(w, "active"), bounds, Json.Bool(w, "max"));
 				opened++;
 			}
-			return opened > 0;
+			return opened > 0 && Windows.Count > before;
 		}
 
 		public static BrowserWindow OpenWindow(List<string> urls, int active, Rectangle? bounds, bool maximized)
 		{
-			BrowserWindow w = new BrowserWindow(urls, active, bounds, maximized);
+			return OpenWindow(urls, active, bounds, maximized, null);
+		}
+
+		public static BrowserWindow OpenWindow(List<string> urls, int active, Rectangle? bounds, bool maximized, WebAppDef app)
+		{
+			BrowserWindow w = new BrowserWindow(urls, active, bounds, maximized, app);
 			Windows.Add(w);
 			LastActive = w;
 			w.FormClosed += delegate
@@ -417,14 +472,24 @@ namespace OazyBrowser
 				int tab = line.IndexOf('\t');
 				if (tab < 0) continue;
 				string kind = line.Substring(0, tab), url = line.Substring(tab + 1).Trim();
-				if (kind == "window" || LastActive == null || (kind == "open" && url == ""))
+				BrowserWindow last = LastBrowser();
+				if (kind == "app")
+				{
+					if (WebApps.Find(url) != null) OpenApp(WebApps.Find(url));
+				}
+				else if (!sessionLoaded || last == null)
+				{
+					// Only web apps were open: this is the browser's first window.
+					OpenBrowser(url == "" ? new List<string>() : new List<string> { url }, kind == "window");
+				}
+				else if (kind == "window" || (kind == "open" && url == ""))
 				{
 					OpenWindow(new List<string> { url }, 0, null, false);
 				}
 				else
 				{
-					LastActive.AddTab(FixUrl(url), true, -1);
-					LastActive.BringUp();
+					last.AddTab(FixUrl(url), true, -1);
+					last.BringUp();
 				}
 			}
 		}
@@ -507,8 +572,18 @@ namespace OazyBrowser
 			{
 				sessionDirty = false;
 				List<object> wins = new List<object>();
-				foreach (BrowserWindow w in Windows) wins.Add(w.SessionInfo());
-				Json.Save(Path.Combine(Data, "session.json"), Json.Obj("windows", wins.ToArray()));
+				foreach (BrowserWindow w in Windows)
+				{
+					// A web app keeps only where its window was; it isn't part of the session.
+					if (w.WebApp != null) { Prefs["app_" + w.WebApp.Id] = w.SessionInfo(); prefsDirty = true; }
+					else wins.Add(w.SessionInfo());
+				}
+				if (wins.Count > 0 && sessionLoaded) Json.Save(Path.Combine(Data, "session.json"), Json.Obj("windows", wins.ToArray()));
+			}
+			if (prefsDirty)
+			{
+				prefsDirty = false;
+				Json.Save(Path.Combine(Data, "prefs.json"), Prefs);
 			}
 			History.SaveIfDirty();
 			Downloads.SaveIfDirty();
@@ -993,6 +1068,110 @@ namespace OazyBrowser
 		}
 	}
 
+	// --- Web apps: a site in its own window, wearing Oazy's look -------------------------
+	// The site does all the work; Oazy adds a style sheet and a script (ui/apps)
+	// that only restyle and rearrange what's there. The script finds its way
+	// around the page by what things are (the prompt box, the media) rather
+	// than by Google's class names, and if it can't, the site shows as it is.
+
+	class WebAppDef
+	{
+		public string Id, Name, Url, Script, Style;
+		public string[] Hosts;
+		public Color A, B;
+	}
+
+	static class WebApps
+	{
+		public static readonly WebAppDef[] All =
+		{
+			new WebAppDef
+			{
+				Id = "flow", Name = "Flow", Url = "https://flow.google.com/u/0/",
+				Hosts = new string[] { "flow.google.com", "flow.google", "labs.google" },
+				Script = "flow.js", Style = "flow.css",
+				A = Color.FromArgb(124, 108, 255), B = Color.FromArgb(38, 92, 214),
+			},
+		};
+
+		// Signing in happens on Google's account pages, inside the app's window.
+		static readonly string[] SignIn = { "accounts.google.com", "accounts.youtube.com", "gds.google.com" };
+
+		public static WebAppDef Find(string id)
+		{
+			foreach (WebAppDef a in All) if (a.Id == id) return a;
+			return null;
+		}
+
+		static bool HostIn(string host, string[] list)
+		{
+			foreach (string h in list) if (host == h || host.EndsWith("." + h)) return true;
+			return false;
+		}
+
+		public static bool Owns(WebAppDef a, string url)
+		{
+			return HostIn(App.HostOf(url), a.Hosts);
+		}
+
+		// Whether a page belongs in the app's window (else the browser opens it).
+		public static bool Stays(WebAppDef a, string url)
+		{
+			if (string.IsNullOrEmpty(url) || url.StartsWith("about:") || url.StartsWith("blob:") || url.StartsWith("data:")) return true;
+			string host = App.HostOf(url);
+			return HostIn(host, a.Hosts) || HostIn(host, SignIn);
+		}
+
+		static string Read(string name)
+		{
+			try { return File.ReadAllText(Path.Combine(App.Ui, "apps", name), Encoding.UTF8); } catch { return ""; }
+		}
+
+		// The script that goes into every document: the app's script, handed its
+		// style sheet and settings, in a closure of its own.
+		public static string Bootstrap(WebAppDef a, bool on, string accent, bool test)
+		{
+			string config = Json.S.Serialize(Json.Obj("id", a.Id, "hosts", a.Hosts, "on", on, "accent", accent, "test", test, "css", Read(a.Style)));
+			return "(function () {\n'use strict';\nconst OAZY = " + config + ";\n" + Read(a.Script) + "\n})();";
+		}
+
+		// The window's own icon (Alt+Tab, Windows' taskbar): a glass tile with a spark.
+		public static Icon MakeIcon(WebAppDef a)
+		{
+			using (Bitmap bmp = new Bitmap(64, 64))
+			{
+				using (Graphics g = Graphics.FromImage(bmp))
+				{
+					g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+					using (System.Drawing.Drawing2D.GraphicsPath tile = Rounded(new RectangleF(3, 3, 58, 58), 16))
+					using (System.Drawing.Drawing2D.LinearGradientBrush fill = new System.Drawing.Drawing2D.LinearGradientBrush(new PointF(0, 3), new PointF(0, 61), a.A, a.B))
+						g.FillPath(fill, tile);
+					PointF[] star = new PointF[8];
+					for (int i = 0; i < 8; i++)
+					{
+						double ang = Math.PI / 4 * i - Math.PI / 2;
+						float r = i % 2 == 0 ? 20f : 6.5f;
+						star[i] = new PointF(32 + (float)Math.Cos(ang) * r, 32 + (float)Math.Sin(ang) * r);
+					}
+					using (SolidBrush white = new SolidBrush(Color.White)) g.FillPolygon(white, star);
+				}
+				return Icon.FromHandle(bmp.GetHicon());
+			}
+		}
+
+		static System.Drawing.Drawing2D.GraphicsPath Rounded(RectangleF r, float rad)
+		{
+			System.Drawing.Drawing2D.GraphicsPath p = new System.Drawing.Drawing2D.GraphicsPath();
+			float d = rad * 2;
+			p.AddArc(r.Left, r.Top, d, d, 180, 90);
+			p.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+			p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+			p.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+			p.CloseFigure();
+			return p;
+		}
+	}
+
 	// --- A tab ------------------------------------------------------------------------
 
 	class Tab
@@ -1007,6 +1186,7 @@ namespace OazyBrowser
 		public string Url = "", Title = "", Icon = "";
 		public bool Loading, Audio, Muted, Crashed, Transparent;
 		public int Opener;
+		public string ScriptId;
 
 		public bool IsNtp
 		{
@@ -1024,7 +1204,12 @@ namespace OazyBrowser
 
 	class BrowserWindow : Form
 	{
-		const int ChromeDip = 88;
+		// A web app's window (WebApps) has a slim title bar instead of tabs and
+		// an address bar, and Oazy's look laid over the site.
+		public readonly WebAppDef WebApp;
+		bool look;
+		int ChromeDip { get { return WebApp != null ? 40 : 88; } }
+		string ChromePage { get { return WebApp != null ? App.AppChromeUrl : App.ChromeUrl; } }
 		const int WM_GETMINMAXINFO = 0x24, WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84, WM_DPICHANGED = 0x2E0, WM_MOVE = 0x3, WM_ACTIVATE = 0x6, WM_NCLBUTTONDOWN = 0xA1;
 		const int HTCLIENT = 1, HTCAPTION = 2, HTTOP = 12, HTTOPLEFT = 13, HTTOPRIGHT = 14;
 
@@ -1045,29 +1230,31 @@ namespace OazyBrowser
 		readonly int initialActive;
 		readonly bool startMaximized;
 
-		public BrowserWindow(List<string> urls, int active, Rectangle? bounds, bool maximized)
+		public BrowserWindow(List<string> urls, int active, Rectangle? bounds, bool maximized, WebAppDef app)
 		{
+			WebApp = app;
 			initialUrls = urls;
 			initialActive = active;
 			startMaximized = maximized;
-			Text = App.Name;
+			Text = app != null ? app.Name : App.Name;
+			if (app != null) look = !Json.Bool(App.Prefs, "app_" + app.Id + "_plain");
 			BackColor = Color.Black;
 			FormBorderStyle = FormBorderStyle.Sizable;
 			StartPosition = FormStartPosition.Manual;
 			KeyPreview = false;
-			try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+			try { Icon = app != null ? WebApps.MakeIcon(app) : Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 			contentPanel.BackColor = Color.Black;
 			Controls.Add(contentPanel);
 
 			Rectangle work = Screen.FromPoint(Cursor.Position).WorkingArea;
 			float scale = DpiScale(work);
-			int w = (int)(1320 * scale), h = (int)(860 * scale);
+			int w = (int)((app != null ? 1440 : 1320) * scale), h = (int)((app != null ? 900 : 860) * scale);
 			w = Math.Min(w, work.Width - 40);
 			h = Math.Min(h, work.Height - 40);
 			Rectangle r = new Rectangle(work.Left + (work.Width - w) / 2, work.Top + (work.Height - h) / 2, w, h);
 			if (bounds.HasValue && bounds.Value.Width > 300 && bounds.Value.Height > 200 && Screen.FromRectangle(bounds.Value).WorkingArea.IntersectsWith(bounds.Value))
 				r = bounds.Value;
-			else if (App.Windows.Count > 0)
+			else if (App.Windows.Count > 0 && app == null)
 				r.Offset((int)(32 * scale * App.Windows.Count), (int)(32 * scale * App.Windows.Count));
 			Bounds = r;
 			MinimumSize = new Size((int)(560 * scale), (int)(380 * scale));
@@ -1308,8 +1495,10 @@ namespace OazyBrowser
 		protected override void OnFormClosing(FormClosingEventArgs e)
 		{
 			closing = true;
-			// The last window's tabs are the session to come back to.
-			if (App.Windows.Count == 1) App.SessionChanged();
+			// The last browser window's tabs are the session to come back to.
+			int browsers = 0;
+			foreach (BrowserWindow x in App.Windows) if (x.WebApp == null) browsers++;
+			if (WebApp != null || browsers == 1) App.SessionChanged();
 			App.SaveNow();
 			base.OnFormClosing(e);
 		}
@@ -1370,11 +1559,11 @@ namespace OazyBrowser
 			cw.NavigationStarting += delegate(object o, CoreWebView2NavigationStartingEventArgs e)
 			{
 				// The chrome never leaves its own page.
-				if (!e.Uri.StartsWith(App.ChromeUrl)) e.Cancel = true;
+				if (!e.Uri.StartsWith(ChromePage)) e.Cancel = true;
 			};
 			chrome.AcceleratorKeyPressed += OnAccelerator;
 			DoLayout();
-			cw.Navigate(App.ChromeUrl);
+			cw.Navigate(ChromePage);
 
 			for (int i = 0; i < initialUrls.Count; i++)
 			{
@@ -1406,7 +1595,8 @@ namespace OazyBrowser
 				case "ready":
 					chromeReady = true;
 					Post(Json.Obj("t", "init", "glass", glass, "accent", App.Accent, "engine", App.Engine(), "engines", EngineList(),
-						"restore", !Json.Bool(App.Prefs, "no_restore"), "version", App.Version, "nativeDrag", nativeDrag));
+						"restore", !Json.Bool(App.Prefs, "no_restore"), "version", App.Version, "nativeDrag", nativeDrag,
+						"app", WebApp != null ? WebApp.Name : "", "look", look));
 					foreach (object o in outbox) Post(o);
 					outbox.Clear();
 					PostWinState();
@@ -1461,6 +1651,8 @@ namespace OazyBrowser
 					break;
 				case "find": Find(m); break;
 				case "focusContent": FocusContent(); break;
+				case "look": SetLook(Json.Bool(m, "on")); break;
+				case "openInBrowser": if (Active != null) App.OpenInBrowser(Active.ShownUrl); break;
 				case "test":
 					if (App.Test != null) App.Test.FromChrome(this, m);
 					break;
@@ -1525,7 +1717,8 @@ namespace OazyBrowser
 			c.Bounds = new Rectangle(Point.Empty, contentPanel.ClientSize);
 			c.IsVisible = t == Active && WindowState != FormWindowState.Minimized && !pageHidden;
 			SetupTab(t);
-			SetTransparent(t, t.IsNtp);
+			SetTransparent(t, Glassy(t.ShownUrl));
+			if (WebApp != null) await InjectApp(t);
 			if (t.Pending != null)
 			{
 				string url = t.Pending;
@@ -1541,13 +1734,16 @@ namespace OazyBrowser
 			w.Settings.IsStatusBarEnabled = true;
 			w.Settings.AreDevToolsEnabled = true;
 			w.SetVirtualHostNameToFolderMapping(App.UiHost, App.Ui, CoreWebView2HostResourceAccessKind.DenyCors);
+			// The self-test can't sign in to a web app; it gets a stand-in page on the app's own host.
+			if (WebApp != null && App.Test != null)
+				w.SetVirtualHostNameToFolderMapping(WebApp.Hosts[0], Path.Combine(App.Ui, "apps"), CoreWebView2HostResourceAccessKind.Allow);
 			c.AcceleratorKeyPressed += OnAccelerator;
 			c.ZoomFactorChanged += delegate { if (t == Active) PushNav(); };
 			c.GotFocus += delegate { if (t == Active) Post(Json.Obj("t", "contentFocus")); };
 			w.SourceChanged += delegate
 			{
 				t.Url = w.Source;
-				SetTransparent(t, t.IsNtp);
+				SetTransparent(t, Glassy(t.Url));
 				if (t == Active) PushNav();
 				PushTabs();
 				App.SessionChanged();
@@ -1563,7 +1759,15 @@ namespace OazyBrowser
 			{
 				t.Loading = true;
 				t.Crashed = false;
-				SetTransparent(t, e.Uri.StartsWith(App.NewTabUrl, StringComparison.OrdinalIgnoreCase));
+				SetTransparent(t, Glassy(e.Uri));
+				// Links out of a web app open in the browser proper.
+				if (WebApp != null && e.IsUserInitiated && !WebApps.Stays(WebApp, e.Uri) && e.Uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+				{
+					e.Cancel = true;
+					t.Loading = false;
+					App.OpenInBrowser(e.Uri);
+					return;
+				}
 				if (t == Active) PushNav();
 				PushTabs();
 			};
@@ -1579,6 +1783,13 @@ namespace OazyBrowser
 			w.WindowCloseRequested += delegate { CloseTab(t); };
 			w.NewWindowRequested += async delegate(object o, CoreWebView2NewWindowRequestedEventArgs e)
 			{
+				// A web app's links to other sites open in the browser proper.
+				if (WebApp != null && !WebApps.Stays(WebApp, e.Uri))
+				{
+					e.Handled = true;
+					App.OpenInBrowser(e.Uri);
+					return;
+				}
 				// Popups and target=_blank links open as tabs next to this one, still
 				// connected to their opener (sign-in popups need that).
 				CoreWebView2Deferral def = e.GetDeferral();
@@ -1610,6 +1821,9 @@ namespace OazyBrowser
 			};
 			w.WebMessageReceived += delegate(object o, CoreWebView2WebMessageReceivedEventArgs e)
 			{
+				// A web app's script reports how its look went (nothing it says is acted on
+				// beyond showing it).
+				if (WebApp != null && WebApps.Owns(WebApp, e.Source)) { OnAppMessage(t, e.WebMessageAsJson); return; }
 				// Only Oazy's own pages (the new tab page) may talk to the browser.
 				if (!e.Source.StartsWith("https://" + App.UiHost + "/", StringComparison.OrdinalIgnoreCase)) return;
 				OnPageMessage(t, e.WebMessageAsJson);
@@ -1654,7 +1868,47 @@ namespace OazyBrowser
 		{
 			if (t.C == null || t.Transparent == on) return;
 			t.Transparent = on;
-			try { t.C.DefaultBackgroundColor = on ? Color.Transparent : Color.White; } catch { }
+			try { t.C.DefaultBackgroundColor = on ? Color.Transparent : (WebApp != null ? Color.FromArgb(12, 17, 21) : Color.White); } catch { }
+		}
+
+		// Whether this page sits straight on the window's glass: the new tab page,
+		// and a web app's own site while it wears Oazy's look.
+		bool Glassy(string url)
+		{
+			if (url == null) return false;
+			if (url == "" || url.StartsWith(App.NewTabUrl, StringComparison.OrdinalIgnoreCase)) return WebApp == null;
+			return WebApp != null && look && WebApps.Owns(WebApp, url);
+		}
+
+		// Oazy's look over a web app on or off (Ctrl+Shift+O, or the title bar).
+		void SetLook(bool on)
+		{
+			if (WebApp == null || on == look) return;
+			look = on;
+			App.SetPref("app_" + WebApp.Id + "_plain", !on);
+			foreach (Tab t in Tabs)
+			{
+				if (t.W == null) continue;
+				InjectApp(t);
+				SetTransparent(t, Glassy(t.Url));
+				try { t.W.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('oazy:look', { detail: " + (on ? "true" : "false") + " }))"); } catch { }
+			}
+			Post(Json.Obj("t", "look", "on", look));
+		}
+
+		// The web app's style and script go in before the site's own code runs,
+		// in every document the tab loads. Re-added when the look changes.
+		async Task InjectApp(Tab t)
+		{
+			if (WebApp == null || t.W == null) return;
+			try
+			{
+				if (t.ScriptId != null) t.W.RemoveScriptToExecuteOnDocumentCreated(t.ScriptId);
+				t.ScriptId = null;
+				string id = await t.W.AddScriptToExecuteOnDocumentCreatedAsync(WebApps.Bootstrap(WebApp, look, App.Accent, App.Test != null));
+				t.ScriptId = id;
+			}
+			catch { }
 		}
 
 		async void LoadFavicon(Tab t)
@@ -1779,6 +2033,8 @@ namespace OazyBrowser
 
 		void UpdateTitle()
 		{
+			// A web app's window keeps its name, so Oazy's taskbar knows it.
+			if (WebApp != null) { Text = WebApp.Name; return; }
 			string title = Active == null || Active.IsNtp ? "New tab" : (Active.Title != "" ? Active.Title : DisplayUrl(Active.ShownUrl));
 			Text = title + " - " + App.Name;
 		}
@@ -1971,9 +2227,18 @@ namespace OazyBrowser
 
 		// --- Commands and shortcuts ----------------------------------------------------------------
 
+		static readonly string[] AppCommands = { "back", "forward", "reload", "hardReload", "stop", "closeTab", "closeWindow", "nextTab", "prevTab",
+			"fullscreen", "zoomIn", "zoomOut", "zoomReset", "print", "devtools", "minimize", "maximize", "close", "downloadsFolder", "tab", "look" };
+
 		void Command(string cmd, Dictionary<string, object> m)
 		{
 			Tab t = Active;
+			if (WebApp != null && Array.IndexOf(AppCommands, cmd) < 0)
+			{
+				// Browser things asked of a web app's window go to the browser.
+				if (cmd == "newTab" || cmd == "newWindow" || cmd == "focusOmnibox") App.OpenInBrowser("");
+				return;
+			}
 			switch (cmd)
 			{
 				case "back": if (t != null && t.W != null && t.W.CanGoBack) t.W.GoBack(); break;
@@ -2032,6 +2297,7 @@ namespace OazyBrowser
 					App.SetPref("no_restore", !Json.Bool(m, "value"));
 					break;
 				case "clearData": ClearData(); break;
+				case "look": SetLook(!look); break;
 				case "minimize": WindowState = FormWindowState.Minimized; break;
 				case "maximize":
 					if (fullscreen) SetFullscreen(false);
@@ -2106,6 +2372,7 @@ namespace OazyBrowser
 					case 0x4C: cmd = "focusOmnibox"; break;                            // L
 					case 0x4B: cmd = "focusOmnibox"; break;                            // K
 					case 0x52: cmd = shift ? "hardReload" : "reload"; break;           // R
+					case 0x4F: if (shift) cmd = "look"; break;                         // Shift+O
 					case 0x74: cmd = "hardReload"; break;                              // F5
 					case 0x46: cmd = "find"; break;                                    // F
 					case 0x48: cmd = "history"; break;                                 // H
@@ -2158,6 +2425,13 @@ namespace OazyBrowser
 					break;
 				}
 			}
+			if (WebApp != null)
+			{
+				CoreWebView2ContextMenuItem browserItem = App.Env.CreateContextMenuItem("Open link in Oazy Browser", null, CoreWebView2ContextMenuItemKind.Command);
+				browserItem.CustomItemSelected += delegate { Sync(delegate { App.OpenInBrowser(link); }); };
+				items.Insert(Math.Min(at, items.Count), browserItem);
+				return;
+			}
 			CoreWebView2ContextMenuItem tabItem = App.Env.CreateContextMenuItem("Open link in new tab", null, CoreWebView2ContextMenuItemKind.Command);
 			tabItem.CustomItemSelected += delegate { Sync(delegate { AddTab(link, false, Tabs.IndexOf(t) + 1 + CountOpened(t)); }); };
 			CoreWebView2ContextMenuItem winItem = App.Env.CreateContextMenuItem("Open link in new window", null, CoreWebView2ContextMenuItemKind.Command);
@@ -2169,6 +2443,21 @@ namespace OazyBrowser
 		static void Sync(Action a)
 		{
 			App.Sync.Post(delegate { a(); }, null);
+		}
+
+		// --- Web apps ----------------------------------------------------------------------------
+
+		void OnAppMessage(Tab t, string json)
+		{
+			Dictionary<string, object> m;
+			try { m = Json.S.DeserializeObject(json) as Dictionary<string, object>; } catch { return; }
+			if (m == null || Json.Str(m, "oazyApp") != WebApp.Id) return;
+			if (Json.Str(m, "t") == "look")
+			{
+				// Shown in the title bar: whether the look found its way around the page.
+				Post(Json.Obj("t", "appStatus", "ok", Json.Bool(m, "ok"), "found", Json.Str(m, "found"), "on", look));
+				if (App.Test != null) App.Test.AppLook(this, m);
+			}
 		}
 
 		// --- The new tab page ----------------------------------------------------------------
@@ -2227,6 +2516,7 @@ namespace OazyBrowser
 		public void TestNavigate(string url) { Navigate(Active, url); }
 		public void TestShowChrome(bool on) { try { chrome.IsVisible = on; } catch { } }
 		public void TestShowPage(bool on) { try { Active.C.IsVisible = on; } catch { } }
+		public void TestLook(bool on) { SetLook(on); }
 	}
 
 	// --- Self-test: proves the browser works on a real Windows box (CI) ------------------
@@ -2236,8 +2526,8 @@ namespace OazyBrowser
 		readonly string dir;
 		readonly List<string> log = new List<string>();
 		public int ExitCode = 1;
-		BrowserWindow win;
-		bool chromeOk, ntpOk, pageOk, glassOk, done;
+		BrowserWindow win, appWin;
+		bool chromeOk, ntpOk, pageOk, glassOk, appOk, done;
 		int step, retries;
 		const string TestUrl = "https://en.wikipedia.org/wiki/Oasis";
 		System.Windows.Forms.Timer timeout;
@@ -2318,8 +2608,36 @@ namespace OazyBrowser
 				win.TestOpenPanel("downloads");
 				await Task.Delay(1000);
 				Shot("browser-downloads.png");
+				win.TestOpenPanel("");
+				// A web app, on a stand-in for its site: the slim window and the look.
+				step = 4;
+				WebAppDef flow = WebApps.Find("flow");
+				Rectangle bounds = win.Bounds;
+				// Screenshots are taken off the screen, so the browser steps aside.
+				win.WindowState = FormWindowState.Minimized;
+				appWin = App.OpenWindow(new List<string> { "https://" + flow.Hosts[0] + "/flow-mock.html" }, 0, bounds, false, flow);
+				appWin.TopMost = true;
+				await Task.Delay(20000);
+				if (step == 4) { Log("the web app's look never reported"); Shot(appWin, "flow-app.png"); Finish(); }
+			}
+			else if (step == 5)
+			{
+				await Task.Delay(1800);
+				Shot(appWin, "flow-app.png");
+				appWin.TestLook(false);
+				await Task.Delay(1800);
+				Shot(appWin, "flow-plain.png");
 				Finish();
 			}
+		}
+
+		public void AppLook(BrowserWindow w, Dictionary<string, object> m)
+		{
+			Log("web app look: ok=" + Json.Bool(m, "ok") + " found=" + Json.Str(m, "found"));
+			if (step != 4 || w != appWin) return;
+			appOk = Json.Bool(m, "ok") && Json.Str(m, "found").Contains("prompt") && Json.Str(m, "found").Contains("media");
+			step = 5;
+			Next();
 		}
 
 		public void Exited()
@@ -2346,11 +2664,13 @@ namespace OazyBrowser
 			catch (Exception e) { Log("glass check failed: " + e.Message); return false; }
 		}
 
-		void Shot(string name)
+		void Shot(string name) { Shot(win, name); }
+
+		void Shot(BrowserWindow of, string name)
 		{
 			try
 			{
-				Rectangle b = win.Bounds;
+				Rectangle b = of.Bounds;
 				using (Bitmap bmp = new Bitmap(b.Width, b.Height))
 				{
 					using (Graphics g = Graphics.FromImage(bmp)) g.CopyFromScreen(b.Location, Point.Empty, b.Size);
@@ -2373,8 +2693,8 @@ namespace OazyBrowser
 		{
 			if (done) return;
 			done = true;
-			ExitCode = chromeOk && ntpOk && pageOk && glassOk ? 0 : 1;
-			Log("chrome=" + chromeOk + " ntp=" + ntpOk + " page=" + pageOk + " glass=" + glassOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
+			ExitCode = chromeOk && ntpOk && pageOk && glassOk && appOk ? 0 : 1;
+			Log("chrome=" + chromeOk + " ntp=" + ntpOk + " page=" + pageOk + " glass=" + glassOk + " app=" + appOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
 			try { File.WriteAllLines(Path.Combine(dir, "browser-selftest.log"), log.ToArray()); } catch { }
 			App.Quit();
 		}
