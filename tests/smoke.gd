@@ -391,6 +391,18 @@ func _ui_tests() -> void:
 	check(main.taskbar.button_for("oazy:settings") != null and main.taskbar.button_for("oazy:settings").window_count() == 1, "windows: shell windows on the taskbar")
 	_window_checks(main, lib, "library")
 	_window_checks(main, settings, "settings")
+	var st := settings.body.get_child(0) as SettingsApp
+	for spec in SettingsApp.PAGES:
+		st.open_page(spec[0])
+		check(st.page_visible(spec[0]) and st.visible_rows() > 0, "settings: %s page shows its settings" % spec[0])
+	st.open_page("desktop")
+	st.search("taskbar")
+	check(st.visible_rows() >= 2 and st.page_visible("desktop"), "settings: search finds taskbar settings")
+	st.search("zzqx")
+	check(st.visible_rows() == 0, "settings: search with no match shows nothing")
+	st.search("")
+	check(st.page_visible("desktop") and not st.page_visible("personalise"), "settings: clearing search goes back to the page")
+	st.open_page("personalise")
 	settings.toggle_maximize()
 	await _wait(0.5)
 	check(settings.maximized and main.layer.work_rect().grow(1.0).encloses(settings.get_rect()), "windows: maximise fills the work area")

@@ -625,6 +625,14 @@ func attach_network(n: NetworkFlyout) -> void:
 	network = n
 
 
+## Opens the network flyout from its tray button (Settings' Choose a network).
+func open_network() -> void:
+	if network and _net:
+		_close_flyouts(network)
+		if not network.is_open:
+			network.toggle(_net)
+
+
 ## Every tray flyout but `keep` closes, so only one is ever up.
 func _close_flyouts(keep: Flyout) -> void:
 	for f in [quick, calendar, weather, network]:
