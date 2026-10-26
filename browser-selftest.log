@@ -1,0 +1,10 @@
+02:29:47.595 runtime 155.0.4283.62
+02:29:51.886 chrome ready
+02:29:51.902 new tab page ready
+02:29:53.502 saved browser-newtab.png
+02:29:54.213 page loaded: True https://en.wikipedia.org/wiki/Oasis
+02:29:56.757 saved browser-page.png
+02:30:00.514 saved browser-menu.png
+02:30:02.061 saved browser-downloads.png
+02:30:02.061 chrome=True ntp=True page=True -> PASS
+02:30:02.331 message loop ended, exiting with 0
