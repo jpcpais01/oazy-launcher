@@ -36,6 +36,7 @@ Weather="*res://scripts/autoload/weather.gd"
 Network="*res://scripts/autoload/network.gd"
 Browser="*res://scripts/autoload/browser.gd"
 Terminal="*res://scripts/autoload/terminal.gd"
+Files="*res://scripts/autoload/files.gd"
 Cleaner="*res://scripts/autoload/cleaner.gd"
 Cursors="*res://scripts/autoload/cursors.gd"
 

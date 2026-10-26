@@ -209,6 +209,20 @@ func _logic_tests() -> void:
 	if App.is_windows():
 		var built_term := Terminal.build()
 		check(built_term.has("exe"), "terminal: compiles on Windows (%s)" % str(built_term.get("error", "ok")))
+	# Oazy Files: folders in an Oazy window, standing in for File Explorer.
+	check(Catalog.item(Files.REF)["kind"] == "oazy", "files: in the catalog")
+	check(Catalog.is_own_window_app(Files.REF), "files: its own window")
+	var fe_ref := Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\files\\app-1234abcd\\OazyFiles.exe", "title": "Downloads - Oazy Files"})
+	check(fe_ref == Files.REF or fe_ref.begins_with("app:"), "files: windows group under Files or File Explorer")
+	check(Files.is_explorer({"ref": "app:Microsoft.Windows.Explorer", "name": "File Explorer"}), "files: takes over File Explorer")
+	check(not Files.is_explorer({"ref": "app:Chrome", "name": "Google Chrome"}), "files: leaves other apps alone")
+	check(Settings.get_value("files_oazy") == true, "files: on by default")
+	var files_files := Files.files()
+	for f in files_files:
+		check(FileAccess.file_exists(str(files_files[f])), "files: packaged " + str(f))
+	if App.is_windows():
+		var built_files := Files.build()
+		check(built_files.has("exe"), "files: compiles on Windows (%s)" % str(built_files.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
 	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")

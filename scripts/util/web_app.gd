@@ -6,6 +6,7 @@ class_name WebApp
 ## build() unpacks `files` ({path in the app folder: res:// path}) into
 ## user://<folder>/app-<hash of the files> and compiles `cs` there into `exe`.
 ## A new Oazy with changed files builds a new folder and cleans up old ones.
+## `refs` are extra .NET Framework assemblies the program uses.
 
 const WEBVIEW2 := {
 	"Microsoft.Web.WebView2.Core.dll": "res://native/browser/bin/Microsoft.Web.WebView2.Core.dll",
@@ -15,7 +16,7 @@ const WEBVIEW2 := {
 
 
 ## Returns {"exe": path} or {"error": text}. Safe to call from a worker thread.
-static func build(folder: String, exe_name: String, cs: String, icon: String, files: Dictionary) -> Dictionary:
+static func build(folder: String, exe_name: String, cs: String, icon: String, files: Dictionary, refs: Array = []) -> Dictionary:
 	var hashes := PackedStringArray()
 	var blobs := {}
 	for f in files:
@@ -47,8 +48,10 @@ static func build(folder: String, exe_name: String, cs: String, icon: String, fi
 		var args := ["/nologo", "/optimize+", "/target:winexe", "/platform:x64",
 			"/win32icon:" + w.call(icon),
 			"/r:System.dll", "/r:System.Core.dll", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll", "/r:System.Web.Extensions.dll",
-			"/r:" + w.call("Microsoft.Web.WebView2.Core.dll"),
-			"/out:" + w.call(exe_name + ".tmp"), w.call(cs)]
+			"/r:" + w.call("Microsoft.Web.WebView2.Core.dll")]
+		for r in refs:
+			args.append("/r:" + str(r))
+		args.append_array(["/out:" + w.call(exe_name + ".tmp"), w.call(cs)])
 		var code := OS.execute(csc, args, out, true)
 		if code == 0 and FileAccess.file_exists(dir.path_join(exe_name + ".tmp")):
 			DirAccess.rename_absolute(dir.path_join(exe_name + ".tmp"), exe)
