@@ -135,6 +135,13 @@ func _logic_tests() -> void:
 	check(Art.decode(FileAccess.get_file_as_bytes(Art.brand_art("Higgsfield", &"cover"))) != null, "art: built-in app art decodes")
 	check(Art.brand_art("Some Random Game", &"cover") == "", "art: no built-in art for unknown names")
 
+	check(Art.share_image("<head><meta property=\"og:image\" content=\"https://cdn.x/og.jpg\"></head>", "https://x.com") == "https://cdn.x/og.jpg", "art: share image from og:image")
+	check(Art.share_image("<meta content='/img/s.png' name='twitter:image'>", "https://x.com/app") == "https://x.com/img/s.png", "art: share image, relative and reversed attributes")
+	var wide := Image.create(1200, 630, false, Image.FORMAT_RGBA8)
+	wide.fill(Color(0.3, 0.4, 0.9))
+	var poster := Art.poster_from_wide(wide)
+	check(poster != null and poster.get_size() == Vector2i(600, 900), "art: wide share image becomes a poster")
+
 	var deduped := Library.dedupe_found([{"name": "Apex Legends", "kind": "game", "source": "ea", "path": "a"}, {"name": "Apex Legends™", "kind": "game", "source": "steam", "path": "b"}])
 	check(deduped.size() == 1 and deduped[0]["source"] == "steam", "discovery: one tile per game, best store wins")
 	check(not Catalog.is_clutter("Debugger Pro", "x") and Catalog.is_clutter("Game Setup", "x") and Catalog.is_clutter("Thing", "C:/Thing/unins000.exe"), "catalog: clutter matches whole words and helper exes")
