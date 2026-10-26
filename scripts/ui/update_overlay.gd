@@ -349,28 +349,7 @@ func _show_veil(version: String) -> void:
 	_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_veil.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_veil)
-	var wall := Wallpaper.new()
-	_veil.add_child(wall)
-	wall.mat.set_shader_parameter("focus_center", 1.0)
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_veil.add_child(center)
-	var col := Kit.vbox(18)
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_child(col)
-	var orb_box := CenterContainer.new()
-	col.add_child(orb_box)
-	var orb := UpdateOrb.new(260, 0.5)
-	orb.snap(1.0)
-	orb.mat.set_shader_parameter("swirl", 1.0)
-	orb.mat.set_shader_parameter("waves", 0.4)
-	orb_box.add_child(orb)
-	var word := Kit.label("Oazy %s" % version, 30, 800, Color.WHITE, true)
-	word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(word)
-	var sub := Kit.label("Restarting", 15, 600, App.TEXT_DIM)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(sub)
+	LoadingScreen.build_stage(_veil, "Restarting into %s" % version, 1.0)
 	_veil.modulate.a = 0.0
 	var t := create_tween()
 	t.tween_interval(0.5)

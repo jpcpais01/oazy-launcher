@@ -24,55 +24,13 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
-	var bg := Wallpaper.new()
-	add_child(bg)
-	bg.mat.set_shader_parameter("focus_center", 1.0)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(center)
-	var col := Kit.vbox(0)
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_child(col)
-
-	# The same glass orb the updater uses: it fills with water as Oazy loads,
-	# with the logo floating in it and ripples running out over the wallpaper.
-	_mark = Control.new()
-	_mark.custom_minimum_size = Vector2(420, 420)
-	_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_mark.pivot_offset = Vector2(210, 210)
-	# The ripples may run under the wordmark, so the holder is shorter than the orb.
-	var mark_holder := Control.new()
-	mark_holder.custom_minimum_size = Vector2(420, 330)
-	mark_holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	mark_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mark_holder.add_child(_mark)
-	col.add_child(mark_holder)
-	_orb = UpdateOrb.new(420, 0.5)
-	_orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_mark.add_child(_orb)
-	_logo = TextureRect.new()
-	_logo.texture = load("res://assets/icon.png")
-	_logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_logo.position = Vector2(160, 160)
-	_logo.size = Vector2(100, 100)
-	_logo.pivot_offset = Vector2(50, 50)
-	_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_mark.add_child(_logo)
-
-	_word = Kit.label("OAZY", 46, 800, Color.WHITE, true)
-	_word_font = FontVariation.new()
-	_word_font.base_font = Kit.font(800, true)
-	_word_font.spacing_glyph = 14
-	_word.add_theme_font_override("font", _word_font)
-	_word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(_word)
-	col.add_child(Kit.spacer(0, 6))
-	_tag = Kit.label("Welcome home", 17, 500, Color(1, 1, 1, 0.66))
-	_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(_tag)
+	var stage := build_stage(self, "Welcome home", -1.0)
+	_mark = stage["mark"]
+	_orb = stage["orb"]
+	_logo = stage["logo"]
+	_word = stage["word"]
+	_word_font = stage["word_font"]
+	_tag = stage["tag"]
 
 	_status = Kit.label("Starting up", 14, 500, Color(1, 1, 1, 0.5))
 	_status.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
@@ -93,7 +51,66 @@ func _ready() -> void:
 	_intro()
 
 
-## A drop lands: the orb springs up with a shockwave, the logo bobs to the
+## The boot stage, shared with the update's restart screen so closing and
+## opening are one scene: wallpaper, the glass orb full of water with the logo
+## floating in it, the wordmark and a tag line. `swirl` > 0 turns the water
+## one way (restarting), < 0 the other (starting up).
+static func build_stage(root: Control, tag_text: String, swirl: float) -> Dictionary:
+	var bg := Wallpaper.new()
+	root.add_child(bg)
+	bg.mat.set_shader_parameter("focus_center", 1.0)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var col := Kit.vbox(0)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(col)
+
+	var mark := Control.new()
+	mark.custom_minimum_size = Vector2(420, 420)
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.pivot_offset = Vector2(210, 210)
+	# The ripples may run under the wordmark, so the holder is shorter than the orb.
+	var mark_holder := Control.new()
+	mark_holder.custom_minimum_size = Vector2(420, 330)
+	mark_holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	mark_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark_holder.add_child(mark)
+	col.add_child(mark_holder)
+	var orb := UpdateOrb.new(420, 0.5)
+	orb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	orb.snap(1.0)
+	orb.mat.set_shader_parameter("swirl", swirl)
+	orb.mat.set_shader_parameter("waves", 0.4)
+	mark.add_child(orb)
+	var logo := TextureRect.new()
+	logo.texture = load("res://assets/icon.png")
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.position = Vector2(160, 160)
+	logo.size = Vector2(100, 100)
+	logo.pivot_offset = Vector2(50, 50)
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.add_child(logo)
+
+	var word := Kit.label("OAZY", 46, 800, Color.WHITE, true)
+	var word_font := FontVariation.new()
+	word_font.base_font = Kit.font(800, true)
+	word_font.spacing_glyph = 14
+	word.add_theme_font_override("font", word_font)
+	word.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(word)
+	col.add_child(Kit.spacer(0, 6))
+	var tag := Kit.label(tag_text, 17, 500, Color(1, 1, 1, 0.66))
+	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(tag)
+	return {"mark": mark, "orb": orb, "logo": logo, "word": word, "word_font": word_font, "tag": tag}
+
+
+## The restart played backwards: the orb springs up full, its water turning
+## the opposite way to the restart screen, the logo surfaces and the wordmark
+## draws its letters together. the orb springs up with a shockwave, the logo bobs to the
 ## surface and the wordmark draws its letters together.
 func _intro() -> void:
 	_mark.scale = Vector2.ONE * 0.6
@@ -104,7 +121,6 @@ func _intro() -> void:
 	_tag.modulate.a = 0.0
 	_status.modulate.a = 0.0
 	_word_font.spacing_glyph = 42
-	_orb.snap(0.06)
 	_orb.shockwave(1.1)
 	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_property(_mark, "scale", Vector2.ONE, 0.6)
@@ -122,7 +138,6 @@ func _intro() -> void:
 
 func _step(text: String, progress: float) -> void:
 	_status.text = text
-	_orb.target = maxf(_orb.target, progress)
 
 
 ## Runs the boot steps. Every await yields a frame so animation stays fluid.
@@ -175,11 +190,12 @@ func run() -> void:
 	_outro()
 
 
-## The orb fills to the brim, sends one last ripple out, and everything lifts
-## away so the desktop can come in underneath.
+## The swirl unwinds, one last ripple runs out, and everything lifts away so
+## the desktop can come in underneath.
 func _outro() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_orb.shockwave(0.7)
+	_orb.set_look({"swirl": 0.0}, 0.5)
 	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN_OUT)
 	t.tween_property(_mark, "scale", Vector2.ONE * 1.25, 0.5)
 	t.tween_property(_word, "modulate:a", 0.0, 0.25)

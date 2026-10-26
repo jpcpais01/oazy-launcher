@@ -52,7 +52,7 @@ func _ready() -> void:
 		if str(e["name"]) == "Claude Code":
 			Catalog.set_favorite("lib:" + str(e["id"]), true)
 	Catalog.set_favorite("app:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)
-	await _wait(0.4)
+	await _wait(0.2)
 	await shot("00-loading")
 	var main := get_tree().current_scene
 	var waited := 0.0
