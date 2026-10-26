@@ -525,6 +525,21 @@ func _ui_tests() -> void:
 	main.start._menu.hide()
 	main.start.close()
 	check(main.desktop._hero_id != "" and main.desktop._hero_glass.visible, "desktop: the game card shows a game")
+	var tile: Control = null
+	if not Library.entries.is_empty():
+		tile = main.desktop._recent_tile(str(Library.entries[0]["id"]))
+		main.desktop._recent.add_child(tile)
+		# A quick pass over a card: the "in" animation must not outlive the "out".
+		tile.mouse_entered.emit()
+		await get_tree().process_frame
+		tile.mouse_exited.emit()
+		await _wait(0.45)
+		var cover: CoverArt = tile.get_child(0)
+		var want := 0.85 if str(tile.get_meta("id")) == main.desktop._hero_id else 0.0
+		check(absf(cover.focus_amount - want) < 0.01 and tile.scale.is_equal_approx(Vector2.ONE), "desktop: a quick pass over a recent card leaves it unlit")
+		tile.queue_free()
+	else:
+		check(false, "desktop: test library has a game")
 	Catalog.favorites_changed.emit()
 	check(main.desktop._favs.get_child_count() == mini(Catalog.favorites().size(), Desktop.FAV_MAX) or (Catalog.favorites().is_empty() and main.desktop._favs.get_child_count() == 1), "desktop: favourites show")
 	for m in get_tree().get_nodes_in_group("modal"):

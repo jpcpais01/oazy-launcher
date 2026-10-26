@@ -349,7 +349,9 @@ func _mark_recent() -> void:
 			continue
 		var on := str(c.get_meta("id")) == _hero_id
 		var cover: CoverArt = c.get_child(0)
-		cover.focus_amount = 0.85 if on else 0.0
+		var t := Kit.hover_tween(c).set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		t.tween_property(c, "scale", Vector2.ONE, 0.3)
+		t.tween_property(cover, "focus_amount", 0.85 if on else 0.0, 0.2)
 		cover.set_dim(0.0 if on else 0.14)
 
 
@@ -392,15 +394,13 @@ func _recent_tile(id: String) -> Control:
 	holder.mouse_entered.connect(func() -> void:
 		holder.set_meta("hot", true)
 		cover.set_dim(0.0)
-		var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		var t := Kit.hover_tween(holder).set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 		t.tween_property(holder, "scale", Vector2.ONE * 1.03, 0.22)
 		t.tween_property(cover, "focus_amount", 1.0, 0.18)
 		Sfx.play(&"move", 1.15)
 	)
 	holder.mouse_exited.connect(func() -> void:
 		holder.set_meta("hot", false)
-		var t := holder.create_tween().set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-		t.tween_property(holder, "scale", Vector2.ONE, 0.3)
 		_mark_recent()
 	)
 	holder.gui_input.connect(func(ev: InputEvent) -> void:
@@ -488,12 +488,12 @@ func _fav_tile(it: Dictionary) -> Control:
 	_shadow(l, 3)
 	c.add_child(l)
 	b.mouse_entered.connect(func() -> void:
-		var t := b.create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		var t := Kit.hover_tween(b).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 		t.tween_property(b, "scale", Vector2.ONE * 1.03, 0.2)
 		Sfx.play(&"move", 1.2)
 	)
 	b.mouse_exited.connect(func() -> void:
-		var t := b.create_tween().set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		var t := Kit.hover_tween(b).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		t.tween_property(b, "scale", Vector2.ONE, 0.3)
 	)
 	b.pressed.connect(func() -> void:
