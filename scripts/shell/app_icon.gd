@@ -110,6 +110,12 @@ func refresh() -> void:
 			add_child(_globe)
 		_globe.visible = true
 		return
+	if str(item.get("ref", "")) == ClaudeApp.REF:
+		# Oazy's Claude: Claude's coral rays on dark glass, so it never looks
+		# like the Claude app's coral tile next to it.
+		_show_plate(Color("3a3330"), Color("161415"))
+		_show_glyph("claude", Color("f2a27c"))
+		return
 	if str(item.get("ref", "")) == "oazy:flow":
 		# Flow keeps its own colours: a violet-to-blue tile with a spark.
 		_show_plate(Color("7c6cff"), Color("265cd6"))
@@ -229,10 +235,11 @@ func _show_plate(a: Color, b: Color) -> void:
 	_plate.visible = true
 
 
-func _show_glyph(name: String) -> void:
+func _show_glyph(name: String, color := Color.WHITE) -> void:
 	var px := int(clampf(minf(size.x, size.y) * 0.5, 10.0, 96.0))
-	_glyph.texture = Icons.tex(name, px, Color.WHITE)
+	_glyph.texture = Icons.tex(name, px, color)
 	_glyph.set_meta("glyph", name)
+	_glyph.set_meta("glyph_color", color)
 	_glyph.visible = true
 
 
@@ -257,6 +264,6 @@ func _sync() -> void:
 	_plate_mat.set_shader_parameter("radius", _radius())
 	_letter.add_theme_font_size_override("font_size", int(clampf(minf(size.x, size.y) * 0.46, 10.0, 80.0)))
 	if _glyph.visible and _glyph.has_meta("glyph"):
-		_show_glyph(str(_glyph.get_meta("glyph")))
+		_show_glyph(str(_glyph.get_meta("glyph")), _glyph.get_meta("glyph_color", Color.WHITE))
 	if _cover:
 		_cover.setup(str(item.get("entry_id", "")), _radius())

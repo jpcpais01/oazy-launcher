@@ -241,6 +241,18 @@ func _logic_tests() -> void:
 	if App.is_windows():
 		var built_files := Files.build()
 		check(built_files.has("exe"), "files: compiles on Windows (%s)" % str(built_files.get("error", "ok")))
+	# Oazy Claude: Claude Code in an Oazy window.
+	check(Catalog.item(ClaudeApp.REF)["kind"] == "oazy" and Catalog.is_own_window_app(ClaudeApp.REF), "claude: in the catalog, its own window")
+	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\claude\\app-1234abcd\\OazyClaude.exe", "title": "Claude - Fix the build"}) == ClaudeApp.REF, "claude: windows group under it")
+	check(Catalog.search("claude").any(func(it: Dictionary) -> bool: return it["ref"] == ClaudeApp.REF), "claude: found from Start")
+	if App.is_windows():
+		check(Catalog.pins().has(ClaudeApp.REF), "claude: pinned")
+	var claude_files := ClaudeApp.files()
+	for f in claude_files:
+		check(FileAccess.file_exists(str(claude_files[f])), "claude: packaged " + str(f))
+	if App.is_windows():
+		var built_claude := ClaudeApp.build()
+		check(built_claude.has("exe"), "claude: compiles on Windows (%s)" % str(built_claude.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
 	check(Wallpaper.style_index("tide") == 2 and Wallpaper.style_index("gone") == 0, "wallpaper: styles, unknown falls back to Oasis")

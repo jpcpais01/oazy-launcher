@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude</title>
+<link rel="stylesheet" href="claude.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<linearGradient id="mark-fill" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#ffc4a3"/>
+			<stop offset="1" stop-color="#d9714a"/>
+		</linearGradient>
+	</defs>
+</svg>
+
+<div id="strip">
+	<button id="side-btn" class="icon-btn" title="Conversations (Ctrl+B)"></button>
+	<div id="brand"><span id="brand-mark"></span><span>Claude</span></div>
+	<div id="drag"></div>
+	<div id="wincontrols">
+		<button id="win-min" title="Minimise"></button>
+		<button id="win-max" title="Maximise"></button>
+		<button id="win-close" title="Close"></button>
+	</div>
+</div>
+
+<div id="body">
+	<nav id="side">
+		<button id="new-chat" class="side-new"><span class="ic-slot"></span><span>New conversation</span><kbd>Ctrl N</kbd></button>
+		<div class="side-label">Recent</div>
+		<div id="recents"></div>
+	</nav>
+
+	<main id="main">
+		<div id="top">
+			<button id="folder-btn" class="chip" title="The folder Claude works in (Ctrl+O)"></button>
+			<div id="convo-title"></div>
+			<button id="term-btn" class="chip ghost" title="Continue this conversation in the terminal"></button>
+		</div>
+
+		<div id="scroll">
+			<div id="thread"></div>
+			<section id="home">
+				<div id="home-mark"></div>
+				<h1 id="home-hi">What are we working on?</h1>
+				<button id="home-folder" class="home-folder"></button>
+				<div id="home-cards"></div>
+				<div id="setup" hidden></div>
+			</section>
+		</div>
+
+		<div id="dock">
+			<div id="ask" hidden></div>
+			<div id="composer">
+				<div id="attach"></div>
+				<textarea id="input" rows="1" spellcheck="true" placeholder="Ask Claude to build, fix or explain anything in this folder"></textarea>
+				<div id="controls">
+					<button id="mode-btn" class="pill" title="How Claude asks before changing things (Shift+Tab)"></button>
+					<button id="model-btn" class="pill" title="Model"></button>
+					<button id="img-btn" class="icon-btn small" title="Add an image"></button>
+					<div class="grow"></div>
+					<span id="status"></span>
+					<button id="send" title="Send (Enter)"></button>
+				</div>
+			</div>
+			<div id="hint"><span>Claude Code, signed in as you, working in this folder.</span></div>
+		</div>
+	</main>
+</div>
+
+<div id="menu" hidden></div>
+<div id="dialog" hidden></div>
+<div id="toast"></div>
+<input id="file-in" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+
+<script src="icons.js"></script>
+<script src="markdown.js"></script>
+<script src="claude.js"></script>
+</body>
+</html>
