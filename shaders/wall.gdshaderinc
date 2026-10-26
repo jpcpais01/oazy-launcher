@@ -35,6 +35,16 @@ vec3 wall_color(vec2 uv, float time) {
 	col = mix(col, wall_b.rgb, wall_pool(p, cb, 0.58) * 0.8);
 	col = mix(col, wall_c.rgb, wall_pool(p, cc, 0.55) * 0.55);
 	col = mix(col, accent.rgb * 0.55, wall_pool(p, cd, 0.4) * 0.35);
+	// The oasis, barely there: a band of light on a far horizon, and below
+	// it a slow, faint shimmer like sun on still water.
+	float hy = 0.6 + 0.012 * sin(p.x * 1.4 + t * 2.0);
+	float hd = (uv.y - hy) * 6.5;
+	vec3 sheen = mix(wall_glow.rgb, accent.rgb, 0.45);
+	col += sheen * exp(-hd * hd) * 0.045;
+	float below = smoothstep(hy, 1.0, uv.y);
+	float w1 = sin(p.x * 7.0 + sin(p.y * 9.0 + t * 5.0) * 1.4 + t * 2.5);
+	float w2 = sin(p.y * 23.0 - t * 4.0 + sin(p.x * 4.0 - t) * 1.6);
+	col += sheen * smoothstep(0.55, 1.0, w1 * w2) * below * (1.0 - below) * 0.05;
 	// Soft light from above.
 	col += wall_glow.rgb * exp(-uv.y * uv.y * 5.0) * 0.035;
 	vec2 vc = uv - vec2(0.5, 0.45);
