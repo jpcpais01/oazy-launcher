@@ -368,6 +368,15 @@ func _ui_tests() -> void:
 		{"hwnd": 102, "title": "Docs - Google Chrome", "exe": "C:/Program Files/Google/Chrome/Application/chrome.exe", "aumid": "Chrome", "name": "Google Chrome"},
 		{"hwnd": 103, "title": "Mystery", "exe": "C:/Tools/mystery.exe"},
 	], 101)
+	# Both bottom corners of the screen are click targets, and the orb keeps its own.
+	var vp := main.get_viewport().get_visible_rect().size
+	var tb: Taskbar = main.taskbar
+	var corner_l := tb._start_hit.get_global_rect()
+	var corner_r := tb._desk_hit.get_global_rect()
+	check(corner_l.has_point(Vector2(0.5, vp.y - 0.5)), "taskbar: bottom-left corner opens Start")
+	check(corner_r.has_point(Vector2(vp.x - 0.5, vp.y - 0.5)), "taskbar: bottom-right corner shows the desktop")
+	var orb_c := tb.orb.get_global_rect().get_center()
+	check(not tb._start_hit._has_point(orb_c - corner_l.position), "taskbar: the orb keeps its own clicks")
 	main.taskbar.rebuild()
 	var chrome: TaskbarButton = main.taskbar.button_for("app:Chrome")
 	check(chrome != null and chrome.window_count() == 2, "taskbar: groups windows under their pin")
