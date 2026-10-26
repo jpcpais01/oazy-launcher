@@ -344,6 +344,9 @@ namespace OazyBrowser
 			if (quitting) return;
 			quitting = true;
 			SaveNow();
+			// Close every window (and with it every WebView) before the message
+			// loop ends; leaving them to finalizers crashes on the way out.
+			foreach (BrowserWindow w in Windows.ToArray()) { try { w.Close(); } catch { } }
 			ctx.ExitThread();
 		}
 

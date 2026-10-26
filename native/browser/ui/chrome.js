@@ -223,6 +223,9 @@ tabsBox.addEventListener('mouseleave', () => {
 });
 window.addEventListener('resize', () => { layoutTabs(); positionPanels(); });
 // The page is sized by the browser; never let focus scroll it out of place.
+// When the page takes focus the address bar lets go for real, so it shows the
+// page's address again instead of what it had before.
+window.addEventListener('blur', () => { if (document.activeElement === addr) addr.blur(); });
 window.addEventListener('scroll', () => { if (window.scrollY || window.scrollX) window.scrollTo(0, 0); });
 
 function onTabDown(e, id) {
