@@ -1063,6 +1063,12 @@ namespace OazyTerminal
 					base.WndProc(ref m);
 					if (view != null) try { view.NotifyParentWindowPositionChanged(); } catch { }
 					return;
+				case 0x86: // WM_NCACTIVATE
+					// Activating repaints the caption DWM keeps for the window; -1 skips
+					// that, so no dark title strip shows over the glass.
+					m.LParam = new IntPtr(-1);
+					base.WndProc(ref m);
+					return;
 				case WM_ACTIVATE:
 					base.WndProc(ref m);
 					active = (m.WParam.ToInt64() & 0xFFFF) != 0;
@@ -1077,10 +1083,20 @@ namespace OazyTerminal
 			base.WndProc(ref m);
 		}
 
+		// DWM paints its dark caption strip again after maximizing or restoring;
+		// recalculating the frame clears it (FrameFix off only to test that).
+		public static bool FrameFix = true;
+		FormWindowState shownState = FormWindowState.Normal;
+
 		protected override void OnResize(EventArgs e)
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			if (WindowState != shownState && IsHandleCreated)
+			{
+				shownState = WindowState;
+				if (!min && FrameFix) BeginInvoke((Action)RefreshFrame);
+			}
 			if (view != null) try { view.IsVisible = !min; } catch { }
 			if (!min) DoLayout();
 			Post(Json.Obj("t", "win", "max", Maximized));

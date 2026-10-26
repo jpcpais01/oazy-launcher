@@ -1400,6 +1400,12 @@ namespace OazyBrowser
 					if (chrome != null) try { chrome.NotifyParentWindowPositionChanged(); } catch { }
 					if (Active != null && Active.C != null) try { Active.C.NotifyParentWindowPositionChanged(); } catch { }
 					return;
+				case 0x86: // WM_NCACTIVATE
+					// Activating repaints the caption DWM keeps for the window; -1 skips
+					// that, so no dark title strip shows over the glass.
+					m.LParam = new IntPtr(-1);
+					base.WndProc(ref m);
+					return;
 				case WM_ACTIVATE:
 					base.WndProc(ref m);
 					bool on = (m.WParam.ToInt64() & 0xFFFF) != 0;
@@ -1410,10 +1416,20 @@ namespace OazyBrowser
 			base.WndProc(ref m);
 		}
 
+		// DWM paints its dark caption strip again after maximizing or restoring;
+		// recalculating the frame clears it (FrameFix off only to test that).
+		public static bool FrameFix = true;
+		FormWindowState shownState = FormWindowState.Normal;
+
 		protected override void OnResize(EventArgs e)
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			if (WindowState != shownState && IsHandleCreated)
+			{
+				shownState = WindowState;
+				if (!min && FrameFix) BeginInvoke((Action)RefreshFrame);
+			}
 			if (chrome != null) try { chrome.IsVisible = !min; } catch { }
 			if (Active != null && Active.C != null) try { Active.C.IsVisible = !min && !pageHidden; } catch { }
 			if (!min) DoLayout();
@@ -2586,6 +2602,23 @@ namespace OazyBrowser
 				await Task.Delay(600);
 				Shot("browser-backdrop.png");
 				glassOk = EvenGlass("browser-backdrop.png");
+				// Maximized too: once without the frame fix (to show the strip), once with it.
+				BrowserWindow.FrameFix = false;
+				win.WindowState = FormWindowState.Maximized;
+				await Task.Delay(1500);
+				Shot("browser-max-nofix.png");
+				EvenGlass("browser-max-nofix.png");
+				win.WindowState = FormWindowState.Normal;
+				await Task.Delay(800);
+				BrowserWindow.FrameFix = true;
+				win.WindowState = FormWindowState.Maximized;
+				await Task.Delay(1500);
+				Shot("browser-max.png");
+				glassOk = EvenGlass("browser-max.png") && glassOk;
+				win.WindowState = FormWindowState.Normal;
+				await Task.Delay(1500);
+				Shot("browser-restored.png");
+				glassOk = EvenGlass("browser-restored.png") && glassOk;
 				win.TestShowChrome(true);
 				await Task.Delay(400);
 				Shot("browser-chrome-only.png");
@@ -2654,10 +2687,11 @@ namespace OazyBrowser
 			{
 				using (Bitmap bmp = new Bitmap(Path.Combine(dir, name)))
 				{
-					int x = bmp.Width * 6 / 10;
-					Color top = bmp.GetPixel(x, 12), below = bmp.GetPixel(x, Math.Min(80, bmp.Height - 1));
+					// Maximized, the window starts above the screen's edge.
+					int x = bmp.Width * 6 / 10, dy = win.WindowState == FormWindowState.Maximized ? Math.Max(0, Screen.FromHandle(win.Handle).WorkingArea.Top - win.Bounds.Top) : 0;
+					Color top = bmp.GetPixel(x, dy + 12), below = bmp.GetPixel(x, Math.Min(dy + 80, bmp.Height - 1));
 					int diff = Math.Abs(top.R - below.R) + Math.Abs(top.G - below.G) + Math.Abs(top.B - below.B);
-					Log("glass top vs below: " + diff);
+					Log(name + " glass top vs below: " + diff);
 					return diff < 30;
 				}
 			}
