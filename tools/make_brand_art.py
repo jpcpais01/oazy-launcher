@@ -7,7 +7,7 @@ files inside the exe (see include_filter in export_presets.cfg).
 Each app's mark and name centred over its brand colours: soft light blooms, a
 liquid-glass orb and fine grain, with the name set in Outfit. Marks come from
 tools/brand_src/marks (CC0: @iconify-json/logos, simple-icons). A finished
-cover in tools/brand_src/<slug>_cover.png is used as it is.
+cover or logo in tools/brand_src/<slug>_{cover,logo}.png is used as it is.
 Run: python3 tools/make_brand_art.py  (needs Pillow, numpy, fonttools, brotli, cairosvg)
 """
 import io, math, os, random, sys, tempfile, zlib
@@ -41,6 +41,7 @@ APPS = {
     "flow": ("Flow", "Make images and video", "#0b0a1f", ["#7c6cff", "#265cd6", "#c58bff", "#2fd3e6"], "#f4f2ff"),
     "epicgameslauncher": ("Epic Games", "Play, free every week", "#0e0e10", ["#5a5a66", "#d8d8e2", "#2a2a34", "#0078f2"], "#ffffff"),
     "arcgisearth": ("ArcGIS Earth", "The whole planet, in 3D", "#02050c", ["#1f6fd1", "#0b2a5c", "#5fb4ff", "#0a1630"], "#ffffff"),
+    "hyperliquid": ("Hyperliquid", "Trade on-chain", "#030809", ["#97fce4", "#1f6f62", "#5fe0c8", "#0b2e2a"], "#ffffff"),
     "microsoftteams": ("Teams", "Meet, chat, call", "#14123a", ["#5b5fc7", "#7b83eb", "#4b53bc", "#c5c9ff"], "#ffffff"),
 }
 
@@ -265,6 +266,9 @@ def hero(slug, app):
 
 def logo(slug, app):
     """Mark and name side by side on transparency."""
+    given = os.path.join(SRC, slug + "_logo.png")
+    if os.path.exists(given):
+        return Image.open(given).convert("RGBA")
     title, _, _, _, ink = app
     f = font("title", 200)
     b = f.getbbox(title)
