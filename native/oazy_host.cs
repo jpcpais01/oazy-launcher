@@ -531,7 +531,9 @@ namespace Oazy
 				case "release":
 					return "\"ok\":" + Json.Bool(Release(H(Arg(p, 2))));
 				case "raise":
-					return "\"ok\":" + Json.Bool(Native.SetWindowPos(H(Arg(p, 2)), IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER));
+					// "raise <hwnd> 1": back to the very top of the topmost band, for
+					// Oazy's always-on-top layers (taskbar, previews, Start, menus).
+					return "\"ok\":" + Json.Bool(Native.SetWindowPos(H(Arg(p, 2)), Arg(p, 3) == "1" ? new IntPtr(-1) : IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER));
 				case "toggle":
 				{
 					IntPtr h = H(Arg(p, 2));

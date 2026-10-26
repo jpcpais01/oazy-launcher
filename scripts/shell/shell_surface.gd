@@ -24,6 +24,10 @@ const PARKED := [Vector2(-8, -8), Vector2(-2, -8), Vector2(-2, -2), Vector2(-8, 
 var parked := false
 var _poly := PackedVector2Array([Vector2(-1, -1)])
 var _styled_id := DisplayServer.INVALID_WINDOW_ID
+## The foreground window when this layer last lifted itself (see _on_windows).
+var _lifted_over := -1
+var _lifted_at := 0
+var _shape_count := 0
 ## Frames left to draw after parking, so the buffer that comes back on screen
 ## next time is a clear one.
 var _park_frames := 0
@@ -56,6 +60,7 @@ func _ready() -> void:
 	# Menus close on their own when you go elsewhere (Godot's popups close
 	# when the app or a window above them in the tree gains focus); hiding
 	# them here as well raced with menus that were still opening.
+	Host.windows_changed.connect(_on_windows)
 	focus_entered.connect(func() -> void: os_focused = true)
 	focus_exited.connect(func() -> void: os_focused = false)
 	visibility_changed.connect(func() -> void:
@@ -185,12 +190,19 @@ func _update_shape(force_show: bool) -> void:
 	if poly != _poly:
 		_poly = poly
 		mouse_passthrough_polygon = poly
+	# Something new just appeared on an always-on-top layer (a taskbar
+	# preview, a menu, a flyout): make sure it comes up over every window.
+	var count := 1000 if full else rects.size()
+	if count > _shape_count and not parked:
+		lift()
+	_shape_count = count
 	if want != visible:
 		visible = want
 
 
 func _park() -> void:
 	parked = true
+	_shape_count = 0
 	# Draw a couple more (now empty) frames before stopping.
 	_park_frames = 2
 	_poly = PackedVector2Array(PARKED)
@@ -209,7 +221,31 @@ func _unpark() -> void:
 	if unfocusable:
 		# Newly made windows used to come up above the other layers; a parked
 		# one keeps its old place, so lift it (without taking focus).
-		Host.raise_window(hwnd())
+		Host.raise_window(hwnd(), always_on_top)
+
+
+## Puts an always-on-top layer back at the very top, over every app's window
+## (Oazy's apps lift themselves when activated, other apps can be topmost
+## too). Fullscreen games and videos hide these layers instead (suppressed).
+func lift() -> void:
+	if not always_on_top or suppressed or not visible or not Host.available:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _lifted_at < 120:
+		return
+	_lifted_at = now
+	Host.raise_window(hwnd(), true)
+
+
+## Another window came to the front: an always-on-top layer that is showing
+## something goes back over it.
+func _on_windows() -> void:
+	if Host.foreground == _lifted_over:
+		return
+	_lifted_over = Host.foreground
+	if is_up() and not Host.self_foreground:
+		_lifted_at = 0
+		lift()
 
 
 func pin(on: bool) -> void:

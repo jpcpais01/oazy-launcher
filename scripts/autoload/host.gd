@@ -336,10 +336,11 @@ func release_focus(hwnd: int) -> void:
 		request(["release", hwnd])
 
 
-## Lifts a window to the top of its band (topmost or not) without focusing it.
-func raise_window(hwnd: int) -> void:
+## Lifts a window to the top of its band without focusing it. `topmost` also
+## makes sure it is (back) in the always-on-top band.
+func raise_window(hwnd: int, topmost: bool = false) -> void:
 	if hwnd != 0:
-		request(["raise", hwnd])
+		request(["raise", hwnd, 1 if topmost else 0])
 
 
 ## Focus it, or minimise it if it is already the active window (taskbar click).
