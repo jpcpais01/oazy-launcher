@@ -34,6 +34,7 @@ const COMMANDS := [
 	["oazy_notes", "Oazy patch notes", "patch notes whats new changelog oazy", "sparkles", "notes"],
 	["oazy_scan", "Scan this PC for games", "scan games steam epic gog import", "sparkles", "scan"],
 	["oazy_add", "Add a game or app", "add game app new", "plus", "add"],
+	["oazy_clean", "Clean up Windows", "clean cleaner cleanup bloatware bloat debloat junk temp files startup apps privacy telemetry ads speed up faster optimise optimize tune", "wand", "cleaner"],
 	["oazy_keys", "Keyboard shortcuts", "keyboard shortcuts keys hotkeys help", "keyboard", "shortcuts"],
 ]
 
@@ -145,6 +146,8 @@ static func _run_command(what: String, main: Node) -> void:
 			main.open_add({})
 		"shortcuts":
 			main.show_shortcuts()
+		"cleaner":
+			main.open_app(&"cleaner")
 
 
 # --- Sums --------------------------------------------------------------------------------

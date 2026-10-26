@@ -89,7 +89,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb libgl1 libgl1-mesa-dri libglx-mesa0 libxcursor1 libxinerama1 libxrandr2 libxi6 >/dev/null
           mkdir -p shots
-          xvfb-run -a -s "-screen 0 2560x1440x24" timeout 150 "$HOME/godot/godot" --path . --rendering-driver opengl3 --resolution 2560x1440 -- --screenshots="$PWD/shots" > shots.log 2>&1 || true
+          xvfb-run -a -s "-screen 0 2560x1440x24" timeout 200 "$HOME/godot/godot" --path . --rendering-driver opengl3 --resolution 2560x1440 -- --screenshots="$PWD/shots" > shots.log 2>&1 || true
           tail -n 80 shots.log
           ls -la shots
 

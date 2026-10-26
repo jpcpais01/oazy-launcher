@@ -1,6 +1,6 @@
 extends Node
 ## Everything Oazy can open, behind one "ref" string:
-##   oazy:<app>  Oazy's own apps (Library, Settings)
+##   oazy:<app>  Oazy's own apps (Library, Settings, Cleaner)
 ##   app:<id>    an installed Windows app (Start menu's All apps; id = AppsFolder id)
 ##   lib:<id>    a game or app from the library
 ##   win:<exe>   a running program that matches nothing above
@@ -17,6 +17,7 @@ const ICON_PX := 128
 const OAZY_APPS := {
 	"oazy:library": {"name": "Library", "glyph": "grid", "desc": "Your games and apps"},
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
+	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
 }
 ## Start menu clutter that ships next to real apps.
 const SKIP_WORDS := ["uninstall", "uninstaller", "readme", "read me", "help", "documentation", "release notes", "website", "license", "manual", "changelog", "what's new", "support", "faq", "eula", "recovery", "debug", "setup", "installer", "updater", "crash reporter", "bug reporter", "repair", "safe mode", "migration assistant"]
