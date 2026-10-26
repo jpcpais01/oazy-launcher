@@ -458,7 +458,8 @@ namespace Oazy
 				string reply;
 				try { reply = Handle(p); }
 				catch (Exception ex) { reply = "\"ok\":false,\"error\":" + Json.Str(ex.Message); }
-				Write("{\"id\":" + Num(p[0]) + "," + reply + "}");
+				// Id 0: fire and forget (live previews moving every frame).
+				if (p[0] != "0") Write("{\"id\":" + Num(p[0]) + "," + reply + "}");
 			}
 			RestoreCursors();
 			ClearThumbs();

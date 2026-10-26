@@ -137,6 +137,8 @@ func open(back: bool = false) -> void:
 	if _entries.is_empty():
 		return
 	is_open = true
+	# Full frame rate from the first moment, even over another app.
+	App.switcher_open = true
 	_serial += 1
 	var serial := _serial
 	selected = (_entries.size() - 1 if back else 1) if _entries.size() > 1 else 0
@@ -257,6 +259,7 @@ func _close(picked: bool) -> void:
 	is_open = false
 	_serial += 1
 	if not _shown:
+		App.switcher_open = false
 		return
 	_shown = false
 	_closing = true
@@ -268,6 +271,8 @@ func _finish_close() -> void:
 	_closing = false
 	set_process(false)
 	visible = false
+	if not is_open:
+		App.switcher_open = false
 	_clear_thumbs()
 	for c in _cards:
 		(c["node"] as Node).queue_free()

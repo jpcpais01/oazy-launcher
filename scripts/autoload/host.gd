@@ -354,11 +354,26 @@ func stats(done: Callable) -> void:
 ## `dest`, Oazy's main window when 0), at `opacity` (0 hides it). `done`
 ## gets the fitted rect. Cheap enough to call every frame while it moves.
 func thumb(hwnd: int, rect: Rect2i, done: Callable = Callable(), dest: int = 0, opacity: int = 255) -> void:
-	request(["thumb", hwnd, rect.position.x, rect.position.y, rect.size.x, rect.size.y, opacity, dest], done)
+	var parts := ["thumb", hwnd, rect.position.x, rect.position.y, rect.size.x, rect.size.y, opacity, dest]
+	if done.is_valid():
+		request(parts, done)
+	else:
+		_send_quiet(parts)
+
+
+## A command nobody waits for: the companion sends no reply, so moving
+## previews every frame costs neither side a JSON round trip.
+func _send_quiet(parts: Array) -> void:
+	if not available or _pipe == null:
+		return
+	var clean := PackedStringArray(["0"])
+	for p in parts:
+		clean.append(str(p))
+	_pipe.store_line("\t".join(clean))
 
 
 func thumb_clear() -> void:
-	request(["thumb_clear"])
+	_send_quiet(["thumb_clear"])
 
 
 ## Alt+Tab opens Oazy's switcher instead of Windows' own (see switch_key).
