@@ -1,0 +1,18 @@
+16:34:34.140 runtime 155.0.4283.62
+16:34:37.759 page ready
+16:34:40.387 listing Holiday photos, Projects, data.json, lagoon.png, notes.txt
+16:34:40.446 saved files-grid.png
+16:34:43.555 loaded images 4
+16:34:43.595 saved files-thumbnails.png
+16:34:46.339 saved files-list.png
+16:34:51.445 rename True, mkdir True, copy True, delete True, view updated True
+16:34:54.053 search True
+16:34:54.093 saved files-search.png
+16:34:55.337 saved files-menu.png
+16:34:57.881 saved files-home.png
+16:34:59.437 saved files-max.png
+16:34:59.442 maximized True, bounds {X=0,Y=0,Width=1024,Height=727} vs work area {X=0,Y=0,Width=1024,Height=727}, top vs strip 0
+16:35:01.011 saved files-restored.png
+16:35:01.014 restored to {X=20,Y=20,Width=984,Height=687} (was {X=20,Y=20,Width=984,Height=687}), top vs strip 0
+16:35:01.015 page=True list=True icons=True ops=True search=True glass=True -> PASS
+16:35:01.199 message loop ended, exiting with 0
