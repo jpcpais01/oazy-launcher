@@ -1515,6 +1515,8 @@ namespace OazyBrowser
 		IntPtr chromeHwnd;
 		bool pageHidden, chromeTall;
 		bool chromeReady, glass, overlay, fullscreen, findOpen, closing, nativeDrag;
+		// Whether the chrome (address bar, panels) or the page had the keyboard last.
+		bool focusChrome;
 		int extraDip;
 		readonly List<object> outbox = new List<object>();
 		public readonly List<Tab> Tabs = new List<Tab>();
@@ -1700,6 +1702,8 @@ namespace OazyBrowser
 					{
 						int sc = (int)(m.WParam.ToInt64() & 0xFFF0);
 						bool mouse = (m.WParam.ToInt64() & 0xF) == HTCAPTION, iconic = Native.IsIconic(Handle);
+						// A page in fullscreen keeps the whole screen until it leaves (Esc).
+						if (fullscreen && (sc == 0xF030 || sc == 0xF010)) return;
 						// A title double-click toggles; Win+Up only maximizes.
 						if (sc == 0xF030 && !iconic) { SetMaximized(mouse ? !zoomed : true); return; }
 						if (sc == 0xF120 && zoomed && !iconic) { SetMaximized(false); return; }
@@ -1731,6 +1735,9 @@ namespace OazyBrowser
 						Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200);
 					bool on = (m.WParam.ToInt64() & 0xFFFF) != 0;
 					if (on) App.LastActive = this;
+					// Back from the taskbar or Alt+Tab, the keys go where they went before.
+					// A click picks its own target, so it is left alone.
+					if ((m.WParam.ToInt64() & 0xFFFF) == 1) BeginInvoke((Action)RestoreFocus);
 					Post(Json.Obj("t", "active", "on", on));
 					return;
 			}
@@ -1889,6 +1896,7 @@ namespace OazyBrowser
 		// Recalculate the frame on every state change, in case DWM brings its
 		// caption strip back.
 		FormWindowState shownState = FormWindowState.Normal;
+		Size lastClient;
 
 		protected override void OnResize(EventArgs e)
 		{
@@ -1906,6 +1914,9 @@ namespace OazyBrowser
 			if (chrome != null) try { chrome.IsVisible = !min; } catch { }
 			if (Active != null && Active.C != null) try { Active.C.IsVisible = !min && !pageHidden; } catch { }
 			if (!min) DoLayout();
+			// An open panel shows a still of the page, which no longer fits.
+			if (overlay && ClientSize != lastClient) Post(Json.Obj("t", "closePanel"));
+			if (!min) lastClient = ClientSize;
 			PostWinState();
 			App.SessionChanged();
 		}
@@ -1957,14 +1968,17 @@ namespace OazyBrowser
 
 		void SetFullscreen(bool on)
 		{
-			if (on == fullscreen) return;
+			if (on == fullscreen || !IsHandleCreated) return;
+			bool was = zooming;
+			zooming = true;
 			if (on)
 			{
-				preFullZoom = zoomed;
 				if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
+				preFullZoom = zoomed;
+				preFullBounds = zoomed ? unzoomed : Bounds;
 				zoomed = false;
-				preFullBounds = Bounds;
 				fullscreen = true;
+				Native.SetProp(Handle, "OazyMax", IntPtr.Zero);
 				int square = 1, none = unchecked((int)0xFFFFFFFE);
 				Native.DwmSetWindowAttribute(Handle, 33, ref square, 4);
 				Native.DwmSetWindowAttribute(Handle, 34, ref none, 4);
@@ -1972,14 +1986,16 @@ namespace OazyBrowser
 			}
 			else
 			{
+				// Back to exactly what it was: maximized over the (current) work area,
+				// or its own size and place.
 				fullscreen = false;
-				int round = preFullZoom ? 1 : 2, border = preFullZoom ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
-				Native.DwmSetWindowAttribute(Handle, 33, ref round, 4);
-				Native.DwmSetWindowAttribute(Handle, 34, ref border, 4);
-				Bounds = preFullBounds;
 				zoomed = preFullZoom;
+				if (zoomed) unzoomed = preFullBounds;
+				ApplyLook();
+				Bounds = zoomed ? WorkArea : preFullBounds;
 			}
-			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+			zooming = was;
+			KickFrame();
 			DoLayout();
 			PostWinState();
 		}
@@ -2007,7 +2023,7 @@ namespace OazyBrowser
 		{
 			List<object> urls = new List<object>();
 			foreach (Tab t in Tabs) urls.Add(t.IsNtp ? "" : t.ShownUrl);
-			Rectangle b = fullscreen ? (preFullZoom ? unzoomed : preFullBounds) : NormalBounds;
+			Rectangle b = fullscreen ? preFullBounds : NormalBounds;
 			return Json.Obj("tabs", urls.ToArray(), "active", Math.Max(0, Tabs.IndexOf(Active)),
 				"bounds", new object[] { b.X, b.Y, b.Width, b.Height }, "max", fullscreen ? preFullZoom : zoomed);
 		}
@@ -2055,6 +2071,7 @@ namespace OazyBrowser
 				if (!e.Uri.StartsWith(ChromePage)) e.Cancel = true;
 			};
 			chrome.AcceleratorKeyPressed += OnAccelerator;
+			chrome.GotFocus += delegate { focusChrome = true; };
 			DoLayout();
 			cw.Navigate(ChromePage);
 
@@ -2166,6 +2183,13 @@ namespace OazyBrowser
 			Post(Json.Obj("t", "focusOmnibox"));
 		}
 
+		void RestoreFocus()
+		{
+			if (closing || WindowState == FormWindowState.Minimized) return;
+			if (focusChrome || overlay || Active == null || Active.C == null) { if (chrome != null) try { chrome.MoveFocus(CoreWebView2MoveFocusReason.Programmatic); } catch { } }
+			else FocusContent();
+		}
+
 		void FocusContent()
 		{
 			if (Active == null || Active.C == null) return;
@@ -2233,7 +2257,7 @@ namespace OazyBrowser
 				w.SetVirtualHostNameToFolderMapping(WebApp.Hosts[0], Path.Combine(App.Ui, "apps"), CoreWebView2HostResourceAccessKind.Allow);
 			c.AcceleratorKeyPressed += OnAccelerator;
 			c.ZoomFactorChanged += delegate { if (t == Active) PushNav(); };
-			c.GotFocus += delegate { if (t == Active) Post(Json.Obj("t", "contentFocus")); };
+			c.GotFocus += delegate { focusChrome = false; if (t == Active) Post(Json.Obj("t", "contentFocus")); };
 			w.SourceChanged += delegate
 			{
 				t.Url = w.Source;
