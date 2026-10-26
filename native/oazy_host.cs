@@ -763,7 +763,8 @@ namespace Oazy
 			props.rcDestination.Right = props.rcDestination.Left + dw;
 			props.rcDestination.Bottom = props.rcDestination.Top + dh;
 			props.opacity = (byte)Math.Max(0, Math.Min(255, opacity));
-			props.fVisible = true;
+			// Opacity 0 hides it (the switcher fades previews in and out).
+			props.fVisible = opacity > 0;
 			props.fSourceClientAreaOnly = false;
 			int hr = Native.DwmUpdateThumbnailProperties(thumb, ref props);
 			return "\"ok\":" + Json.Bool(hr == 0) + ",\"x\":" + props.rcDestination.Left + ",\"y\":" + props.rcDestination.Top
