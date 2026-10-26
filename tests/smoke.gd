@@ -337,6 +337,32 @@ func _ui_tests() -> void:
 	main.start.open("chro")
 	await _wait(0.3)
 	check(main.start._rows.size() > 1, "start: search shows results")
+	var first_row: Control = main.start._rows[0]
+	var row_count: int = main.start._result_list.get_child_count()
+	main.start._search.text = "steam"
+	main.start._on_text("steam")
+	check(main.start._result_list.get_child_count() == row_count and main.start._result_list.get_child(0) == first_row, "start: search reuses its rows")
+	check(str(main.start._rows[0].get_meta("ref")) != "", "start: reused rows point at the new results")
+	var tiles: Array = main.start._pinned.get_children()
+	main.start.close()
+	await _wait(0.4)
+	main.start.open()
+	await _wait(0.1)
+	check(main.start._pinned.get_children() == tiles, "start: reopening keeps its tiles")
+	main.start._show_view(main.start._all)
+	await _wait(0.2)
+	var all_scroll: ScrollContainer = main.start._all_list.get_parent()
+	check(all_scroll.has_meta("smooth_scroll"), "scroll: Start's lists scroll smoothly")
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
+	wheel.pressed = true
+	wheel.factor = 1.0
+	all_scroll.gui_input.emit(wheel)
+	await _wait(0.05)
+	var mid: float = all_scroll.get_v_scroll_bar().value
+	await _wait(0.6)
+	var end: float = all_scroll.get_v_scroll_bar().value
+	check(end > 0.0 and mid < end, "scroll: the wheel glides instead of jumping (%.0f -> %.0f)" % [mid, end])
 	main.start.close()
 	await _wait(0.4)
 	check(not main.start.is_open, "start: closes")

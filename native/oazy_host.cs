@@ -259,6 +259,7 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
 		[DllImport("user32.dll", EntryPoint = "SetWindowLongW")] public static extern int SetWindowLong(IntPtr h, int index, int value);
+		[DllImport("user32.dll")] public static extern int GetWindowRgnBox(IntPtr h, out RECT r);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
 		[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
@@ -494,6 +495,10 @@ namespace Oazy
 					return "\"ok\":true," + WindowsJson();
 				case "focus":
 					return "\"ok\":" + Json.Bool(Focus(H(Arg(p, 2))));
+				case "release":
+					return "\"ok\":" + Json.Bool(Release(H(Arg(p, 2))));
+				case "raise":
+					return "\"ok\":" + Json.Bool(Native.SetWindowPos(H(Arg(p, 2)), IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER));
 				case "toggle":
 				{
 					IntPtr h = H(Arg(p, 2));
@@ -727,6 +732,20 @@ namespace Oazy
 			Native.SetForegroundWindow(h);
 			if (attached) Native.AttachThreadInput(me, fgThread, false);
 			return Native.GetForegroundWindow() == h;
+		}
+
+		// One of Oazy's layers emptied while active (it stays up, cut to nothing,
+		// so it can come back instantly). Hiding it for a moment makes Windows
+		// activate the next window in line, exactly as when it used to close.
+		// Skipped if the layer already has a shape again (opened straight back).
+		static bool Release(IntPtr h)
+		{
+			if (h == IntPtr.Zero || !Native.IsWindow(h) || Native.GetForegroundWindow() != h) return false;
+			Native.RECT box;
+			if (Native.GetWindowRgnBox(h, out box) == 0 || box.Right > 0 || box.Bottom > 0) return false;
+			Native.ShowWindow(h, SW_HIDE);
+			Native.ShowWindow(h, SW_SHOWNA);
+			return true;
 		}
 
 		// --- Live thumbnails -------------------------------------------------------

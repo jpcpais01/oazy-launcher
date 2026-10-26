@@ -145,6 +145,8 @@ func _ready() -> void:
 		if not Host.available:
 			Host.self_foreground = true
 		taskbar.queue_rebuild()
+		if loaded:
+			Shell.precreate_layers()
 	)
 
 	if not App.smoke_test or App.is_windows():
@@ -668,7 +670,9 @@ func _on_loaded() -> void:
 	desktop.intro()
 	taskbar.intro()
 	Sfx.play(&"open", 0.8)
+	Shell.precreate_layers()
 	_post_update_welcome()
+	Warmup.run(self)
 
 
 func _post_update_welcome() -> void:
@@ -721,6 +725,8 @@ func _on_hotkey(was_foreground: bool) -> void:
 func _on_host_status(ok: bool) -> void:
 	if ok and Shell.native:
 		_enter_shell()
+		if loaded:
+			Shell.precreate_layers()
 	if not ok and Host.failed and loaded and App.is_windows():
 		App.toast("Oazy couldn't connect to Windows, so open apps won't show on the taskbar", &"error")
 

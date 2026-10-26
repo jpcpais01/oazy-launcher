@@ -303,6 +303,19 @@ func focus(hwnd: int) -> void:
 	request(["focus", hwnd])
 
 
+## One of Oazy's layers just emptied while it had focus: Windows activates the
+## next window in line, as if it had closed. Ignored if it has come back since.
+func release_focus(hwnd: int) -> void:
+	if hwnd != 0:
+		request(["release", hwnd])
+
+
+## Lifts a window to the top of its band (topmost or not) without focusing it.
+func raise_window(hwnd: int) -> void:
+	if hwnd != 0:
+		request(["raise", hwnd])
+
+
 ## Focus it, or minimise it if it is already the active window (taskbar click).
 func toggle(hwnd: int) -> void:
 	request(["toggle", hwnd])
