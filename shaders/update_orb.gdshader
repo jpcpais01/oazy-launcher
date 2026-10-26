@@ -10,8 +10,9 @@ uniform vec4 color_b : source_color = vec4(0.25, 0.55, 1.0, 1.0);
 uniform vec4 warn : source_color = vec4(1.0, 0.71, 0.28, 1.0);
 // Surface motion: 1 while downloading, lower once it settles.
 uniform float waves : hint_range(0.0, 1.0) = 1.0;
-// Installing: the water turns into a slow glowing vortex.
-uniform float swirl : hint_range(0.0, 1.0) = 0.0;
+// A slow glowing vortex: positive turns one way (restarting), negative the
+// other (starting up), so opening reads as the restart played back.
+uniform float swirl : hint_range(-1.0, 1.0) = 0.0;
 uniform float error : hint_range(0.0, 1.0) = 0.0;
 uniform float ripples : hint_range(0.0, 1.0) = 1.0;
 // Timeline of the completion shockwave, 0..1. Negative means off.
@@ -32,11 +33,12 @@ void fragment() {
 	vec3 wa = mix(color_a.rgb, warn.rgb, error);
 	vec3 wb = mix(color_b.rgb, warn.rgb * vec3(1.0, 0.62, 0.45), error);
 	vec3 mid = mix(wa, wb, 0.4);
+	float sw = abs(swirl);
 
 	// --- Around the orb ------------------------------------------------------
 	float outside = smoothstep(R - px, R + px, r);
 	float fade = 1.0 - smoothstep(0.72, 1.0, r);
-	float halo = exp(-max(r - R, 0.0) * 10.0) * (0.18 + 0.32 * progress + 0.4 * swirl);
+	float halo = exp(-max(r - R, 0.0) * 10.0) * (0.18 + 0.32 * progress + 0.4 * sw);
 	float rip = 0.0;
 	for (int i = 0; i < 3; i++) {
 		float ph = fract(t * 0.2 + float(i) / 3.0);
@@ -48,8 +50,8 @@ void fragment() {
 	float shock = 0.0;
 	if (pulse >= 0.0 && pulse < 1.0) {
 		float sr = R + pulse * (1.02 - R);
-		float sw = 0.012 + 0.05 * pulse;
-		shock = exp(-pow((r - sr) / sw, 2.0)) * (1.0 - pulse) * 1.3;
+		float width = 0.012 + 0.05 * pulse;
+		shock = exp(-pow((r - sr) / width, 2.0)) * (1.0 - pulse) * 1.3;
 	}
 	vec3 around_rgb = mix(mid, vec3(1.0), clamp(shock * 0.6, 0.0, 0.7));
 	float around_a = clamp((halo + rip + shock) * fade, 0.0, 1.0) * outside;
@@ -60,7 +62,7 @@ void fragment() {
 	float z = sqrt(max(1.0 - qr * qr, 0.0));
 	// Through a curved shell the water bends towards the rim.
 	vec2 wq = q * (0.82 + 0.18 * z);
-	if (swirl > 0.0) {
+	if (sw > 0.0) {
 		float ang = swirl * ((1.0 - qr) * 2.6 + t * 1.4);
 		float cs = cos(ang);
 		float sn = sin(ang);
@@ -84,7 +86,7 @@ void fragment() {
 	float c = sin(cq.x * 2.1 + t * 1.1 + sin(cq.y * 1.7 - t * 0.8))
 		+ sin(cq.y * 2.6 - t * 0.9 + sin(cq.x * 1.3 + t * 0.6));
 	c = pow(clamp(1.0 - abs(c) * 0.55, 0.0, 1.0), 6.0);
-	water += vec3(0.85, 1.0, 1.0) * c * (0.16 + 0.2 * swirl) * (1.0 - depth * 0.7);
+	water += vec3(0.85, 1.0, 1.0) * c * (0.16 + 0.2 * sw) * (1.0 - depth * 0.7);
 	// Bubbles rising from the bottom to the surface.
 	float bub = 0.0;
 	for (int i = 0; i < 6; i++) {
@@ -115,7 +117,7 @@ void fragment() {
 	float line = 1.0 - smoothstep(0.0, 1.6 * px, abs(r - R + px));
 	float facing = dot(normalize(p + 0.0001), normalize(vec2(-0.55, -1.0)));
 	col += vec3(1.0) * line * mix(0.12, 0.6, facing * facing);
-	col += wa * swirl * 0.18 * (1.0 - qr);
+	col += wa * sw * 0.18 * (1.0 - qr);
 
 	float inside = 1.0 - outside;
 	vec3 rgb = mix(around_rgb, col, inside);

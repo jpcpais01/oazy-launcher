@@ -56,7 +56,7 @@ func _ready() -> void:
 	Catalog.set_favorite("app:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)
 	for r in ["app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App", "app:com.squirrel.figma.Figma", "app:Microsoft.VisualStudioCode", "app:com.squirrel.Discord.Discord"]:
 		Catalog.note_recent(r)
-	await _wait(0.4)
+	await _wait(0.2)
 	await shot("00-loading")
 	var main := get_tree().current_scene
 	var waited := 0.0
