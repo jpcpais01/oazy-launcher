@@ -10,8 +10,6 @@ const GRIP := 6.0
 const APP_TITLES := {&"library": "Library", &"settings": "Settings", &"cleaner": "Cleaner"}
 const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(1120, 820), &"cleaner": Vector2(1180, 800)}
 
-## The update version a toast already announced.
-var _announced_update := ""
 var wallpaper: Wallpaper
 var desktop: Desktop
 var layer: WindowLayer
@@ -23,6 +21,7 @@ var preview: TaskPreview
 var switcher: Switcher
 var overlay_layer: Control
 var toasts: Toasts
+var update_pill: UpdatePill
 var loaded := false
 
 var _chrome: Control
@@ -113,6 +112,9 @@ func _ready() -> void:
 	_menus.add_child(overlay_layer)
 	toasts = Toasts.new()
 	Shell.layer("toasts", {"top": true}).add_child(toasts)
+	update_pill = UpdatePill.new()
+	update_pill.main = self
+	Shell.layer("pill", {"top": true}).add_child(update_pill)
 	switcher = Switcher.new()
 	switcher.main = self
 	Shell.layer("switcher", {"top": true}).add_child(switcher)
@@ -548,6 +550,13 @@ func show_update() -> void:
 		Updater.check()
 
 
+func update_screen_open() -> bool:
+	for c in overlay_layer.get_children():
+		if c is UpdateOverlay and not c.is_queued_for_deletion():
+			return true
+	return false
+
+
 func show_patch_notes() -> void:
 	var d := NotesDialog.new()
 	d.title = "Patch notes"
@@ -807,10 +816,9 @@ func _on_import_finished(added: int, found: int) -> void:
 
 
 func _on_update_state(state: StringName) -> void:
-	# Rechecks find the same update again; only a new version is news.
-	if state == &"available" and loaded and str(Updater.latest.get("version", "")) != _announced_update:
-		_announced_update = str(Updater.latest.get("version", ""))
-		toasts.show_toast("Oazy %s is available. See what's new" % Updater.latest.get("version", ""), &"update", show_update)
+	# Restarting from the update pill or Settings still plays the full restart.
+	if state == &"installing" and loaded:
+		show_update()
 
 
 func _on_hotkey(was_foreground: bool) -> void:
@@ -867,6 +875,7 @@ func _on_fullscreen_app(on: bool) -> void:
 	if loaded:
 		Shell.set_layer_visible("bar", not on)
 	Shell.set_layer_visible("toasts", not on)
+	Shell.set_layer_visible("pill", not on)
 	App.refresh_fps()
 
 

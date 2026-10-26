@@ -762,6 +762,28 @@ func _ui_tests() -> void:
 	main.launch(first_id)
 	await _wait(0.30)
 	Updater.apply_releases([{"tag_name": "v99.0.0", "body": "- Big", "assets": [{"name": "OazyLauncher.exe", "size": 1, "browser_download_url": "https://x"}]}], App.version)
+	var was_state := Updater.state
+	Updater.state = &"available"
+	Updater.state_changed.emit(&"available")
+	await _wait(0.6)
+	check(main.update_pill._card.visible and main.update_pill._open, "update pill: slides in, open with the news")
+	check(main.update_pill.shell_shape().size() == 1, "update pill: its layer keeps it on screen")
+	Updater.state = &"downloading"
+	Updater.state_changed.emit(&"downloading")
+	Updater.progress.emit(500, 1000, 100.0)
+	await _wait(0.3)
+	check(main.update_pill._sub.text.contains("/s"), "update pill: shows download speed")
+	Updater.state = &"checking"
+	Updater.state_changed.emit(&"checking")
+	Updater.state = &"error"
+	Updater.state_changed.emit(&"error")
+	check(main.update_pill._want_in, "update pill: a failed download stays to retry")
+	Updater.state = &"idle"
+	Updater.state_changed.emit(&"idle")
+	Updater.state = &"error"
+	Updater.state_changed.emit(&"error")
+	check(not main.update_pill._want_in, "update pill: a failed background check isn't news")
+	Updater.state = was_state
 	main.show_update()
 	main.show_patch_notes()
 	main.toasts.show_toast("Smoke toast", &"success")

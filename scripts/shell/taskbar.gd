@@ -3,8 +3,8 @@ extends Control
 ## The glass taskbar. Left: the Start orb and search. Middle: pinned and
 ## running apps, real Windows windows and Oazy's own side by side, with a
 ## liquid "lens" that glides to whichever one is active. Drag an app to
-## reorder; its neighbours ease aside and the order is kept. Right: updates,
-## the network (Wi-Fi and cable), sound (quick settings), the weather, the
+## reorder; its neighbours ease aside and the order is kept. Right: the
+## network (Wi-Fi and cable), sound (quick settings), the weather, the
 ## clock (calendar) and an invisible corner that shows the desktop.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
@@ -39,7 +39,6 @@ var _drag_grab := 0.0
 var _reflowing := false
 var _clock: Label
 var _date: Label
-var _update_btn: FxButton
 var _battery: Label
 var _sound: Button
 var _net: Button
@@ -109,13 +108,6 @@ func _ready() -> void:
 	_start_corner()
 	row.add_child(_search_pill())
 	row.add_child(Kit.spacer(0, 0, true))
-
-	_update_btn = FxButton.make("Update", "download", FxButton.Style.ACCENT, 38)
-	_update_btn.visible = false
-	_update_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_update_btn.focus_mode = Control.FOCUS_NONE
-	_update_btn.pressed.connect(func() -> void: main.show_update())
-	row.add_child(_update_btn)
 
 	_battery = Kit.label("", 14, 600, App.TEXT_DIM)
 	_battery.visible = false
@@ -191,7 +183,6 @@ func _ready() -> void:
 	Catalog.apps_changed.connect(queue_rebuild)
 	Host.windows_changed.connect(queue_rebuild)
 	Library.changed.connect(queue_rebuild)
-	Updater.state_changed.connect(_on_update_state)
 	layer.changed.connect(queue_rebuild)
 	rebuild()
 
@@ -1016,19 +1007,3 @@ func _tray_button(min_size: Vector2, tip: String) -> Button:
 	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.16), 14, Color(1, 1, 1, 0.14), 1))
 	b.add_theme_stylebox_override("hover_pressed", Kit.box(Color(1, 1, 1, 0.16), 14, Color(1, 1, 1, 0.14), 1))
 	return b
-
-
-func _on_update_state(state: StringName) -> void:
-	# A (re)check leaves the button as it was, so it never blinks away
-	# while Oazy looks for an even newer update.
-	if state == &"checking":
-		return
-	var show := state in [&"available", &"downloading", &"ready"]
-	_update_btn.visible = show
-	match state:
-		&"downloading":
-			_update_btn.text = "Downloading"
-		&"ready":
-			_update_btn.text = "Restart to update"
-		_:
-			_update_btn.text = "Update"
