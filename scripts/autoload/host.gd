@@ -192,6 +192,12 @@ func _on_line(line: String) -> void:
 				switch_key.emit(key)
 			"wifi":
 				wifi_event.emit(d)
+			"picture":
+				# A newer kept picture: loaded when something asks for it.
+				var hw := int(d.get("hwnd", 0))
+				if float(d.get("dev", 0.0)) >= 1.0:
+					_kept[hw] = Vector2i(int(d.get("w", 0)), int(d.get("h", 0)))
+					captures.erase(hw)
 			"ready":
 				hotkey_ok = bool(d.get("hotkey", false))
 		return
@@ -283,6 +289,13 @@ func _apply_windows(d: Dictionary) -> void:
 		for k in captures.keys():
 			if not alive.has(k):
 				captures.erase(k)
+	if not _kept.is_empty():
+		var alive_k := {}
+		for w in list:
+			alive_k[int(w["hwnd"])] = true
+		for k in _kept.keys():
+			if not alive_k.has(k):
+				_kept.erase(k)
 	foreground = int(d.get("fg", 0))
 	self_foreground = bool(d.get("self_fg", false)) or not available
 	var fs := bool(d.get("fs", false))
@@ -352,6 +365,8 @@ func go_home() -> void:
 ## The last picture taken of each window (hwnd -> ImageTexture), so a window
 ## that has since been minimised still has one.
 var captures := {}
+## hwnd -> size of the picture the companion keeps of it (see keep_pictures).
+var _kept := {}
 
 
 ## Takes a picture of `hwnd` (PrintWindow) at most `max_px` in size. `done`
@@ -374,6 +389,34 @@ func capture(hwnd: int, max_px: Vector2i, done: Callable) -> void:
 		if done.is_valid():
 			done.call(tex)
 	)
+
+
+## Has the companion keep a recent picture of every open window, so Alt+Tab
+## has one for windows that are minimised (Windows can't draw those).
+func keep_pictures(on: bool, max_px: Vector2i = Vector2i(800, 500)) -> void:
+	var dir := ""
+	if on:
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://host/caps"))
+		dir = ProjectSettings.globalize_path("user://host/caps").replace("/", "\\")
+	request(["keep_pictures", dir, max_px.x, max_px.y])
+
+
+## The latest picture of a window: the last capture, or the one the companion
+## kept. Null if there's none.
+func picture_of(hwnd: int) -> Texture2D:
+	if captures.has(hwnd):
+		return captures[hwnd]
+	if not _kept.has(hwnd):
+		return null
+	var size: Vector2i = _kept[hwnd]
+	var bytes := FileAccess.get_file_as_bytes("user://host/caps/%d.kept.rgba" % hwnd)
+	if size.x <= 0 or size.y <= 0 or bytes.size() != size.x * size.y * 4:
+		return null
+	var img := Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBA8, bytes)
+	img.generate_mipmaps()
+	var tex := ImageTexture.create_from_image(img)
+	captures[hwnd] = tex
+	return tex
 
 
 func render_icon(key: String, px: int, out_path: String, done: Callable) -> void:

@@ -599,6 +599,9 @@ namespace Oazy
 					if (!SwitchWanted) Switching = false;
 					SwitchAcked = true;
 					return "\"ok\":true,\"hook\":" + Json.Bool(KeyHook != IntPtr.Zero);
+				case "keep_pictures":
+					KeepPictures(Arg(p, 2), Int(Arg(p, 3), 640), Int(Arg(p, 4), 400));
+					return "\"ok\":true";
 				case "switcher_ack":
 					SwitchAcked = true;
 					return "\"ok\":true";
@@ -1878,6 +1881,94 @@ namespace Oazy
 				SwitchEvent(key);
 			}
 			return true;
+		}
+
+		// --- Kept pictures ----------------------------------------------------------
+		// Windows can't draw a minimised window, so Alt+Tab would have nothing
+		// to show for it. While enabled, a background thread keeps a recent
+		// picture of every open window instead: the one in front every few
+		// seconds (and soon after it comes to the front), the others now and
+		// then, one at a time, and never while a fullscreen game is up. Each new
+		// picture goes to <dir>\<hwnd>.kept.rgba with a "picture" event.
+
+		static volatile string KeepDir = "";
+		static int KeepW = 640, KeepH = 400;
+		static Thread Keeper;
+		static readonly Dictionary<long, DateTime> Kept = new Dictionary<long, DateTime>();
+
+		static void KeepPictures(string dir, int w, int h)
+		{
+			KeepW = w;
+			KeepH = h;
+			KeepDir = dir ?? "";
+			if (KeepDir != "" && Keeper == null)
+			{
+				Keeper = new Thread(KeepLoop);
+				Keeper.IsBackground = true;
+				Keeper.Priority = ThreadPriority.BelowNormal;
+				Keeper.Start();
+			}
+		}
+
+		static void KeepLoop()
+		{
+			IntPtr lastFg = IntPtr.Zero;
+			DateTime fgSince = DateTime.UtcNow;
+			while (true)
+			{
+				Thread.Sleep(600);
+				string dir = KeepDir;
+				if (dir == "") continue;
+				try
+				{
+					IntPtr fg = Native.GetForegroundWindow();
+					DateTime now = DateTime.UtcNow;
+					if (fg != lastFg) { lastFg = fg; fgSince = now; }
+					if (fg != IntPtr.Zero && IsFullscreen(fg)) continue;
+					// Windows that are gone drop out.
+					List<IntPtr> open = new List<IntPtr>();
+					Native.EnumWindows(delegate(IntPtr h, IntPtr l)
+					{
+						uint pid;
+						Native.GetWindowThreadProcessId(h, out pid);
+						if (IsAppWindow(h, pid)) open.Add(h);
+						return true;
+					}, IntPtr.Zero);
+					HashSet<long> alive = new HashSet<long>();
+					foreach (IntPtr h in open) alive.Add(h.ToInt64());
+					List<long> gone = new List<long>();
+					foreach (long k in Kept.Keys) if (!alive.Contains(k)) gone.Add(k);
+					foreach (long k in gone) Kept.Remove(k);
+					// Pick one: the front window once it has had a moment to draw,
+					// else whichever other window has gone longest without one.
+					IntPtr pick = IntPtr.Zero;
+					if (alive.Contains(fg.ToInt64()) && !Native.IsIconic(fg) && (now - fgSince).TotalMilliseconds >= 500
+						&& Age(fg, now) >= ((now - fgSince).TotalSeconds < 2 ? 1.0 : 3.0))
+						pick = fg;
+					if (pick == IntPtr.Zero)
+					{
+						double oldest = 15.0;
+						foreach (IntPtr h in open)
+						{
+							if (Native.IsIconic(h)) continue;
+							double age = Age(h, now);
+							if (age >= oldest) { oldest = age; pick = h; }
+						}
+					}
+					if (pick == IntPtr.Zero) continue;
+					Kept[pick.ToInt64()] = now;
+					string path = Path.Combine(dir, pick.ToInt64() + ".kept.rgba");
+					string r = Capture(pick, KeepW, KeepH, path);
+					if (r.StartsWith("\"ok\":true")) Write("{\"ev\":\"picture\",\"hwnd\":" + pick.ToInt64() + "," + r + "}");
+				}
+				catch (Exception) { }
+			}
+		}
+
+		static double Age(IntPtr h, DateTime now)
+		{
+			DateTime at;
+			return Kept.TryGetValue(h.ToInt64(), out at) ? (now - at).TotalSeconds : 1e9;
 		}
 
 		static bool Shift() { return (Native.GetAsyncKeyState((int)VK_SHIFT) & 0x8000) != 0; }

@@ -808,6 +808,7 @@ func _enter_shell() -> void:
 	Host.enter_shell(Host.self_hwnd, reserve, bool(Settings.get_value("hide_windows_taskbar")))
 	_theme_apps()
 	Host.set_switcher(bool(Settings.get_value("alt_tab")))
+	Host.keep_pictures(bool(Settings.get_value("alt_tab")))
 
 
 func _theme_apps() -> void:
@@ -825,6 +826,7 @@ func _on_setting(key: String, _value: Variant) -> void:
 			_theme_apps()
 		"alt_tab":
 			Host.set_switcher(bool(Settings.get_value("alt_tab")))
+			Host.keep_pictures(bool(Settings.get_value("alt_tab")))
 
 
 func _on_fullscreen_app(on: bool) -> void:

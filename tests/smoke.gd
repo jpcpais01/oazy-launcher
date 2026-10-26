@@ -761,6 +761,19 @@ func _capture_test() -> void:
 		var tex: ImageTexture = got.get("tex")
 		check(tex != null and tex.get_width() > 32 and tex.get_height() > 32, "capture: takes a picture of a real window (not blank)")
 		check(Host.captures.has(hwnd), "capture: keeps the last picture")
+		# The companion keeps pictures on its own, so a window minimised later
+		# still has one.
+		Host.captures.erase(hwnd)
+		Host.keep_pictures(true)
+		waited = 0.0
+		while not Host._kept.has(hwnd) and waited < 12.0:
+			await _wait(0.2)
+			waited += 0.2
+		check(Host._kept.has(hwnd), "capture: the companion keeps a picture of open windows")
+		Host.minimize(hwnd)
+		await _wait(1.0)
+		var kept := Host.picture_of(hwnd)
+		check(kept != null and kept.get_width() > 32, "capture: a minimised window still has its kept picture")
 		Host.close_window(hwnd)
 	await _wait(0.5)
 	if OS.is_process_running(pid):
