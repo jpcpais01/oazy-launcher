@@ -15,8 +15,13 @@ var root: Root
 var _poly := PackedVector2Array([Vector2(-1, -1)])
 var _styled := false
 var _shown_at := 0
+## True between the OS telling us this window got focus and lost it.
+## (Window.has_focus() turns true as soon as focus is asked for.)
+var os_focused := false
 ## Frames to stay on screen even with nothing to show (a menu is about to open).
 var _hold := 0
+## Kept on screen while a menu waits to open in it.
+var _pins := 0
 
 
 func _init() -> void:
@@ -35,13 +40,14 @@ func _init() -> void:
 
 func _ready() -> void:
 	fit()
-	# Menus inside a layer close when you go to another window.
-	focus_exited.connect(func() -> void:
-		for w in get_embedded_subwindows():
-			if w is Popup and w.visible:
-				w.hide()
-	)
+	# Menus close on their own when you go elsewhere (Godot's popups close
+	# when the app or a window above them in the tree gains focus); hiding
+	# them here as well raced with menus that were still opening.
+	focus_entered.connect(func() -> void: os_focused = true)
+	focus_exited.connect(func() -> void: os_focused = false)
 	visibility_changed.connect(func() -> void:
+		if not visible:
+			os_focused = false
 		if visible:
 			_shown_at = Time.get_ticks_msec()
 			if not _styled:
@@ -107,13 +113,23 @@ func _update_shape(force_show: bool) -> void:
 		_hold = 3
 	elif _hold > 0:
 		_hold -= 1
-	var want := not suppressed and (full or not rects.is_empty() or _hold > 0)
+	var want := not suppressed and (full or not rects.is_empty() or _hold > 0 or _pins > 0)
 	var poly := PackedVector2Array() if full else Shell.union_polygon(rects, Shell.scale)
+	if not full and poly.is_empty():
+		# Up but empty (held for a menu): an empty polygon would mean "the
+		# whole window takes clicks", so keep a single pixel instead.
+		poly = PackedVector2Array([Vector2.ZERO, Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
 	if poly != _poly:
 		_poly = poly
 		mouse_passthrough_polygon = poly
 	if want != visible:
 		visible = want
+
+
+func pin(on: bool) -> void:
+	_pins = maxi(0, _pins + (1 if on else -1))
+	if on:
+		_update_shape(true)
 
 
 ## Shows the layer right away, without taking focus.
