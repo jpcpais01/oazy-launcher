@@ -55,6 +55,8 @@ namespace OazyBrowser
 
 		[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
 		[DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr h, ref MARGINS m);
+		[DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
+		[DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool ReleaseCapture();
@@ -2209,6 +2211,16 @@ namespace OazyBrowser
 
 		public void TestOpenPanel(string name) { Post(Json.Obj("t", "openPanel", "name", name)); }
 		public void TestNavigate(string url) { Navigate(Active, url); }
+		// Self-test only: try a frame variant (0 = as shipped) to compare the bare glass.
+		public void TestFrame(bool caption, bool noCaptionColor)
+		{
+			long style = Native.GetWindowLongPtr(Handle, -16).ToInt64();
+			style = caption ? style | 0x00C00000 : style & ~0x00C00000L;
+			Native.SetWindowLongPtr(Handle, -16, new IntPtr(style));
+			int color = noCaptionColor ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
+			Native.DwmSetWindowAttribute(Handle, 35, ref color, 4);
+			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+		}
 		public void TestShowChrome(bool on) { try { chrome.IsVisible = on; } catch { } }
 		public void TestShowPage(bool on) { try { Active.C.IsVisible = on; } catch { } }
 	}
@@ -2279,6 +2291,17 @@ namespace OazyBrowser
 				win.TestShowPage(false);
 				await Task.Delay(600);
 				Shot("browser-backdrop.png");
+				win.TestFrame(true, false);
+				await Task.Delay(600);
+				Shot("frame-caption.png");
+				win.TestFrame(false, true);
+				await Task.Delay(600);
+				Shot("frame-nocolor.png");
+				win.TestFrame(true, true);
+				await Task.Delay(600);
+				Shot("frame-caption-nocolor.png");
+				win.TestFrame(false, false);
+				await Task.Delay(400);
 				win.TestShowChrome(true);
 				await Task.Delay(400);
 				Shot("browser-chrome-only.png");
