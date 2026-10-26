@@ -35,6 +35,8 @@ namespace OazyBrowser
 {
 	static class Native
 	{
+		[DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
+		[DllImport("kernel32.dll")] public static extern bool TerminateProcess(IntPtr process, uint code);
 		[StructLayout(LayoutKind.Sequential)]
 		public struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -161,6 +163,11 @@ namespace OazyBrowser
 			Application.SetCompatibleTextRenderingDefault(false);
 			int code = App.Run(data, accent, pipe, urls, newWindow, selftest);
 			GC.KeepAlive(single);
+			// Everything is saved and every WebView closed. Leave now rather than
+			// let CLR shutdown finalize WebView2's COM objects off their STA
+			// thread, which crashes (0xC0000005) on the way out.
+			try { single.ReleaseMutex(); } catch { }
+			Native.TerminateProcess(Native.GetCurrentProcess(), (uint)code);
 			return code;
 		}
 
@@ -268,6 +275,7 @@ namespace OazyBrowser
 			Start(urls, newWindow);
 			Application.Run(ctx);
 			SaveNow();
+			if (Test != null) Test.Exited();
 			return Test != null ? Test.ExitCode : 0;
 		}
 
@@ -2271,6 +2279,12 @@ namespace OazyBrowser
 				Shot("browser-downloads.png");
 				Finish();
 			}
+		}
+
+		public void Exited()
+		{
+			Log("message loop ended, exiting with " + ExitCode);
+			try { File.WriteAllLines(Path.Combine(dir, "browser-selftest.log"), log.ToArray()); } catch { }
 		}
 
 		void Shot(string name)
