@@ -64,6 +64,7 @@ function onMessage(m) {
 			break;
 		case 'suggest': onSuggest(m); break;
 		case 'snapshot': if (snapResolve) { snapResolve(m.url); snapResolve = null; } break;
+		case 'closePanel': closePanel(); break;
 		case 'win':
 			body.classList.toggle('maximized', !!m.max);
 			body.classList.toggle('full', !!m.full);
