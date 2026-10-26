@@ -17,6 +17,8 @@ var desktop: Desktop
 var layer: WindowLayer
 var taskbar: Taskbar
 var start: StartPanel
+## The Start orb's Claude popup.
+var assistant: AssistantPanel
 var preview: TaskPreview
 var switcher: Switcher
 var overlay_layer: Control
@@ -75,26 +77,36 @@ func _ready() -> void:
 	calendar = CalendarFlyout.new()
 	start_layer.add_child(calendar)
 	taskbar.attach_flyouts(quick, calendar)
+	assistant = AssistantPanel.new()
+	assistant.main = self
+	start_layer.add_child(assistant)
 	weather = WeatherFlyout.new()
 	start_layer.add_child(weather)
 	taskbar.attach_weather(weather)
 	network = NetworkFlyout.new()
 	start_layer.add_child(network)
 	taskbar.attach_network(network)
-	taskbar.start_pressed.connect(start.toggle)
+	# The orb is Claude now; the search pill (and right-clicking the orb) is Start.
+	taskbar.start_pressed.connect(assistant.toggle)
+	taskbar.start_alt_pressed.connect(start.toggle)
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
-		taskbar.orb.open = o
+		taskbar.orb.open = o or assistant.is_open
 		if o:
 			_fg_at_start = Host.foreground
 		desktop.dim(o)
 		if o:
-			preview.hide_preview()
-			quick.close()
-			calendar.close()
-			weather.close()
-			network.close()
+			assistant.close()
+			_close_popups()
 	)
+	assistant.visibility_changed_to.connect(func(o: bool) -> void:
+		taskbar.orb.open = o or start.is_open
+		if o:
+			start.close()
+			_close_popups()
+	)
+	assistant.busy_changed.connect(func(on: bool) -> void: taskbar.orb.busy = on)
+	assistant.needs_you.connect(_on_assistant_needs_you)
 
 	_menus = Shell.layer("overlay", {"top": true, "focus": true, "work": true})
 	overlay_layer = OverlayLayer.new()
@@ -296,6 +308,21 @@ func _exit_tree() -> void:
 	if w and w.mode == Window.MODE_WINDOWED and not App.smoke_test and not Shell.native:
 		Settings.set_value("window_rect", [w.position.x, w.position.y, w.size.x, w.size.y])
 	Settings.save()
+
+
+func _close_popups() -> void:
+	preview.hide_preview()
+	quick.close()
+	calendar.close()
+	weather.close()
+	network.close()
+
+
+## Claude finished or asked something while its popup was closed.
+func _on_assistant_needs_you(why: String) -> void:
+	taskbar.orb.ping()
+	if why == "ask":
+		toasts.show_toast("Claude is waiting for your OK", &"info", assistant.open)
 
 
 func quit() -> void:
@@ -835,6 +862,7 @@ func _on_fullscreen_app(on: bool) -> void:
 	# A game or video took the whole screen: get out of its way.
 	if on:
 		start.close()
+		assistant.close()
 		preview.hide_preview()
 	if loaded:
 		Shell.set_layer_visible("bar", not on)
@@ -894,6 +922,9 @@ func handle_key(event: InputEvent, from: Window = null) -> bool:
 	if Shell.native and start.is_open and not modal_open() and from != Shell.surface_of(start):
 		start.forward_key(k)
 		return true
+	if Shell.native and assistant.is_open and not modal_open() and from != Shell.surface_of(assistant):
+		assistant.forward_key(k)
+		return true
 	if k.keycode == KEY_F11 or (k.keycode == KEY_ENTER and k.alt_pressed):
 		toggle_fullscreen()
 	elif modal_open():
@@ -902,6 +933,8 @@ func handle_key(event: InputEvent, from: Window = null) -> bool:
 		show_shortcuts()
 	elif k.keycode == KEY_F and k.ctrl_pressed:
 		start.open()
+	elif k.keycode == KEY_SPACE and k.ctrl_pressed:
+		assistant.toggle()
 	elif k.keycode == KEY_L and k.ctrl_pressed:
 		open_app(&"library")
 	elif k.keycode == KEY_N and k.ctrl_pressed:

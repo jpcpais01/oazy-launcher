@@ -39,6 +39,15 @@ func _logic_tests() -> void:
 	check(Library.is_steam_tool("228980", "Steamworks Common Redistributables"), "steam: skips redistributables")
 	check(not Library.is_steam_tool("1245620", "ELDEN RING"), "steam: keeps games")
 
+	# Claude's replies in the orb popup.
+	var md := ChatMarkdown.blocks("Hi **there**\n\n- one\n- two\n\n```py\nprint(1)\n```\nafter")
+	check(md.size() == 3 and md[0]["t"] == "text" and md[1]["t"] == "code" and md[2]["t"] == "text", "chat markdown: text, code, text")
+	check(str(md[0]["bb"]).contains("[b]there[/b]") and str(md[0]["bb"]).contains("[ul"), "chat markdown: bold and list")
+	check(str(md[1]["lang"]) == "py" and str(md[1]["code"]) == "print(1)", "chat markdown: fenced code")
+	var open_fence := ChatMarkdown.blocks("Look:\n```\nhalf")
+	check(open_fence.size() == 2 and str(open_fence[1]["code"]) == "half", "chat markdown: code still streaming")
+	check(ClaudeCli._quote("C:/Program Files/x") == "\"C:/Program Files/x\"" and ClaudeCli._quote("-p") == "-p", "claude cli: argument quoting")
+
 	# Epic manifest.
 	var epic := Library.epic_entry({
 		"DisplayName": "Fortnite", "AppName": "Fortnite", "MainGameAppName": "Fortnite",
@@ -620,6 +629,32 @@ func _ui_tests() -> void:
 	check(Cleaner.history[0].get("undone", false), "cleaner: undo")
 	cl.close()
 	await _wait(0.4)
+
+	# The orb's Claude popup (no claude here: events are fed in).
+	var ai: AssistantPanel = main.assistant
+	ai.mock = true
+	main.taskbar.start_pressed.emit()
+	await _wait(0.4)
+	check(ai.is_open and not main.start.is_open, "assistant: the orb opens Claude, not Start")
+	check(main.get_viewport_rect().grow(1.0).encloses(ai.get_global_rect()) and ai.get_global_rect().end.y <= main.taskbar.get_global_rect().position.y + 1.0, "assistant: fits above the taskbar")
+	ai.submit("hello")
+	check(ai.running and main.taskbar.orb.busy, "assistant: sending stirs the orb")
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}})
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hi **João**"}}})
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}})
+	ai.handle_message({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Write", "input": {"file_path": "/tmp/x.txt"}}})
+	check(ai._asks.size() == 1, "assistant: asks before writing")
+	ai._answer("r1", false)
+	ai.handle_message({"type": "result", "subtype": "success"})
+	check(not ai.running and ai._asks.is_empty() and not main.taskbar.orb.busy, "assistant: reply done")
+	main.taskbar.start_alt_pressed.emit()
+	await _wait(0.3)
+	check(main.start.is_open and not ai.is_open, "assistant: right-clicking the orb opens Start instead")
+	main.start.close()
+	ai.new_chat()
+	check(not ai._has_conversation(), "assistant: new chat clears it")
+	ai.mock = false
+	await _wait(0.3)
 
 	# Start.
 	main.start.open()

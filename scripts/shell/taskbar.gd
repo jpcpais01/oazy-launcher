@@ -9,7 +9,10 @@ extends Control
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
+## The orb (or the corner past it): Claude.
 signal start_pressed
+## The orb right-clicked: Start.
+signal start_alt_pressed
 signal search_pressed
 
 const HEIGHT := 48.0
@@ -101,6 +104,7 @@ func _ready() -> void:
 	orb = StartOrb.new()
 	orb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	orb.pressed.connect(func() -> void: start_pressed.emit())
+	orb.alt_pressed.connect(func() -> void: start_alt_pressed.emit())
 	row.add_child(orb)
 	_start_corner()
 	row.add_child(_search_pill())
@@ -267,12 +271,13 @@ class CornerHit extends Button:
 		return Rect2(Vector2.ZERO, size).has_point(point) and not hole.has_point(point)
 
 
-## The Start corner, like the show desktop one on the right: throwing the mouse
-## into the screen's bottom-left corner and clicking opens Start. The button
+## The orb's corner, like the show desktop one on the right: throwing the mouse
+## into the screen's bottom-left corner and clicking does what the orb does
+## (opens Claude). The button
 ## covers the orb's end of the bar out to the corner, minus the orb itself.
 func _start_corner() -> void:
 	var s := CornerHit.new()
-	s.tooltip_text = "Start (Ctrl + Alt + O)"
+	s.tooltip_text = "Claude (Ctrl + Space)"
 	s.pressed.connect(func() -> void: start_pressed.emit())
 	add_child(s)
 	_start_hit = s
