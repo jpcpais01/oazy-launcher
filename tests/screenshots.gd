@@ -385,7 +385,8 @@ static func _mock_quotes() -> Dictionary:
 			v += drift + rng.randfn(0.0, prev * 0.0018)
 			pts.append(v)
 		pts[-1] = price
-		out[sym] = {"symbol": sym, "name": spec[sym][2], "price": price, "prev": prev, "currency": "USD", "points": pts, "at": int(Time.get_unix_time_from_system())}
+		out[sym] = {"symbol": sym, "name": spec[sym][2], "price": price, "prev": prev, "currency": "USD", "points": pts, "at": int(Time.get_unix_time_from_system()),
+			"open_from": int(Time.get_unix_time_from_system()) - 3 * 3600, "open_to": int(Time.get_unix_time_from_system()) + 3 * 3600}
 	return out
 
 

@@ -146,11 +146,28 @@ static func parse_chart(j: Variant) -> Dictionary:
 	var prev: Variant = meta.get("chartPreviousClose", meta.get("previousClose"))
 	var sym := str(meta.get("symbol", ""))
 	var name := str(meta.get("shortName", meta.get("longName", "")))
+	# Today's regular session, to tell open from closed.
+	var session := {}
+	var period: Variant = meta.get("currentTradingPeriod")
+	if period is Dictionary and period.get("regular") is Dictionary:
+		session = period["regular"]
 	return {
+		"open_from": int(session.get("start", 0)), "open_to": int(session.get("end", 0)),
 		"symbol": sym, "name": name, "price": price,
 		"prev": float(prev) if prev != null else (points[0] if not points.is_empty() else price),
 		"currency": str(meta.get("currency", "")), "points": points,
 	}
+
+
+## True while the quote's market is in its regular session, false when it's
+## closed, null when Yahoo didn't say.
+static func is_open(q: Dictionary) -> Variant:
+	var a := int(q.get("open_from", 0))
+	var b := int(q.get("open_to", 0))
+	if a <= 0 or b <= a:
+		return null
+	var now := int(Time.get_unix_time_from_system())
+	return now >= a and now < b
 
 
 static func format_price(v: float, currency: String = "") -> String:
