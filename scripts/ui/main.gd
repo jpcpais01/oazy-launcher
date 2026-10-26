@@ -675,13 +675,15 @@ func _post_update_welcome() -> void:
 	var pending := str(Settings.get_value("pending_update_version"))
 	var last := str(Settings.get_value("last_seen_version"))
 	if pending != "" and Semver.compare(pending, App.version) == 0:
-		var d := NotesDialog.new()
-		d.title = "Welcome to Oazy %s" % App.version
-		d.subtitle = "The update went smoothly. Here's what's new."
+		var d := UpdateWelcome.new()
+		d.version = App.version
+		d.from_version = str(Settings.get_value("pending_update_from"))
 		d.markdown = str(Settings.get_value("pending_update_notes"))
+		d.show_all = show_patch_notes
 		overlay_layer.add_child(d)
 		Settings.set_value("pending_update_version", "")
 		Settings.set_value("pending_update_notes", "")
+		Settings.set_value("pending_update_from", "")
 	elif not Settings.get_value("seen_shell_intro") and not App.smoke_test:
 		var d2 := NotesDialog.new()
 		d2.title = "Welcome home"
