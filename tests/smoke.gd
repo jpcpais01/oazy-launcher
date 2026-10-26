@@ -449,6 +449,12 @@ func _ui_tests() -> void:
 	st.search("")
 	check(st.page_visible("desktop") and not st.page_visible("personalise"), "settings: clearing search goes back to the page")
 	st.open_page("personalise")
+	var favs := main.desktop.get("_favs") as GridContainer
+	for size_id in ["large", "small", "medium"]:
+		Settings.set_value("fav_icon_size", size_id)
+		await _wait(0.1)
+		var tile := favs.get_child(0) as Control
+		check(tile.custom_minimum_size == Desktop.FAV_SIZES[size_id]["tile"] and favs.position.x >= 0.0, "desktop: %s favourite icons" % size_id)
 	settings.toggle_maximize()
 	await _wait(0.5)
 	check(settings.maximized and main.layer.work_rect().grow(1.0).encloses(settings.get_rect()), "windows: maximise fills the work area")
