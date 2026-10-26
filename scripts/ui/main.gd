@@ -30,6 +30,7 @@ var _desk_menu: PopupMenu
 var _grips: Array[Control] = []
 var _launching := false
 var _peeked: Array[ShellWindow] = []
+var _fg_at_start := 0
 var _menus: Control
 var quick: QuickSettings
 var calendar: CalendarFlyout
@@ -75,6 +76,8 @@ func _ready() -> void:
 	taskbar.search_pressed.connect(func() -> void: start.open())
 	start.visibility_changed_to.connect(func(o: bool) -> void:
 		taskbar.orb.open = o
+		if o:
+			_fg_at_start = Host.foreground
 		desktop.dim(o)
 		if o:
 			preview.hide_preview()
@@ -127,7 +130,10 @@ func _ready() -> void:
 		get_window().focus_entered.connect(_close_start_elsewhere)
 		Shell.surface_of(layer).focus_entered.connect(_close_start_elsewhere)
 		Host.windows_changed.connect(func() -> void:
-			if not Host.self_foreground:
+			# Only when you actually switched to another app since Start
+			# opened, not on any window event while Windows is still
+			# handing focus over.
+			if not Host.self_foreground and Host.foreground != _fg_at_start:
 				_close_start_elsewhere()
 		)
 	get_window().focus_entered.connect(func() -> void:
