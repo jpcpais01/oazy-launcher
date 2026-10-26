@@ -26,6 +26,8 @@ var _recent_title: Label
 var _all_list: VBoxContainer
 var _result_list: VBoxContainer
 var _rows: Array[Control] = []
+var _pinned_sig := "-"
+var _recent_sig := "-"
 var _sel := 0
 var _tween: Tween
 var _menu: PopupMenu
@@ -282,7 +284,12 @@ func _tile(ref: String) -> Control:
 
 ## A row (icon, name, kind) for All apps and search results.
 func _row(it: Dictionary, sub: String = "") -> Button:
-	var ref := str(it["ref"])
+	return _bind_row(_make_row(), it, sub)
+
+
+## An empty row; _bind_row fills it. Search reuses the same rows as you type
+## instead of building new ones on every key.
+func _make_row() -> Button:
 	var b := Button.new()
 	b.custom_minimum_size.y = 50
 	b.focus_mode = Control.FOCUS_NONE
@@ -290,7 +297,6 @@ func _row(it: Dictionary, sub: String = "") -> Button:
 	b.add_theme_stylebox_override("normal", Kit.empty())
 	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.08), 12))
 	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.14), 12))
-	b.set_meta("ref", ref)
 	var row := Kit.hbox(14)
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	row.offset_left = 12
@@ -299,24 +305,34 @@ func _row(it: Dictionary, sub: String = "") -> Button:
 	var ic := AppIcon.new()
 	ic.custom_minimum_size = Vector2(32, 32)
 	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ic.set_item(it)
 	row.add_child(ic)
-	var name := Kit.label(str(it["name"]), 15, 600, App.TEXT)
+	var name := Kit.label("", 15, 600, App.TEXT)
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.clip_text = true
 	name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(name)
-	var kind := sub if sub != "" else _kind_label(it)
-	if kind != "":
-		var k := Kit.label(kind, 13, 500, App.TEXT_MUTE)
-		k.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(k)
-	b.pressed.connect(func() -> void: _launch(ref))
+	var k := Kit.label("", 13, 500, App.TEXT_MUTE)
+	k.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(k)
+	b.set_meta("icon", ic)
+	b.set_meta("name", name)
+	b.set_meta("kind", k)
+	b.pressed.connect(func() -> void: _launch(str(b.get_meta("ref"))))
 	b.gui_input.connect(func(e: InputEvent) -> void:
 		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_RIGHT:
-			_show_menu(ref, b.get_global_mouse_position())
+			_show_menu(str(b.get_meta("ref")), b.get_global_mouse_position())
 	)
+	return b
+
+
+func _bind_row(b: Button, it: Dictionary, sub: String = "") -> Button:
+	b.set_meta("ref", str(it["ref"]))
+	(b.get_meta("icon") as AppIcon).set_item(it)
+	(b.get_meta("name") as Label).text = str(it["name"])
+	var k: Label = b.get_meta("kind")
+	k.text = sub if sub != "" else _kind_label(it)
+	k.visible = k.text != ""
 	return b
 
 
@@ -334,17 +350,9 @@ func _kind_label(it: Dictionary) -> String:
 # --- Fill -----------------------------------------------------------------------------------
 
 func _fill_pinned() -> void:
-	for c in _favs.get_children():
-		c.queue_free()
 	var favs := Catalog.favorites().slice(0, COLS)
-	_fav_title.visible = not favs.is_empty()
-	_favs.visible = not favs.is_empty()
-	for ref in favs:
-		_favs.add_child(_tile(ref))
 	# Favourites take a row, so Pinned gives one up.
 	var rows := 2 if not favs.is_empty() else 3
-	for c in _pinned.get_children():
-		c.queue_free()
 	var refs: Array[String] = []
 	for ref in Catalog.pins():
 		refs.append(ref)
@@ -357,17 +365,45 @@ func _fill_pinned() -> void:
 	for ref in ["oazy:library", "oazy:settings"]:
 		if not refs.has(ref):
 			refs.append(ref)
-	for ref in refs.slice(0, COLS * rows):
+	refs = refs.slice(0, COLS * rows)
+	# Only rebuilt when what it shows changed, so opening Start costs nothing.
+	var sig := _names(favs) + "/" + _names(refs)
+	if sig == _pinned_sig:
+		return
+	_pinned_sig = sig
+	for c in _favs.get_children():
+		c.queue_free()
+	_fav_title.visible = not favs.is_empty()
+	_favs.visible = not favs.is_empty()
+	for ref in favs:
+		_favs.add_child(_tile(ref))
+	for c in _pinned.get_children():
+		c.queue_free()
+	for ref in refs:
 		_pinned.add_child(_tile(ref))
 
 
+func _names(refs: Array) -> String:
+	var out := PackedStringArray()
+	for ref in refs:
+		out.append(str(ref) + "=" + str(Catalog.item(str(ref)).get("name", "")))
+	return "|".join(out)
+
+
 func _fill_recent() -> void:
-	for c in _recent.get_children():
-		c.queue_free()
 	var games: Array[Dictionary] = []
 	for e in Library.recent():
 		if e["kind"] == "game":
 			games.append(e)
+	var ids := PackedStringArray()
+	for e in games.slice(0, 6):
+		ids.append(str(e["id"]) + "=" + str(e["name"]))
+	var sig := "|".join(ids)
+	if sig == _recent_sig:
+		return
+	_recent_sig = sig
+	for c in _recent.get_children():
+		c.queue_free()
 	_recent_title.visible = not games.is_empty()
 	_recent.visible = not games.is_empty()
 	for e in games.slice(0, 6):
@@ -429,6 +465,19 @@ func _sync_user() -> void:
 		name = "You"
 	_user_name.text = name
 	_avatar_letter.text = name.substr(0, 1).to_upper()
+
+
+## Builds everything Start shows ahead of time (after loading), so the first
+## open is as quick as every other.
+func prepare() -> void:
+	_sync_user()
+	_fill_pinned()
+	_fill_recent()
+	while _result_list.get_child_count() < 13:
+		var r := _make_row()
+		r.visible = false
+		_result_list.add_child(r)
+	_root.get_combined_minimum_size()
 
 
 # --- Open / close -------------------------------------------------------------------------
@@ -515,8 +564,6 @@ func _on_text(text: String) -> void:
 		_show_view(_home)
 		return
 	_show_view(_results)
-	for c in _result_list.get_children():
-		c.queue_free()
 	_rows.clear()
 	var found: Array[Dictionary] = QuickAnswers.top(q)
 	var cmds := QuickAnswers.commands(q)
@@ -525,13 +572,17 @@ func _on_text(text: String) -> void:
 		found.append(cmds.pop_front())
 	found.append_array(Catalog.search(q, 12 - found.size()))
 	found.append_array(cmds)
-	for it in found:
-		var r := _row(it, str(it.get("sub", "")) if QuickAnswers.owns(str(it["ref"])) else "")
-		_result_list.add_child(r)
-		_rows.append(r)
-	var web := _row({"ref": "web:" + q, "name": "Search the web for “%s”" % q, "kind": "oazy", "glyph": "globe"}, "Web")
-	_result_list.add_child(web)
-	_rows.append(web)
+	found.append({"ref": "web:" + q, "name": "Search the web for “%s”" % q, "kind": "oazy", "glyph": "globe", "sub": "Web"})
+	while _result_list.get_child_count() < found.size():
+		_result_list.add_child(_make_row())
+	for i in _result_list.get_child_count():
+		var r: Button = _result_list.get_child(i)
+		r.visible = i < found.size()
+		if r.visible:
+			var it := found[i]
+			var own := QuickAnswers.owns(str(it["ref"])) or str(it["ref"]).begins_with("web:")
+			_bind_row(r, it, str(it.get("sub", "")) if own else "")
+			_rows.append(r)
 	_sel = 0
 	_highlight()
 

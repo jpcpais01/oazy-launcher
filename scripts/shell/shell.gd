@@ -25,6 +25,7 @@ static var screen_px := Vector2i(1600, 900)
 ## Logical pixels kept free at the bottom for Oazy's taskbar.
 static var reserve := 0.0
 static var _layers := {}
+static var _precreated := false
 
 
 static func setup(m: Control, use_native: bool, reserve_bottom: float) -> void:
@@ -89,9 +90,9 @@ static func popup(menu: Popup) -> void:
 	var tree := menu.get_tree()
 	s.pin(true)
 	if s.unfocusable:
-		var was_visible := s.visible
+		var was_up := s.is_up()
 		s.reveal()
-		if not was_visible:
+		if not was_up:
 			await tree.process_frame
 	elif not s.os_focused:
 		s.bring_to_front()
@@ -137,6 +138,36 @@ static func layer_hwnd(name: String) -> int:
 static func hwnd_of(node: Node) -> int:
 	var s := surface_of(node)
 	return s.hwnd() if s else 0
+
+
+## Makes every layer's OS window up front (parked, showing nothing), one per
+## frame, so opening Start, a menu or a dialog never has to create one. Called
+## once Oazy has loaded (and the companion is up), while the desktop has
+## focus; focus goes back to the main window afterwards, since
+## Windows hands it to each new window.
+static func precreate_layers() -> void:
+	if _precreated or not native or main == null or not ShellSurface.can_park():
+		return
+	# Each new window takes focus, so only while Oazy has it anyway.
+	if not DisplayServer.window_is_focused(DisplayServer.MAIN_WINDOW_ID):
+		return
+	_precreated = true
+	var tree := main.get_tree()
+	for holder in _layers.values():
+		var s := holder.get_parent() as ShellSurface
+		if s and s.precreate():
+			await tree.process_frame
+	# Back to the top layer that is showing something (a welcome dialog), else
+	# the desktop.
+	var back: ShellSurface = null
+	for holder in _layers.values():
+		var s := holder.get_parent() as ShellSurface
+		if s and s.is_up() and not s.unfocusable:
+			back = s
+	if back:
+		back.bring_to_front()
+	else:
+		DisplayServer.window_move_to_foreground(DisplayServer.MAIN_WINDOW_ID)
 
 
 ## Recomputes scale and size after the main window settled on the screen.

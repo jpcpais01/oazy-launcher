@@ -13,6 +13,9 @@ var _year := 2000
 var _mon := 1
 
 
+## Which month (and today) the grid was last built for.
+var _shown := ""
+
 func _init() -> void:
 	width = 340.0
 
@@ -45,10 +48,16 @@ func _on_open() -> void:
 	_year = int(t["year"])
 	_mon = int(t["month"])
 	_today.text = Fmt.long_date(t)
+	# Same month and day as last time: the grid is already right.
+	var sig := "%d-%d-%d" % [_year, _mon, int(t["day"])]
+	if sig == _shown:
+		return
+	_shown = sig
 	_fill()
 
 
 func _page(by: int) -> void:
+	_shown = ""
 	_mon += by
 	if _mon < 1:
 		_mon = 12
