@@ -431,10 +431,12 @@ func launch(id: String) -> void:
 		return
 	_launching = true
 	var overlay := LaunchOverlay.new().setup(id)
+	overlay.on_edit = open_edit
 	overlay_layer.add_child(overlay)
 	overlay.finished.connect(func() -> void: _launching = false)
 	Sfx.play(&"launch")
-	await get_tree().create_timer(0.5).timeout
+	# Let the screen settle in before the launch's own hitch.
+	await get_tree().create_timer(0.35).timeout
 	var ok := Library.launch(id) if not App.smoke_test else true
 	if is_instance_valid(overlay):
 		if ok:

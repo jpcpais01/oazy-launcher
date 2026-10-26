@@ -440,6 +440,11 @@ static func detect_claude_code() -> Dictionary:
 
 # --- Playtime ------------------------------------------------------------------
 
+## The executable a launch is being watched for ("game.exe"), or "".
+func session_image(id: String) -> String:
+	return str(_sessions[id]["image"]) if _sessions.has(id) else ""
+
+
 func _poll_sessions() -> void:
 	if _sessions.is_empty() or _poll_busy or not App.is_windows():
 		return
