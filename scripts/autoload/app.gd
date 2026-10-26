@@ -39,11 +39,20 @@ var pointer_on_bar := false: set = set_pointer_on_bar
 ## Oazy's Alt+Tab is on screen: it animates at full speed even while
 ## another app has focus (it never takes focus itself).
 var switcher_open := false: set = set_switcher_open
+## The pointer moved somewhere none of Oazy's windows can see (another
+## app's window, Explorer's desktop). Hover is dropped everywhere then.
+var pointer_away := false
 ## Frame cap used when vsync turns out not to pace the frame (0 = none).
 var _vsync_cap := 0
 var _probe_at := 0
 var _probe_frames := 0
 var _probed := false
+## Any of Oazy's windows got a mouse event since the last frame.
+var _heard := false
+var _guard_pos := Vector2i.ZERO
+## When the pointer started moving without any of Oazy's windows hearing it.
+var _unheard_at := 0
+var _unheard_frames := 0
 
 
 func _ready() -> void:
@@ -52,7 +61,10 @@ func _ready() -> void:
 	get_tree().node_added.connect(func(n: Node) -> void:
 		if n is ScrollContainer or n is RichTextLabel:
 			_smooth.call_deferred(n)
+		elif n is Window:
+			_listen(n as Window)
 	)
+	_listen(get_window())
 	version = str(ProjectSettings.get_setting("application/config/version", "0.0.0-dev"))
 	var args := OS.get_cmdline_user_args()
 	smoke_test = args.has("--smoke-test") or OS.get_cmdline_args().has("--smoke-test")
@@ -123,12 +135,19 @@ func _update_fps(focused: bool) -> void:
 		# A game or video has the screen: nothing of Oazy's is visible.
 		Engine.max_fps = 5
 	elif Shell.native and not focused:
-		# Another app is in front but the taskbar is still on screen; it
-		# speeds up while the pointer is on it.
-		Engine.max_fps = 60 if pointer_on_bar else 30
+		# Another app is in front. Whatever of Oazy's the pointer is on (the
+		# taskbar, the desktop, a menu) still runs at the screen's full rate;
+		# with the pointer elsewhere only the clock and the bar are moving.
+		if pointer_on_bar or not pointer_away:
+			Engine.max_fps = 60 if eco else _vsync_cap
+		else:
+			Engine.max_fps = 30
 	elif not focused:
 		# Behind another app: keep the desktop alive but nearly free.
-		Engine.max_fps = 8 if game_running else 24
+		if not pointer_away and not game_running:
+			Engine.max_fps = 60 if eco else _vsync_cap
+		else:
+			Engine.max_fps = 8 if game_running else 24
 	else:
 		Engine.max_fps = 60 if eco else _vsync_cap
 
@@ -138,11 +157,73 @@ func _smooth(n: Node) -> void:
 		SmoothScroll.attach(n as Control)
 
 
+func _process(_delta: float) -> void:
+	_guard_hover()
+	_probe_refresh()
+
+
+# --- Hover that lets go. -----------------------------------------------------
+# Godot learns the pointer left one of its windows from Windows (a
+# WM_MOUSELEAVE it asks for once per window it enters). That request is
+# sometimes made for the wrong window, after a click or a drag between two of
+# Oazy's layers, and then moving onto another app's window tells Godot
+# nothing: whatever was under the pointer stayed lit until it came back.
+# Windows sends mouse moves to whichever window is under the pointer, so if
+# the pointer keeps moving and none of Oazy's windows hears about it, it is
+# not over Oazy: let go of hover everywhere.
+
+func _listen(w: Window) -> void:
+	if not w.window_input.is_connected(_on_window_input):
+		w.window_input.connect(_on_window_input)
+
+
+func _on_window_input(ev: InputEvent) -> void:
+	if ev is InputEventMouse:
+		_heard = true
+
+
+func _guard_hover() -> void:
+	var pos := DisplayServer.mouse_get_position()
+	if _heard:
+		_heard = false
+		_unheard_at = 0
+		if pointer_away:
+			pointer_away = false
+			refresh_fps()
+	elif pos != _guard_pos and _unheard_at == 0:
+		_unheard_at = Time.get_ticks_msec()
+		_unheard_frames = 0
+	_guard_pos = pos
+	if _unheard_at == 0 or pointer_away:
+		return
+	# A move can land a frame after the cursor does, so give it a moment.
+	_unheard_frames += 1
+	if _unheard_frames < 3 or Time.get_ticks_msec() - _unheard_at < 60:
+		return
+	pointer_away = true
+	for w in _native_windows():
+		w.notify_mouse_exited()
+	refresh_fps()
+
+
+func _native_windows() -> Array[Window]:
+	var out: Array[Window] = [get_window()]
+	for w in get_tree().get_nodes_in_group("shell_surface"):
+		var win := w as Window
+		if win.visible and win.get_window_id() != DisplayServer.INVALID_WINDOW_ID:
+			out.append(win)
+	return out
+
+
+# --- Frame pacing. -----------------------------------------------------------
 ## Only Oazy's main window waits for the screen's refresh (its layers don't,
 ## or each would cost a refresh of its own). Should a driver ignore that and
-## let frames run free, cap them at the refresh rate instead.
-func _process(_delta: float) -> void:
-	if _probed or smoke_test or Engine.max_fps != 0 or not Shell.native:
+## let frames run free, cap them at the refresh rate instead. Should waiting
+## end up costing two refreshes a frame (half of 120 Hz), stop waiting and
+## pace by the clock at the refresh rate: Windows composes Oazy's windows
+## anyway, so that can't tear.
+func _probe_refresh() -> void:
+	if _probed or smoke_test or Engine.max_fps != 0 or not Shell.native or Time.get_ticks_msec() < 6000:
 		_probe_at = 0
 		return
 	var now := Time.get_ticks_msec()
@@ -156,7 +237,12 @@ func _process(_delta: float) -> void:
 		var hz := DisplayServer.screen_get_refresh_rate()
 		if hz <= 0.0:
 			hz = 60.0
-		if _probe_frames * 1000.0 / float(now - _probe_at) > hz * 1.3:
+		var fps := _probe_frames * 1000.0 / float(now - _probe_at)
+		if fps > hz * 1.3:
+			_vsync_cap = int(round(hz))
+			refresh_fps()
+		elif fps < hz * 0.8 and is_windows():
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 			_vsync_cap = int(round(hz))
 			refresh_fps()
 
