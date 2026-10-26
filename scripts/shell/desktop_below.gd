@@ -25,6 +25,7 @@ var _cards_sig := ""
 var _market_panel: GlassPanel
 var _market_rows: VBoxContainer
 var _market_status: Label
+static var _num_fonts := {}
 var _market_edit_box: VBoxContainer
 var _market_edit: LineEdit
 var _market_edit_btn: FxButton
@@ -344,10 +345,22 @@ func _build_markets() -> void:
 	var head: HBoxContainer = parts[2]
 	head.add_child(_title("Markets"))
 	head.add_child(Kit.spacer(0, 0, true))
-	_market_status = _quiet("")
-	head.add_child(_market_status)
-	_market_edit_btn = FxButton.icon_only("edit", "Choose what to follow", 15, 30)
-	_market_edit_btn.variant = FxButton.Style.GHOST
+	var status := Kit.hbox(6)
+	status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status.visible = false
+	head.add_child(status)
+	var dot := Panel.new()
+	dot.custom_minimum_size = Vector2(6, 6)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.add_theme_stylebox_override("panel", Kit.box(Color.WHITE, 3))
+	status.add_child(dot)
+	_market_status = Kit.label("", 12, 600, App.TEXT_MUTE)
+	_market_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	status.add_child(_market_status)
+	status.add_child(Kit.spacer(4, 0))
+	_market_edit_btn = FxButton.icon_only("edit", "Choose what to follow", 14, 28)
+	_market_edit_btn.variant = FxButton.Style.PLAIN
 	_market_edit_btn._apply_style()
 	_market_edit_btn.pressed.connect(_open_market_edit)
 	head.add_child(_market_edit_btn)
@@ -408,15 +421,19 @@ func _close_market_edit() -> void:
 
 func _fill_markets() -> void:
 	_clear(_market_rows)
-	var syms := Markets.symbols()
 	var shown := 0
-	for s in syms:
+	var lead_open: Variant = null
+	for s in Markets.symbols():
 		var q: Dictionary = markets.quotes.get(s, {})
 		if q.is_empty():
 			continue
-		if shown > 0:
+		if shown == 0:
+			# The first one you follow leads, with the day drawn out in full.
+			_market_rows.add_child(_market_lead(s, q))
+			lead_open = Markets.is_open(q)
+		else:
 			_market_rows.add_child(_hairline())
-		_market_rows.add_child(_market_row(s, q))
+			_market_rows.add_child(_market_row(s, q))
 		shown += 1
 	if shown == 0:
 		var l := _quiet("Fetching prices…" if markets.busy or not markets.offline else "Markets are out of reach right now.")
@@ -424,7 +441,112 @@ func _fill_markets() -> void:
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_market_rows.add_child(l)
-	_market_status.text = "Offline" if markets.offline and shown > 0 else ""
+	if markets.offline and shown > 0:
+		_set_market_status("Offline", App.TEXT_MUTE)
+	elif lead_open == null:
+		_set_market_status("", App.TEXT_MUTE)
+	else:
+		_set_market_status("Open" if lead_open else "Closed", UP if lead_open else App.TEXT_MUTE)
+
+
+func _set_market_status(text: String, dot: Color) -> void:
+	_market_status.text = text
+	_market_status.get_parent().visible = text != ""
+	(_market_status.get_parent().get_child(0) as Control).modulate = dot
+
+
+## Prices in tabular figures, so digits line up and don't shuffle as they tick.
+static func _num_font(weight: int) -> Font:
+	var key := "num%d" % weight
+	if not _num_fonts.has(key):
+		var v := FontVariation.new()
+		v.base_font = Kit.font(weight)
+		v.opentype_features = {TextServerManager.get_primary_interface().name_to_tag("tnum"): 1}
+		_num_fonts[key] = v
+	return _num_fonts[key]
+
+
+static func _num(text: String, px: int, weight: int, color: Color) -> Label:
+	var l := Kit.label(text, px, weight, color)
+	l.add_theme_font_override("font", _num_font(weight))
+	return l
+
+
+static func _change_text(change: float, pct: float) -> String:
+	return "%s%.2f%%" % ["+" if change >= 0.0 else "−", absf(pct)]
+
+
+func _quote_parts(sym: String, q: Dictionary) -> Dictionary:
+	var price := float(q["price"])
+	var prev := float(q["prev"])
+	var change := price - prev
+	var friendly := Markets.label_for(sym)
+	return {
+		"price": price, "prev": prev, "change": change,
+		"pct": change / prev * 100.0 if prev != 0.0 else 0.0,
+		"tone": UP if change >= 0.0 else DOWN,
+		"name": friendly,
+		# Under the name: the company for a ticker, the ticker for a nickname.
+		"sub": (str(q.get("name", "")) if friendly == sym else sym),
+		# Indices are points, not money.
+		"text": Markets.format_price(price, "" if sym.begins_with("^") else str(q.get("currency", ""))),
+	}
+
+
+func _quote_button(sym: String, q: Dictionary) -> Button:
+	var name := str(q.get("name", ""))
+	var b := _row_button((name + " · " if name != "" else "") + "Open on Yahoo Finance")
+	b.pressed.connect(func() -> void: open_link("https://finance.yahoo.com/quote/" + sym.uri_encode()))
+	return b
+
+
+func _market_lead(sym: String, q: Dictionary) -> Control:
+	var p := _quote_parts(sym, q)
+	var b := _quote_button(sym, q)
+	b.custom_minimum_size.y = 168
+	var m := MarginContainer.new()
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right"]:
+		m.add_theme_constant_override("margin_" + side, 8)
+	m.add_theme_constant_override("margin_top", 4)
+	m.add_theme_constant_override("margin_bottom", 12)
+	b.add_child(m)
+	var col := Kit.vbox(2)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(col)
+	var names := Kit.hbox(8)
+	names.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(names)
+	names.add_child(Kit.label(str(p["name"]), 14, 600, App.TEXT_DIM))
+	var sub := Kit.label(str(p["sub"]), 12, 500, App.TEXT_MUTE)
+	sub.clip_text = true
+	sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sub.size_flags_vertical = Control.SIZE_SHRINK_END
+	names.add_child(sub)
+	var figures := Kit.hbox(12)
+	figures.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(figures)
+	var big := _num(str(p["text"]), 30, 600, App.TEXT)
+	figures.add_child(big)
+	var tone: Color = p["tone"]
+	var delta := _num(_change_text(p["change"], p["pct"]), 14, 600, tone)
+	delta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	figures.add_child(delta)
+	var points := _num(("+" if float(p["change"]) >= 0.0 else "−") + Markets.format_price(absf(p["change"])), 14, 500, Color(tone, 0.7))
+	points.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	figures.add_child(points)
+	var line := Sparkline.new()
+	line.width = 1.8
+	line.fill = 0.2
+	line.smooth = 1
+	line.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	line.custom_minimum_size.y = 64
+	line.set_data(q.get("points", []), p["prev"], tone)
+	col.add_child(Kit.spacer(0, 6))
+	col.add_child(line)
+	return b
 
 
 func _hairline() -> Control:
@@ -436,15 +558,11 @@ func _hairline() -> Control:
 
 
 func _market_row(sym: String, q: Dictionary) -> Control:
-	var price := float(q["price"])
-	var prev := float(q["prev"])
-	var change := price - prev
-	var pct := change / prev * 100.0 if prev != 0.0 else 0.0
-	var tone := UP if change >= 0.0 else DOWN
-	var b := _row_button("%s · Open on Yahoo Finance" % str(q.get("name", sym)) if str(q.get("name", "")) != "" else "Open on Yahoo Finance")
+	var p := _quote_parts(sym, q)
+	var tone: Color = p["tone"]
+	var b := _quote_button(sym, q)
 	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	b.custom_minimum_size.y = 50
-	b.pressed.connect(func() -> void: open_link("https://finance.yahoo.com/quote/" + sym.uri_encode()))
+	b.custom_minimum_size.y = 52
 	var m := MarginContainer.new()
 	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -454,50 +572,45 @@ func _market_row(sym: String, q: Dictionary) -> Control:
 	var row := Kit.hbox(14)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	m.add_child(row)
-	var names := Kit.vbox(1)
+	var names := Kit.vbox(2)
 	names.alignment = BoxContainer.ALIGNMENT_CENTER
-	names.custom_minimum_size.x = 104
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	names.size_flags_stretch_ratio = 1.15
 	names.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(names)
-	var friendly := Markets.label_for(sym)
-	var top := Kit.label(friendly, 15, 700, App.TEXT)
-	top.clip_text = true
-	top.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	top.custom_minimum_size.x = 104
-	names.add_child(top)
-	var sub_text := str(q.get("name", "")) if friendly == sym else sym
-	var sub := Kit.label(sub_text, 12, 500, App.TEXT_MUTE)
-	sub.clip_text = true
-	sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	sub.custom_minimum_size.x = 104
-	names.add_child(sub)
+	for spec in [[p["name"], 14, 600, App.TEXT], [p["sub"], 12, 500, App.TEXT_MUTE]]:
+		var l := Kit.label(str(spec[0]), spec[1], spec[2], spec[3])
+		l.clip_text = true
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		l.custom_minimum_size.x = 60
+		names.add_child(l)
 	var line := Sparkline.new()
+	line.width = 1.4
+	line.fill = 0.13
+	line.smooth = 2
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	line.custom_minimum_size = Vector2(60, 30)
-	line.set_data(q.get("points", []), prev, tone)
+	line.custom_minimum_size = Vector2(56, 26)
+	line.set_data(q.get("points", []), p["prev"], tone)
 	var line_box := MarginContainer.new()
 	line_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	line_box.add_theme_constant_override("margin_top", 10)
-	line_box.add_theme_constant_override("margin_bottom", 10)
+	line_box.add_theme_constant_override("margin_top", 12)
+	line_box.add_theme_constant_override("margin_bottom", 12)
 	line_box.add_child(line)
 	row.add_child(line_box)
-	var nums := Kit.vbox(3)
+	var nums := Kit.vbox(4)
 	nums.alignment = BoxContainer.ALIGNMENT_CENTER
-	nums.custom_minimum_size.x = 92
+	nums.custom_minimum_size.x = 96
 	nums.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(nums)
-	# Indices are points, not money.
-	var p := Kit.label(Markets.format_price(price, "" if sym.begins_with("^") else str(q.get("currency", ""))), 15, 700, App.TEXT)
-	p.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	nums.add_child(p)
-	var chip := Label.new()
-	chip.text = "%s%.2f%%" % ["+" if change >= 0.0 else "−", absf(pct)]
-	chip.add_theme_font_override("font", Kit.font(700))
-	chip.add_theme_font_size_override("font_size", 12)
-	chip.add_theme_color_override("font_color", tone)
-	chip.add_theme_stylebox_override("normal", Kit.box(Color(tone, 0.13), 7, Color(0, 0, 0, 0), 0, 7, 1))
+	var price := _num(str(p["text"]), 14, 600, App.TEXT)
+	price.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	nums.add_child(price)
+	var chip := _num(_change_text(p["change"], p["pct"]), 12, 600, tone)
+	chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chip.custom_minimum_size.x = 66
+	chip.add_theme_stylebox_override("normal", Kit.box(Color(tone, 0.1), 6, Color(0, 0, 0, 0), 0, 0, 1))
 	chip.size_flags_horizontal = Control.SIZE_SHRINK_END
 	nums.add_child(chip)
 	return b
