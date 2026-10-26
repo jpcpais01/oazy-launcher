@@ -2,8 +2,8 @@ class_name Switcher
 extends Control
 ## Oazy's Alt+Tab. The screen sinks into a quiet dusk and your open windows
 ## (Oazy's own and other apps') line up as a carousel of pictures: the
-## selected one large in the middle with a thin ring, its neighbours smaller
-## and dimmer either side, and the window's name underneath. Tab and Shift+Tab or the arrow keys
+## selected one large and bright in the middle, its neighbours smaller and
+## dimmer either side, and the window's name underneath. Tab and Shift+Tab or the arrow keys
 ## glide between them, Delete closes one, Esc backs out and letting go of Alt
 ## switches. The mouse works too: hover, click, scroll, or click away.
 ##
@@ -22,12 +22,12 @@ const REFRESH := 0.35
 ## Card size n places from the selected one.
 const SCALES := [1.0, 0.7, 0.56, 0.48]
 const GAP := 36.0
-## Inset of the picture inside its card.
-const PAD := 6.0
+## Inset of the picture inside its card: none, the picture is the card.
+const PAD := 0.0
 const RADIUS := 18.0
 ## The app's badge, sitting on each card's bottom edge.
 const BADGE := 36.0
-## Room around a card's pane for its shadow and ring.
+## Room around a card's pane for its shadow.
 const SHADOW_PAD := 60.0
 
 ## How long Alt+Tab has to be held before the switcher shows.
@@ -341,7 +341,6 @@ func _make_card(i: int) -> Dictionary:
 	_stage.add_child(node)
 	var live: bool = Host.available and e.get("shell") == null and not bool(e["min"])
 	var it: Dictionary = e["item"]
-	var tint := Catalog.icon_color(str(it.get("icon_key", "")))
 	var mat := ShaderMaterial.new()
 	mat.shader = CARD
 	var pane := ColorRect.new()
@@ -353,10 +352,7 @@ func _make_card(i: int) -> Dictionary:
 	mat.set_shader_parameter("size", _base)
 	mat.set_shader_parameter("pad", SHADOW_PAD)
 	mat.set_shader_parameter("radius", RADIUS)
-	var fill := Color(0.075, 0.085, 0.1)
-	if tint.a > 0.0:
-		fill = fill.lerp(tint.darkened(0.7), 0.25)
-	mat.set_shader_parameter("fill", fill)
+	mat.set_shader_parameter("fill", Color(0.075, 0.082, 0.095))
 	node.add_child(pane)
 
 	var icon_box := _fill_icon(node, e)
@@ -366,7 +362,7 @@ func _make_card(i: int) -> Dictionary:
 	shot.stretch_mode = TextureRect.STRETCH_SCALE
 	var shot_mat := ShaderMaterial.new()
 	shot_mat.shader = ROUNDED
-	shot_mat.set_shader_parameter("radius", RADIUS - PAD)
+	shot_mat.set_shader_parameter("radius", RADIUS)
 	shot.material = shot_mat
 	shot.visible = false
 	node.add_child(shot)
@@ -375,7 +371,7 @@ func _make_card(i: int) -> Dictionary:
 	var badge := Panel.new()
 	badge.visible = false
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	badge.add_theme_stylebox_override("panel", Kit.box(Color(0.06, 0.07, 0.085), 11, Color(1, 1, 1, 0.08), 1))
+	badge.add_theme_stylebox_override("panel", Kit.box(Color(0.05, 0.055, 0.065, 0.92), 11))
 	badge.size = Vector2(BADGE, BADGE)
 	badge.position = Vector2((_base.x - BADGE) / 2.0, _base.y - BADGE / 2.0)
 	node.add_child(badge)
@@ -390,14 +386,14 @@ func _make_card(i: int) -> Dictionary:
 	x.focus_mode = Control.FOCUS_NONE
 	x.hover_scale = 1.0
 	x.add_theme_stylebox_override("hover", Kit.box(Color(0.86, 0.3, 0.34, 0.95), 999))
-	x.add_theme_stylebox_override("normal", Kit.box(Color(0.04, 0.05, 0.06, 0.78), 999, Color(1, 1, 1, 0.1), 1))
+	x.add_theme_stylebox_override("normal", Kit.box(Color(0.03, 0.035, 0.045, 0.72), 999))
 	x.position = Vector2(_base.x - 26.0 - 12.0, 12.0)
 	x.size = Vector2(26, 26)
 	node.add_child(x)
 
 	var c := {"node": node, "mat": mat, "x_btn": x, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
 		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)),
-		"shot": shot, "icon_box": icon_box, "badge": badge, "busy": false, "since": 0.0, "failed": false}
+		"shot": shot, "icon_box": icon_box, "badge": badge, "pane": pane, "busy": false, "since": 0.0, "failed": false}
 	var cached: Texture2D = Host.picture_of(c["hwnd"]) if e.get("shell") == null else null
 	if cached:
 		_set_shot(c, cached, false)
@@ -610,9 +606,9 @@ func _place(c: Dictionary) -> void:
 	x.modulate.a = maxf(hot, float(c["hover"]))
 	x.mouse_filter = Control.MOUSE_FILTER_STOP if x.modulate.a > 0.5 else Control.MOUSE_FILTER_IGNORE
 	var mat: ShaderMaterial = c["mat"]
-	mat.set_shader_parameter("ring", Color(1, 1, 1, 0.75 * hot))
-	mat.set_shader_parameter("ring_w", 1.5 / sc)
-	mat.set_shader_parameter("ring_gap", 5.0 / sc)
+	# The selected card stands a little further off the page.
+	mat.set_shader_parameter("shadow_a", lerpf(0.26, 0.45, hot))
+	mat.set_shader_parameter("shadow_size", lerpf(24.0, 36.0, hot))
 	if bool(c["live"]) and not _closing and _shown:
 		# Everyone gets a picture once; the selected one keeps it fresh.
 		var shot: TextureRect = c["shot"]
@@ -648,6 +644,15 @@ func _set_shot(c: Dictionary, tex: Texture2D, animate: bool) -> void:
 	shot.position = slot.position + ((slot.size - fit) / 2.0).floor()
 	shot.size = fit
 	(shot.material as ShaderMaterial).set_shader_parameter("size", fit)
+	# The card takes the picture's shape, so there's no frame around it.
+	var r := Rect2(shot.position, fit)
+	var pane: Control = c["pane"]
+	pane.position = r.position - Vector2(SHADOW_PAD, SHADOW_PAD)
+	pane.size = r.size + Vector2(SHADOW_PAD, SHADOW_PAD) * 2.0
+	(c["mat"] as ShaderMaterial).set_shader_parameter("size", r.size)
+	var badge: Control = c["badge"]
+	badge.position = Vector2(r.get_center().x - BADGE / 2.0, r.end.y - BADGE / 2.0)
+	(c["x_btn"] as Control).position = Vector2(r.end.x - 26.0 - 12.0, r.position.y + 12.0)
 	var first := not shot.visible
 	shot.texture = tex
 	shot.visible = true

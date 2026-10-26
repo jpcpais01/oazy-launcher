@@ -976,6 +976,10 @@ namespace Oazy
 				f.Intersect(crop);
 				if (f.Width > 8 && f.Height > 8) crop = f;
 			}
+			// Leave out the window's 1px border, which Windows (and Oazy's own
+			// app theming) tints with the accent colour: in a small picture it
+			// reads as a coloured frame.
+			if (crop.Width > 16 && crop.Height > 16) crop.Inflate(-2, -2);
 			maxW = Math.Max(16, Math.Min(maxW, 2048));
 			maxH = Math.Max(16, Math.Min(maxH, 2048));
 			using (Bitmap full = new Bitmap(w, hh, PixelFormat.Format32bppArgb))
