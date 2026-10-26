@@ -1,7 +1,7 @@
 class_name LibraryCard
 extends Control
-## Portrait card in the Library grid. Lifts, glows and sweeps on hover/focus,
-## and reveals a quick-play button.
+## Portrait card in the Library grid. Lifts a touch and takes a hairline ring
+## on hover/focus, and reveals a quick-play button.
 
 signal open(id: String)
 signal play(id: String)
@@ -38,23 +38,23 @@ func _ready() -> void:
 	cover = CoverArt.new()
 	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_holder.add_child(cover)
-	cover.setup(entry_id, 16.0)
+	cover.setup(entry_id, 12.0)
 
-	_play_btn = FxButton.icon_only("play", "Play", 20, 46)
+	_play_btn = FxButton.icon_only("play", "Play", 18, 42)
 	_play_btn.variant = FxButton.Style.PRIMARY
 	_play_btn._apply_style()
 	# PRIMARY pads for text labels; an icon-only round button needs none, or it
 	# grows into a wide pill that spills past the card's edge.
 	for st in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
 		_play_btn.get_theme_stylebox(st).set_content_margin_all(0)
-	_play_btn.size = Vector2(46, 46)
+	_play_btn.size = Vector2(42, 42)
 	_play_btn.modulate.a = 0.0
 	_play_btn.focus_mode = Control.FOCUS_NONE
 	_play_btn.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_play_btn.pressed.connect(func() -> void: play.emit(entry_id))
 	_holder.add_child(_play_btn)
 
-	_name = Kit.label("", 15, 600, App.TEXT)
+	_name = Kit.label("", 15, 500, App.TEXT)
 	_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_name.clip_text = true
 	add_child(_name)
@@ -76,7 +76,7 @@ func _ready() -> void:
 			_refresh_text()
 	)
 	_refresh_text()
-	cover.set_dim(0.08)
+	cover.set_dim(0.05)
 
 
 ## Cards stretch a little so a row always fills the page edge to edge.
@@ -94,10 +94,10 @@ func _layout() -> void:
 	_holder.size = Vector2(card_w, h)
 	_holder.pivot_offset = _holder.size / 2.0
 	_play_btn.size = _play_btn.get_combined_minimum_size()
-	_play_btn.position = Vector2(card_w, h) - _play_btn.size - Vector2(12, 12)
-	_name.position = Vector2(2, h + 12)
+	_play_btn.position = Vector2(card_w, h) - _play_btn.size - Vector2(10, 10)
+	_name.position = Vector2(2, h + 11)
 	_name.size = Vector2(card_w - 4, 20)
-	_meta.position = Vector2(2, h + 34)
+	_meta.position = Vector2(2, h + 32)
 	_meta.size = Vector2(card_w - 4, 18)
 
 
@@ -125,27 +125,26 @@ func _set_hot(on: bool) -> void:
 		return
 	_hot = on
 	if on:
-		cover.sweep()
 		if not has_focus():
 			Sfx.play(&"move", 1.15)
 	if _tween and _tween.is_valid():
 		_tween.kill()
-	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_tween.tween_property(_holder, "position:y", -8.0 if on else 0.0, 0.4)
-	_tween.tween_property(_holder, "scale", Vector2.ONE * (1.035 if on else 1.0), 0.4)
-	_tween.tween_property(cover, "focus_amount", 1.0 if on else 0.0, 0.3)
-	_tween.tween_property(_play_btn, "modulate:a", 1.0 if on else 0.0, 0.25)
-	_tween.tween_property(_name, "modulate", Color.WHITE if on else Color(1, 1, 1, 0.92), 0.25)
+	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(_holder, "position:y", -4.0 if on else 0.0, 0.22)
+	_tween.tween_property(_holder, "scale", Vector2.ONE * (1.012 if on else 1.0), 0.22)
+	_tween.tween_property(cover, "focus_amount", 1.0 if on else 0.0, 0.18)
+	_tween.tween_property(_play_btn, "modulate:a", 1.0 if on else 0.0, 0.16)
+	_tween.tween_property(_name, "modulate", Color.WHITE if on else Color(1, 1, 1, 0.92), 0.16)
 	_play_btn.mouse_filter = Control.MOUSE_FILTER_STOP if on else Control.MOUSE_FILTER_IGNORE
-	cover.set_dim(0.0 if on else 0.08)
+	cover.set_dim(0.0 if on else 0.05)
 
 
 func intro(delay: float) -> void:
 	modulate.a = 0.0
-	_holder.position.y = 26.0
-	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	t.tween_property(self, "modulate:a", 1.0, 0.45).set_delay(delay)
-	t.tween_property(_holder, "position:y", 0.0, 0.65).set_delay(delay)
+	_holder.position.y = 10.0
+	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	t.tween_property(self, "modulate:a", 1.0, 0.28).set_delay(delay)
+	t.tween_property(_holder, "position:y", 0.0, 0.4).set_delay(delay)
 
 
 func _gui_input(event: InputEvent) -> void:

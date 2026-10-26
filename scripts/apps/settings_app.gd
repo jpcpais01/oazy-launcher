@@ -39,7 +39,7 @@ func _ready() -> void:
 	resized.connect(func() -> void: _col.custom_minimum_size.x = clampf(size.x - 72.0, 420.0, COLUMN))
 
 	_col.add_child(Kit.spacer(0, 18))
-	_col.add_child(Kit.label("Settings", 34, 800, Color.WHITE, true))
+	_col.add_child(Kit.label("Settings", 30, 700, Color.WHITE, true))
 	_col.add_child(Kit.spacer(0, 2))
 
 	_build_updates()
@@ -129,7 +129,7 @@ func _sync_hotkey() -> void:
 
 func _build_updates() -> void:
 	var card := PanelContainer.new()
-	var s := Kit.box(Color(1, 1, 1, 0.055), 22, Color(1, 1, 1, 0.08), 1, 26, 22)
+	var s := Kit.box(Color(1, 1, 1, 0.04), 16, Color(1, 1, 1, 0.06), 1, 24, 20)
 	card.add_theme_stylebox_override("panel", s)
 	_col.add_child(card)
 	var row := Kit.hbox(20)
@@ -149,16 +149,16 @@ func _build_updates() -> void:
 	_update_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_update_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	status_row.add_child(_update_status)
-	var notes := FxButton.make("Patch notes", "sparkles", FxButton.Style.GHOST, 46)
+	var notes := FxButton.make("Patch notes", "sparkles", FxButton.Style.GHOST, 42)
 	notes.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	notes.pressed.connect(func() -> void: main.show_patch_notes())
 	row.add_child(notes)
 	# With an update found, you can still look for an even newer one.
-	_recheck_btn = FxButton.make("Check again", "refresh", FxButton.Style.GHOST, 46)
+	_recheck_btn = FxButton.make("Check again", "refresh", FxButton.Style.GHOST, 42)
 	_recheck_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_recheck_btn.pressed.connect(func() -> void: Updater.check())
 	row.add_child(_recheck_btn)
-	_update_btn = FxButton.make("Check for updates", "refresh", FxButton.Style.PRIMARY, 46)
+	_update_btn = FxButton.make("Check for updates", "refresh", FxButton.Style.PRIMARY, 42)
 	_update_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_update_btn.pressed.connect(_on_update_button)
 	row.add_child(_update_btn)
@@ -170,11 +170,11 @@ func _section(title: String, icon_name: String) -> VBoxContainer:
 	if title != "":
 		var head := Kit.hbox(10)
 		head.add_child(Kit.icon_rect(icon_name, 18, App.TEXT_DIM))
-		head.add_child(Kit.label(title.to_upper(), 13, 700, App.TEXT_DIM))
+		head.add_child(Kit.label(title.to_upper(), 12, 600, App.TEXT_DIM))
 		_col.add_child(Kit.spacer(0, 12))
 		_col.add_child(head)
 	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.045), 20, Color(1, 1, 1, 0.07), 1, 24, 8))
+	card.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.035), 16, Color(1, 1, 1, 0.06), 1, 24, 8))
 	_col.add_child(card)
 	var list := Kit.vbox(0)
 	card.add_child(list)
@@ -196,7 +196,7 @@ func _row(list: VBoxContainer, title: String, desc: String) -> HBoxContainer:
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(text)
-	text.add_child(Kit.label(title, 17, 600, App.TEXT))
+	text.add_child(Kit.label(title, 16, 500, App.TEXT))
 	if desc != "":
 		var d := Kit.label(desc, 14, 500, App.TEXT_MUTE)
 		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

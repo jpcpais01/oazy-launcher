@@ -30,14 +30,19 @@ func _ready() -> void:
 	# Sidebar.
 	var side_bg := PanelContainer.new()
 	side_bg.custom_minimum_size.x = 214
-	side_bg.add_theme_stylebox_override("panel", Kit.box(Color(0, 0, 0, 0.12), 0, Color(0, 0, 0, 0), 0, 14, 18))
+	var side_box := Kit.box(Color(0, 0, 0, 0.06), 0, Color(0, 0, 0, 0), 0, 14, 18)
+	# One hairline between the sidebar and the grid instead of a darker slab.
+	side_box.border_color = Color(1, 1, 1, 0.05)
+	side_box.border_width_right = 1
+	side_bg.add_theme_stylebox_override("panel", side_box)
 	split.add_child(side_bg)
-	var side := Kit.vbox(4)
+	var side := Kit.vbox(2)
 	side_bg.add_child(side)
-	var title := Kit.label("Library", 26, 800, Color.WHITE, true)
+	var title := Kit.label("Library", 22, 700, Color.WHITE, true)
 	var tm := MarginContainer.new()
 	tm.add_theme_constant_override("margin_left", 10)
-	tm.add_theme_constant_override("margin_bottom", 10)
+	tm.add_theme_constant_override("margin_top", 4)
+	tm.add_theme_constant_override("margin_bottom", 14)
 	tm.add_child(title)
 	side.add_child(tm)
 	for spec in [["all", "Everything", "layers"], ["games", "Games", "gamepad"], ["apps", "Apps", "app"], ["favorites", "Favourites", "heart"]]:
@@ -46,11 +51,11 @@ func _ready() -> void:
 		side.add_child(b)
 		_filters[spec[0]] = b
 	side.add_child(Kit.spacer(0, 0, true))
-	var add := FxButton.make("Add", "plus", FxButton.Style.PRIMARY, 44)
+	var add := FxButton.make("Add", "plus", FxButton.Style.PRIMARY, 38)
 	add.pressed.connect(func() -> void: main.open_add({}))
 	side.add_child(add)
 	side.add_child(Kit.spacer(0, 4))
-	var scan := FxButton.make("Find games", "sparkles", FxButton.Style.GHOST, 44)
+	var scan := FxButton.make("Find games", "sparkles", FxButton.Style.GHOST, 38)
 	scan.pressed.connect(func() -> void: main.scan_stores())
 	side.add_child(scan)
 
@@ -71,15 +76,16 @@ func _ready() -> void:
 	_grid_view.add_child(head)
 	_search = LineEdit.new()
 	_search.placeholder_text = "Search your library"
-	_search.custom_minimum_size = Vector2(0, 44)
+	_search.custom_minimum_size = Vector2(0, 40)
 	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search.right_icon = Icons.tex("search", 18, Color(1, 1, 1, 0.5))
+	_search.right_icon = Icons.tex("search", 16, Color(1, 1, 1, 0.45))
 	_search.clear_button_enabled = true
-	_search.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.06), 999, Color(1, 1, 1, 0.09), 1, 18, 10))
-	_search.add_theme_stylebox_override("focus", Kit.box(Color(1, 1, 1, 0.09), 999, Color(App.accent, 0.6), 1, 18, 10))
+	_search.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.045), 999, Color(1, 1, 1, 0.07), 1, 18, 9))
+	_search.add_theme_stylebox_override("focus", Kit.box(Color(1, 1, 1, 0.065), 999, Color(App.accent, 0.45), 1, 18, 9))
+	_search.add_theme_font_size_override("font_size", 15)
 	_search.text_changed.connect(func(_t: String) -> void: refresh(false))
 	head.add_child(_search)
-	_sort_btn = FxButton.make("Recent", "sort", FxButton.Style.GHOST, 44)
+	_sort_btn = FxButton.make("Recent", "sort", FxButton.Style.GHOST, 40)
 	_sort_btn.tooltip_text = "Change sort order"
 	_sort_btn.pressed.connect(_cycle_sort)
 	head.add_child(_sort_btn)
@@ -127,12 +133,12 @@ func _ready() -> void:
 func _side_button(text: String, icon_name: String) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.icon = Icons.tex(icon_name, 18, Color.WHITE)
+	b.icon = Icons.tex(icon_name, 17, Color.WHITE)
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.custom_minimum_size.y = 42
+	b.custom_minimum_size.y = 38
 	b.focus_mode = Control.FOCUS_NONE
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	b.add_theme_font_override("font", Kit.font(600))
+	b.add_theme_font_override("font", Kit.font(500))
 	b.add_theme_font_size_override("font_size", 15)
 	b.add_theme_constant_override("h_separation", 12)
 	return b
@@ -143,11 +149,13 @@ func set_filter(f: String, refresh_now: bool = true) -> void:
 	for key in _filters.keys():
 		var b: Button = _filters[key]
 		var on: bool = key == f
-		b.add_theme_stylebox_override("normal", Kit.box(Color(App.accent, 0.2) if on else Color(0, 0, 0, 0), 12, Color(App.accent, 0.4) if on else Color(0, 0, 0, 0), 1, 12, 6))
-		b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.1), 12, Color(0, 0, 0, 0), 0, 12, 6))
-		b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.14), 12, Color(0, 0, 0, 0), 0, 12, 6))
+		b.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.08) if on else Color(0, 0, 0, 0), 10, Color(0, 0, 0, 0), 0, 12, 6))
+		b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.1 if on else 0.05), 10, Color(0, 0, 0, 0), 0, 12, 6))
+		b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.12), 10, Color(0, 0, 0, 0), 0, 12, 6))
+		b.add_theme_font_override("font", Kit.font(600 if on else 500))
 		b.add_theme_color_override("font_color", Color.WHITE if on else App.TEXT_DIM)
-		b.add_theme_color_override("icon_normal_color", Color.WHITE if on else App.TEXT_DIM)
+		b.add_theme_color_override("icon_normal_color", App.accent.lightened(0.35) if on else App.TEXT_DIM)
+		b.add_theme_color_override("icon_hover_color", App.accent.lightened(0.35) if on else Color.WHITE)
 	if refresh_now:
 		show_grid()
 		refresh(true)
@@ -166,7 +174,7 @@ func refresh(animate: bool) -> void:
 		_grid.add_child(card)
 		_cards.append(card)
 		if animate:
-			card.intro(0.02 * mini(i, 24))
+			card.intro(0.015 * mini(i, 24))
 	_empty.visible = list.is_empty() and _grid_view.visible
 	if list.is_empty():
 		if Library.entries.is_empty():
@@ -205,11 +213,11 @@ func show_entry(id: String) -> void:
 	_detail.visible = true
 	_empty.visible = false
 	_detail.modulate.a = 0.0
-	_detail.position.x = 40.0
-	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	t.tween_property(_detail, "modulate:a", 1.0, 0.3)
-	t.tween_property(_detail, "position:x", 0.0, 0.45)
-	t.tween_property(_grid_view, "modulate:a", 0.0, 0.18)
+	_detail.position.x = 20.0
+	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	t.tween_property(_detail, "modulate:a", 1.0, 0.22)
+	t.tween_property(_detail, "position:x", 0.0, 0.3)
+	t.tween_property(_grid_view, "modulate:a", 0.0, 0.14)
 	t.chain().tween_callback(func() -> void: _grid_view.visible = false)
 
 
@@ -218,9 +226,9 @@ func show_grid() -> void:
 		return
 	_grid_view.visible = true
 	_grid_view.modulate.a = 0.0
-	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	t.tween_property(_grid_view, "modulate:a", 1.0, 0.3)
-	t.tween_property(_detail, "modulate:a", 0.0, 0.15)
+	var t := create_tween().set_parallel(true).set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	t.tween_property(_grid_view, "modulate:a", 1.0, 0.22)
+	t.tween_property(_detail, "modulate:a", 0.0, 0.12)
 	t.chain().tween_callback(func() -> void: _detail.visible = false)
 
 

@@ -119,7 +119,7 @@ static func vbox(sep: int = 10) -> VBoxContainer:
 static func panel(bg: Color = Color("0d1a20"), radius: int = 22, pad: int = 24) -> PanelContainer:
 	var p := PanelContainer.new()
 	var s := box(bg, radius, Color(1, 1, 1, 0.08), 1, pad, pad)
-	shadowed(s, Color(0, 0, 0, 0.45), 40, Vector2(0, 18))
+	shadowed(s, Color(0, 0, 0, 0.3), 28, Vector2(0, 12))
 	p.add_theme_stylebox_override("panel", s)
 	return p
 
@@ -136,8 +136,8 @@ static func cover_colors(name: String, accent_hex: String = "") -> Array[Color]:
 	var base_h := float(h % 360) / 360.0
 	if accent_hex != "":
 		base_h = Color(accent_hex).h
-	var a := Color.from_hsv(base_h, 0.42, 0.62)
-	var b := Color.from_hsv(fposmod(base_h + 0.1 + float((h / 360) % 10) / 100.0, 1.0), 0.55, 0.3)
+	var a := Color.from_hsv(base_h, 0.32, 0.56)
+	var b := Color.from_hsv(fposmod(base_h + 0.1 + float((h / 360) % 10) / 100.0, 1.0), 0.45, 0.24)
 	return [a, b]
 
 
@@ -154,7 +154,7 @@ static func build_theme() -> Theme:
 	t.set_stylebox("pressed", "Button", box(Color(1, 1, 1, 0.18), 12, Color(1, 1, 1, 0.14), 1, 16, 10))
 	t.set_stylebox("hover_pressed", "Button", box(Color(1, 1, 1, 0.2), 12, Color(1, 1, 1, 0.16), 1, 16, 10))
 	t.set_stylebox("disabled", "Button", box(Color(1, 1, 1, 0.03), 12, Color(0, 0, 0, 0), 1, 16, 10))
-	var focus := box(Color(0, 0, 0, 0), 14, Color(1, 1, 1, 0.85), 2)
+	var focus := box(Color(0, 0, 0, 0), 14, Color(1, 1, 1, 0.75), 2)
 	focus.set_expand_margin_all(3)
 	t.set_stylebox("focus", "Button", focus)
 	for c in ["font_color", "font_focus_color", "icon_normal_color", "icon_focus_color"]:
@@ -167,9 +167,9 @@ static func build_theme() -> Theme:
 	t.set_font("font", "Button", font(600))
 
 	# Text input.
-	var le := box(Color(1, 1, 1, 0.06), 12, Color(1, 1, 1, 0.1), 1, 14, 11)
+	var le := box(Color(1, 1, 1, 0.05), 12, Color(1, 1, 1, 0.08), 1, 14, 11)
 	t.set_stylebox("normal", "LineEdit", le)
-	var le_focus := box(Color(1, 1, 1, 0.09), 12, Color(1, 1, 1, 0.55), 1, 14, 11)
+	var le_focus := box(Color(1, 1, 1, 0.07), 12, Color(1, 1, 1, 0.35), 1, 14, 11)
 	t.set_stylebox("focus", "LineEdit", le_focus)
 	t.set_stylebox("read_only", "LineEdit", box(Color(1, 1, 1, 0.03), 12, Color(1, 1, 1, 0.06), 1, 14, 11))
 	t.set_color("font_color", "LineEdit", App.TEXT)
@@ -179,10 +179,10 @@ static func build_theme() -> Theme:
 	t.set_color("clear_button_color", "LineEdit", App.TEXT_DIM)
 
 	# Menus.
-	var menu := box(Color(0.05, 0.11, 0.14, 0.96), 16, Color(1, 1, 1, 0.12), 1, 6, 6)
-	shadowed(menu, Color(0, 0.02, 0.04, 0.5), 28, Vector2(0, 12))
+	var menu := box(Color(0.05, 0.09, 0.11, 0.97), 14, Color(1, 1, 1, 0.09), 1, 6, 6)
+	shadowed(menu, Color(0, 0.02, 0.04, 0.34), 20, Vector2(0, 8))
 	t.set_stylebox("panel", "PopupMenu", menu)
-	t.set_stylebox("hover", "PopupMenu", box(Color(1, 1, 1, 0.09), 9))
+	t.set_stylebox("hover", "PopupMenu", box(Color(1, 1, 1, 0.07), 8))
 	t.set_stylebox("separator", "PopupMenu", _line_box())
 	t.set_color("font_color", "PopupMenu", App.TEXT)
 	t.set_color("font_hover_color", "PopupMenu", Color.WHITE)
@@ -203,7 +203,7 @@ static func build_theme() -> Theme:
 	for sb in ["VScrollBar", "HScrollBar"]:
 		t.set_stylebox("scroll", sb, empty(4, 4))
 		t.set_stylebox("scroll_focus", sb, empty(4, 4))
-		t.set_stylebox("grabber", sb, box(Color(1, 1, 1, 0.16), 4, Color(0, 0, 0, 0), 0, 3, 3))
+		t.set_stylebox("grabber", sb, box(Color(1, 1, 1, 0.12), 4, Color(0, 0, 0, 0), 0, 3, 3))
 		t.set_stylebox("grabber_highlight", sb, box(Color(1, 1, 1, 0.28), 4, Color(0, 0, 0, 0), 0, 3, 3))
 		t.set_stylebox("grabber_pressed", sb, box(Color(1, 1, 1, 0.38), 4, Color(0, 0, 0, 0), 0, 3, 3))
 
@@ -230,7 +230,7 @@ static func build_theme() -> Theme:
 	t.set_color("default_color", "RichTextLabel", Color("c9ccd8"))
 	t.set_constant("line_separation", "RichTextLabel", 5)
 
-	t.set_stylebox("panel", "PanelContainer", box(Color(1, 1, 1, 0.05), 18, Color(1, 1, 1, 0.07)))
+	t.set_stylebox("panel", "PanelContainer", box(Color(1, 1, 1, 0.04), 16, Color(1, 1, 1, 0.06)))
 	return t
 
 

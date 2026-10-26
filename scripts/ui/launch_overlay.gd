@@ -73,7 +73,7 @@ func _ready() -> void:
 	_kicker.add_theme_font_override("font", kv)
 	_kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_kicker)
-	_name = Kit.label(str(e.get("name", "")), 54, 800, Color.WHITE, true)
+	_name = Kit.label(str(e.get("name", "")), 54, 700, Color.WHITE, true)
 	_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(_name)
 

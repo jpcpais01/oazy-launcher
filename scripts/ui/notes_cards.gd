@@ -117,7 +117,7 @@ func _card(title: String, body: String) -> Control:
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(col)
 	if title != "":
-		var head := Kit.label(title, 18, 800, Color.WHITE, true)
+		var head := Kit.label(title, 18, 700, Color.WHITE, true)
 		head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		col.add_child(head)
 	if body.strip_edges() != "":

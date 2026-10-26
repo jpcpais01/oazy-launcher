@@ -43,8 +43,8 @@ func _build() -> void:
 	hero.add_child(col)
 	col.add_child(Kit.label("UPDATE COMPLETE", 13, 700, App.accent.lightened(0.35)))
 	var title := Kit.hbox(12)
-	title.add_child(Kit.label("Welcome to Oazy", 34, 800, Color.WHITE, true))
-	_version_label = Kit.label(_scramble(0.0), 34, 800, App.accent.lightened(0.4), true)
+	title.add_child(Kit.label("Welcome to Oazy", 34, 700, Color.WHITE, true))
+	_version_label = Kit.label(_scramble(0.0), 34, 700, App.accent.lightened(0.4), true)
 	title.add_child(_version_label)
 	col.add_child(title)
 	var sub := "Everything is right where you left it."
@@ -57,7 +57,7 @@ func _build() -> void:
 	content.add_child(Kit.spacer(0, 4))
 	var head := Kit.hbox(10)
 	head.add_child(Kit.icon_rect("sparkles", 18, Color.WHITE))
-	head.add_child(Kit.label("What's new", 20, 800, Color.WHITE, true))
+	head.add_child(Kit.label("What's new", 20, 700, Color.WHITE, true))
 	content.add_child(head)
 	_cards = NotesCards.new(markdown)
 	_cards.custom_minimum_size.y = 400

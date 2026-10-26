@@ -127,7 +127,7 @@ func _sync() -> void:
 
 func _sync_shadow() -> void:
 	if _shadow and not _shadow.has_theme_stylebox_override("panel"):
-		set_shadow_strength(0.38)
+		set_shadow_strength(0.26, 24, 8.0)
 	elif _shadow:
 		var s: StyleBoxFlat = _shadow.get_theme_stylebox("panel")
 		s.set_corner_radius_all(int(radius))
