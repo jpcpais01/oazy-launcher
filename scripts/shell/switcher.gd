@@ -185,8 +185,16 @@ func commit() -> void:
 	if win != null:
 		if is_instance_valid(win) and main:
 			main.focus_shell_window(win)
+			# Over another app Godot can't take the foreground itself, and its
+			# focus state can lag, so the companion always lifts the layer.
+			_lift.call_deferred(Shell.hwnd_of(win))
 	else:
 		Host.focus(int(e["hwnd"]))
+
+
+func _lift(hwnd: int) -> void:
+	if hwnd != 0:
+		Host.focus(hwnd)
 
 
 func cancel() -> void:
