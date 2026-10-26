@@ -82,6 +82,10 @@ func _ready() -> void:
 			_apply_logo(id)
 	)
 	Host.status_changed.connect(func(_ok: bool) -> void: _sync_system())
+	Account.changed.connect(func() -> void:
+		_last_minute = -1
+		_tick()
+	)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		if key == "user_name":
 			_last_minute = -1
@@ -182,9 +186,7 @@ func _tick() -> void:
 		part = "Good afternoon"
 	elif h < 5:
 		part = "Good night"
-	var name := str(Settings.get_value("user_name")).strip_edges()
-	if name == "":
-		name = App.user_name()
+	var name := Account.first_name()
 	_greeting.text = part + (", " + name if name != "" else "")
 
 

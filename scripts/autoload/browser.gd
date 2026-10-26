@@ -12,6 +12,9 @@ extends Node
 ## It also runs web apps (WebApps in oazy_browser.cs): a site in a window of its
 ## own with a slim title bar and Oazy's look laid over the page (ui/apps), like
 ## Flow. They share the browser's profile, so you're signed in to both at once.
+##
+## And it signs you in to Google for Oazy (Account): a small Oazy window around
+## Google's own sign-in, into that same shared profile.
 
 ## Emitted when the WebView2 runtime is missing, so the shell can explain.
 signal runtime_missing
@@ -38,12 +41,15 @@ const FILES := [
 	"ui/common.css",
 	"ui/icons.js",
 	"ui/newtab.html",
+	"ui/signin-done.html",
 	"ui/app.html",
 	"ui/app.css",
 	"ui/app.js",
 	"ui/apps/flow.js",
 	"ui/apps/flow.css",
 	"ui/apps/flow-mock.html",
+	"ui/apps/signin.js",
+	"ui/apps/signin.css",
 ]
 const RUNTIME_URL := "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 
@@ -88,8 +94,26 @@ func open_app(ref: String) -> bool:
 	return true
 
 
+## Opens Oazy's Google sign-in window, with `email` filled in when given. The
+## browser writes how it went to `result` (JSON: ok, name, email, photo, or
+## cancelled) when you're done. Returns false when it can't run here.
+func sign_in(email: String, result: String) -> bool:
+	if not App.is_windows():
+		return false
+	_launch("", false, "", PackedStringArray(["--signin", email if email != "" else "-", "--result", result]))
+	return true
+
+
+## Signs Oazy Browser, Flow and every web app out of Google (result as above).
+func sign_out(result: String) -> bool:
+	if not App.is_windows():
+		return false
+	_launch("", false, "", PackedStringArray(["--signout", "--result", result]))
+	return true
+
+
 ## Checks once that WebView2 is there, then starts or forwards to the browser.
-func _launch(url: String, new_window: bool, app: String) -> void:
+func _launch(url: String, new_window: bool, app: String, extra := PackedStringArray()) -> void:
 	if not _runtime_checked and Host.available:
 		Host.request(["webview2"], func(d: Dictionary) -> void:
 			_runtime_checked = d.get("ok", false)
@@ -97,10 +121,10 @@ func _launch(url: String, new_window: bool, app: String) -> void:
 				_runtime_checked = false
 				runtime_missing.emit()
 			else:
-				_open_now(url, new_window, app)
+				_open_now(url, new_window, app, extra)
 		)
 		return
-	_open_now(url, new_window, app)
+	_open_now(url, new_window, app, extra)
 
 
 ## The web app ref a window of the browser belongs to ("" for the browser itself).
@@ -117,8 +141,8 @@ func handles_links() -> bool:
 	return App.is_windows() and bool(Settings.get_value("browser_links"))
 
 
-func _open_now(url: String, new_window: bool, app := "") -> void:
-	_queue.append([url, new_window, app])
+func _open_now(url: String, new_window: bool, app := "", extra := PackedStringArray()) -> void:
+	_queue.append([url, new_window, app, extra])
 	if _exe != "":
 		_flush()
 		return
@@ -152,7 +176,9 @@ func _flush() -> void:
 		var args := PackedStringArray(["--data", data_dir(), "--accent", "#" + App.accent.to_html(false)])
 		if q[1]:
 			args.append("--new-window")
-		if str(q[2]) != "":
+		if not (q[3] as PackedStringArray).is_empty():
+			args.append_array(q[3])
+		elif str(q[2]) != "":
 			args.append_array(["--app", str(q[2])])
 		elif str(q[0]) != "":
 			args.append(str(q[0]))
