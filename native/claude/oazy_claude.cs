@@ -457,15 +457,34 @@ namespace OazyClaude
 			return string.Join(";", parts.ToArray());
 		}
 
-		// Where claude is: the native installer's, then anything on PATH, then npm's.
+		// Where claude is, first match wins: one you picked yourself, the native
+		// installer's, anything on PATH (the user's and the machine's as they are
+		// now), npm / pnpm / bun / scoop / volta / winget, the old local install,
+		// then the copy the Claude desktop app keeps for its own Claude Code.
 		public static string Find()
 		{
 			string over = Environment.GetEnvironmentVariable("OAZY_CLAUDE");
 			if (!string.IsNullOrEmpty(over) && File.Exists(over)) return over;
-			string local = Path.Combine(App.Home(), ".local\\bin\\claude.exe");
-			if (File.Exists(local)) return local;
-			foreach (string dir in FreshPath().Split(';'))
+			string picked = App.Prefs != null ? Json.Str(App.Prefs, "claudePath") : "";
+			if (picked != "" && File.Exists(picked)) return picked;
+			string home = App.Home();
+			string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+			string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+			string hit = First(new string[] { Path.Combine(home, ".local\\bin\\claude.exe") });
+			if (hit != null) return hit;
+			List<string> dirs = new List<string>(FreshPath().Split(';'));
+			dirs.AddRange(new string[] {
+				Path.Combine(roaming, "npm"), Path.Combine(local, "pnpm"), Path.Combine(home, ".bun\\bin"),
+				Path.Combine(home, "scoop\\shims"), Path.Combine(local, "Volta\\bin"), Path.Combine(local, "Microsoft\\WinGet\\Links"),
+				Path.Combine(home, ".claude\\local"), Path.Combine(home, ".claude\\local\\node_modules\\.bin"),
+				Path.Combine(home, "AppData\\Roaming\\npm"),
+			});
+			foreach (string dir in dirs)
 			{
+				if (dir == "") continue;
+				// The Claude desktop app's own folder holds Claude.exe, which isn't the CLI.
+				string d = dir.ToLowerInvariant();
+				if (d.Contains("anthropicclaude") || d.Contains("\\windowsapps\\claude")) continue;
 				foreach (string f in new string[] { "claude.exe", "claude.cmd", "claude.bat" })
 				{
 					try
@@ -476,8 +495,56 @@ namespace OazyClaude
 					catch { }
 				}
 			}
-			string npm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm\\claude.cmd");
-			return File.Exists(npm) ? npm : "";
+			return Bundled(roaming, local);
+		}
+
+		static string First(string[] paths)
+		{
+			foreach (string p in paths) if (File.Exists(p)) return p;
+			return null;
+		}
+
+		// The Claude desktop app downloads Claude Code into a claude-code folder
+		// of its own (one folder per version); the newest one there.
+		static string Bundled(string roaming, string local)
+		{
+			List<string> roots = new List<string> { Path.Combine(roaming, "Claude"), Path.Combine(local, "AnthropicClaude"), Path.Combine(local, "Claude") };
+			try
+			{
+				foreach (string pkg in Directory.GetDirectories(Path.Combine(local, "Packages"), "*Claude*"))
+					roots.Add(Path.Combine(pkg, "LocalCache\\Roaming\\Claude"));
+			}
+			catch { }
+			string best = "";
+			DateTime bestAt = DateTime.MinValue;
+			int budget = 400;
+			foreach (string r in roots) Scan(r, 0, ref budget, ref best, ref bestAt);
+			return best;
+		}
+
+		static void Scan(string dir, int depth, ref int budget, ref string best, ref DateTime bestAt)
+		{
+			if (depth > 4 || --budget < 0 || !Directory.Exists(dir)) return;
+			try
+			{
+				if (dir.ToLowerInvariant().Contains("claude-code"))
+				{
+					string p = Path.Combine(dir, "claude.exe");
+					if (File.Exists(p))
+					{
+						DateTime at = File.GetLastWriteTimeUtc(p);
+						if (at > bestAt) { best = p; bestAt = at; }
+					}
+				}
+				foreach (string sub in Directory.GetDirectories(dir))
+				{
+					string n = Path.GetFileName(sub).ToLowerInvariant();
+					// Electron's own folders are big and never hold it.
+					if (n == "cache" || n == "code cache" || n == "gpucache" || n == "indexeddb" || n == "local storage" || n == "logs" || n == "crashpad" || n == "blob_storage" || n == "service worker" || n == "session storage") continue;
+					Scan(sub, depth + 1, ref budget, ref best, ref bestAt);
+				}
+			}
+			catch { }
 		}
 
 		public static string Quote(string s)
@@ -1111,6 +1178,19 @@ namespace OazyClaude
 				case "busy": busy = Json.Bool(m, "on"); break;
 				case "recents": SendRecents(); break;
 				case "findClaude": Reply(m, Json.Obj("claude", Cli.Find())); break;
+				case "pickClaude":
+					using (OpenFileDialog d = new OpenFileDialog { Title = "Find Claude Code (claude.exe or claude.cmd)", Filter = "Claude Code|claude.exe;claude.cmd;claude.bat|Programs|*.exe;*.cmd;*.bat", CheckFileExists = true })
+					{
+						string from = Path.Combine(App.Home(), ".local\\bin");
+						d.InitialDirectory = Directory.Exists(from) ? from : App.Home();
+						if (d.ShowDialog(this) == DialogResult.OK)
+						{
+							App.SetPref("claudePath", d.FileName);
+							App.SaveNow();
+						}
+					}
+					Reply(m, Json.Obj("claude", Cli.Find()));
+					break;
 				case "history":
 					{
 						string id = Json.Str(m, "id");
@@ -1232,7 +1312,11 @@ namespace OazyClaude
 			string title = "Claude Code";
 			if (args == "install")
 			{
-				run = Cli.Quote(Path.Combine(sys, "WindowsPowerShell\\v1.0\\powershell.exe")) + " -NoExit -NoProfile -Command \"irm https://claude.ai/install.ps1 | iex\"";
+				// Says what it's doing first: the download itself is silent for a while.
+				run = Cli.Quote(Path.Combine(sys, "WindowsPowerShell\\v1.0\\powershell.exe")) + " -NoExit -NoProfile -ExecutionPolicy Bypass -Command \"" +
+					"Write-Host 'Installing Claude Code. This downloads it from claude.ai and takes a minute or two...'; Write-Host ''; " +
+					"$ProgressPreference = 'SilentlyContinue'; irm https://claude.ai/install.ps1 | iex; Write-Host ''; " +
+					"Write-Host 'All set. Go back to the Claude app: it finds Claude Code by itself, then asks you to sign in once.'\"";
 				title = "Install Claude Code";
 			}
 			else run = Cli.Quote(Path.Combine(sys, "cmd.exe")) + " /k " + Cli.Quote(exe) + (args != "" ? " " + args : "");

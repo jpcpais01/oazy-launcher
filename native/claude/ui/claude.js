@@ -1169,7 +1169,8 @@ function drawSetup() {
 	box.hidden = false;
 	box.innerHTML = '<div class="setup-card">' + icon('terminal', 18) + '<div><b>Claude Code isn\'t installed yet</b>' +
 		'<span>This app runs the Claude Code on your PC, signed in with your Claude account. Install it once (it takes a minute), sign in, and you\'re set.</span>' +
-		'<div class="n-actions"><button class="btn primary small" id="setup-install">Install Claude Code</button><button class="btn small" id="setup-check">I\'ve installed it</button></div></div></div>';
+		'<div class="n-actions"><button class="btn primary small" id="setup-install">Install Claude Code</button><button class="btn small" id="setup-check">Check again</button><button class="btn small" id="setup-pick">Find it myself…</button></div>' +
+		'<small>Looked on your PATH, in ~/.local/bin, npm, pnpm, bun, scoop and the Claude desktop app\'s own copy.</small></div></div>';
 	$('setup-install').onclick = () => send('terminal', { cwd: S.home, args: 'install' });
 	$('setup-check').onclick = async () => {
 		const r = await ask('findClaude');
@@ -1177,6 +1178,20 @@ function drawSetup() {
 		drawSetup();
 		toast(S.claude ? 'Found Claude Code' : 'Still can\'t find it. Finish the install, then try again.');
 	};
+	$('setup-pick').onclick = async () => {
+		const r = await ask('pickClaude');
+		S.claude = r.claude || '';
+		drawSetup();
+		if (S.claude) toast('Found Claude Code');
+	};
+}
+
+async function recheck() {
+	const r = await ask('findClaude');
+	if (!r.claude || S.claude) return;
+	S.claude = r.claude;
+	drawSetup();
+	toast('Found Claude Code');
 }
 
 function openTerminal() {
@@ -1259,7 +1274,11 @@ function onHost(e) {
 			$('win-max').innerHTML = icon(d.max ? 'restore' : 'max', 13);
 			$('win-max').title = d.max ? 'Restore' : 'Maximise';
 			break;
-		case 'active': body.classList.toggle('inactive', !d.on); break;
+		case 'active':
+			body.classList.toggle('inactive', !d.on);
+			// Back from installing it in the terminal: look again.
+			if (d.on && !S.claude && S.home) recheck();
+			break;
 		case 'confirmClose':
 			dialog('Claude is still working', 'Closing now stops this reply. Your conversation is saved either way.', [{ label: 'Keep working' }, { label: 'Close', primary: true, danger: true }])
 				.then(i => { if (i === 1) send('cmd', { cmd: 'forceClose' }); });

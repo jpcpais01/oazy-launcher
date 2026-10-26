@@ -406,6 +406,7 @@ body.no-claude #home-cards { display: none; }
 .setup-card > .ic { color: var(--claude-hi); margin-top: 2px; }
 .setup-card b { display: block; margin-bottom: 4px; }
 .setup-card span { color: var(--dim); line-height: 1.5; font-size: 13px; }
+.setup-card small { display: block; margin-top: 10px; color: var(--mute); font-size: 11.5px; line-height: 1.45; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
