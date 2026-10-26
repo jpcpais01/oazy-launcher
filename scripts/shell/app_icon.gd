@@ -121,6 +121,11 @@ func refresh() -> void:
 		_show_plate(Color("3a3330"), Color("161415"))
 		_show_glyph("claude", Color("f2a27c"))
 		return
+	if _own_ref() == TasksFlyout.REF:
+		# The task manager: a pulse in the accent on dark glass.
+		_show_plate(Color("26363c"), Color("10181c"))
+		_show_glyph("activity", App.accent.lightened(0.25))
+		return
 	if _own_ref() == "oazy:flow":
 		# Flow keeps its own colours: a violet-to-blue tile with a spark.
 		_show_plate(Color("7c6cff"), Color("265cd6"))

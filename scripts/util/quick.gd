@@ -24,7 +24,7 @@ const COMMANDS := [
 	["mouse", "Mouse settings", "mouse pointer cursor speed", "settings", "ms-settings:mousetouchpad"],
 	["notifications", "Notifications", "notifications focus do not disturb", "info", "ms-settings:notifications"],
 	["windows", "Windows Settings", "windows settings pc settings control", "settings", "ms-settings:"],
-	["taskmgr", "Task Manager", "task manager processes kill end task", "cpu", "taskmgr"],
+	["taskmgr", "Windows Task Manager", "windows task manager taskmgr services performance", "cpu", "taskmgr"],
 	["recycle", "Recycle Bin", "recycle bin trash deleted", "trash", "shell:RecycleBinFolder"],
 	["lock", "Lock", "lock pc", "lock", "lock"],
 	["sleep", "Sleep", "sleep pc suspend", "moon", "sleep"],

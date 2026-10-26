@@ -23,6 +23,7 @@ const OAZY_APPS := {
 	"oazy:flow": {"name": "Flow", "glyph": "sparkles", "desc": "Make images and videos with Google Flow, in Oazy's look"},
 	"oazy:files": {"name": "Files", "glyph": "folder", "desc": "Your folders in Oazy's glass"},
 	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
+	"oazy:tasks": {"name": "Task manager", "glyph": "activity", "desc": "What's running, and end anything stuck"},
 }
 ## Start menu clutter that ships next to real apps.
 const SKIP_WORDS := ["uninstall", "uninstaller", "readme", "read me", "help", "documentation", "release notes", "website", "license", "manual", "changelog", "what's new", "support", "faq", "eula", "recovery", "debug", "setup", "installer", "updater", "crash reporter", "bug reporter", "repair", "safe mode", "migration assistant"]
@@ -608,9 +609,12 @@ func window_group_name(w: Dictionary) -> String:
 
 # --- Pins -----------------------------------------------------------------------------------
 
+## The task manager is always one of them: it lives on the taskbar.
 func pins() -> Array[String]:
 	var out: Array[String] = []
 	out.assign(_canonical_list(Settings.get_value("pins")))
+	if not out.has(TasksFlyout.REF):
+		out.append(TasksFlyout.REF)
 	return out
 
 
@@ -620,6 +624,8 @@ func is_pinned(ref: String) -> bool:
 
 func set_pinned(ref: String, on: bool) -> void:
 	ref = canonical(ref)
+	if ref == TasksFlyout.REF:
+		return
 	var list: Array = _canonical_list(Settings.get_value("pins"))
 	if on and not list.has(ref):
 		list.append(ref)

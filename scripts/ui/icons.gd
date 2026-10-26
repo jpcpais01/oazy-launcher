@@ -56,6 +56,7 @@ const SVGS := {
 	"pin": "<path d=\"M12 17v5\"/><path d=\"M9 10.8V5h6v5.8l2.5 2.7a1 1 0 0 1-.7 1.7H7.2a1 1 0 0 1-.7-1.7z\"/><path d=\"M8 5h8\"/>",
 	"unpin": "<path d=\"M12 17v5\"/><path d=\"M9 10.8V5h6v5.8l2.5 2.7a1 1 0 0 1-.7 1.7H7.2a1 1 0 0 1-.7-1.7z\"/><path d=\"M3 3l18 18\"/>",
 	"window": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2.5\"/><path d=\"M3 9h18\"/>",
+	"activity": "<path d=\"M22 12h-2.5a2 2 0 0 0-1.9 1.5l-2.4 8.3a.3.3 0 0 1-.5 0L9.3 2.2a.3.3 0 0 0-.5 0L6.4 10.5A2 2 0 0 1 4.5 12H2\"/>",
 	"cpu": "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3\"/>",
 	"memory": "<rect x=\"3\" y=\"7\" width=\"18\" height=\"10\" rx=\"2\"/><path d=\"M7 17v3M11 17v3M15 17v3M7 10v4M11 10v4M15 10v4\"/>",
 	"battery": "<rect x=\"2\" y=\"7\" width=\"17\" height=\"10\" rx=\"2.5\"/><path d=\"M22 11v2\"/>",

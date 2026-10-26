@@ -516,6 +516,7 @@ func _ui_tests() -> void:
 		await _wait(0.3)
 		check(main.preview.is_showing(), "taskbar: hover preview opens")
 		main.preview.hide_preview()
+	await _tasks_tests(main)
 	main.switcher.handle_key("open")
 	check(main.switcher.is_open and main.switcher.selected == 1, "switcher: Alt+Tab picks the previous window")
 	await _wait(0.4)
@@ -827,7 +828,48 @@ func _host_tests() -> void:
 	# CI machines have no Wi-Fi adapter, but the answer (and the cable list) must still come back.
 	check(got.has("wifi") and got["wifi"].get("ok", false) and got["wifi"].has("ethernet"), "host: network status (%s)" % str(got.get("wifi", {})))
 	await _capture_test()
+	await _procs_test()
 	check(Host.available, "host: still running after the checks")
+
+
+## The task manager's process list (NtQuerySystemInformation read by offset)
+## and ending a process, on a real Windows.
+func _procs_test() -> void:
+	var pid := OS.create_process("ping.exe", ["-n", "60", "127.0.0.1"])
+	check(pid > 0, "procs: ping starts")
+	await _wait(1.0)
+	var got := {}
+	Host.procs(func(d: Dictionary) -> void: got["a"] = d)
+	await _wait(1.2)
+	Host.procs(func(d: Dictionary) -> void: got["b"] = d)
+	var waited := 0.0
+	while got.size() < 2 and waited < 15.0:
+		await _wait(0.2)
+		waited += 0.2
+	var d: Dictionary = got.get("b", {})
+	var mine := {}
+	var me := {}
+	var cpu := 0.0
+	for p in d.get("procs", []):
+		cpu += float(p["cpu"])
+		if int(p["pid"]) == pid:
+			mine = p
+		if int(p["pid"]) == OS.get_process_id():
+			me = p
+	check(d.get("ok", false) and d.get("procs", []).size() > 20, "procs: lists processes (%d)" % d.get("procs", []).size())
+	check(not mine.is_empty() and str(mine["exe"]).to_lower().ends_with("ping.exe") and int(mine["ppid"]) == OS.get_process_id(), "procs: path and parent are right (%s)" % str(mine))
+	check(not me.is_empty() and int(me["mem"]) > 1048576 and int(me["s"]) == int(mine.get("s", -1)), "procs: memory and session are read (%s)" % str(me))
+	check(cpu > 0.0 and cpu <= 1.01 and float(d.get("cpu", -1)) >= 0.0 and float(d.get("mem_total", 0)) > 0.0, "procs: CPU shares and totals (%.3f)" % cpu)
+	var killed := {}
+	Host.kill([pid, OS.get_process_id()], func(r: Dictionary) -> void: killed["r"] = r)
+	waited = 0.0
+	while killed.is_empty() and waited < 10.0:
+		await _wait(0.2)
+		waited += 0.2
+	var r: Dictionary = killed.get("r", {})
+	check(int(r.get("ended", 0)) == 1 and str(r.get("refused", [])).contains(str(OS.get_process_id())), "procs: ends a process, never Oazy itself (%s)" % str(r))
+	await _wait(0.5)
+	check(not OS.is_process_running(pid), "procs: ping is gone")
 
 
 ## Opens a real Notepad and takes the picture the Alt+Tab switcher would show.
@@ -914,6 +956,51 @@ func _cleaner_idle() -> void:
 	while (Cleaner.busy() or not Cleaner.has_scan()) and waited < 10.0:
 		await _wait(0.1)
 		waited += 0.1
+
+
+## The task manager: pinned for good, a card with a tail over its button,
+## one row per app, and End that asks where it should.
+func _tasks_tests(main: Node) -> void:
+	var bar: Taskbar = main.taskbar
+	var btn: TaskbarButton = bar.button_for(TasksFlyout.REF)
+	check(btn != null, "tasks: always on the taskbar")
+	Catalog.set_pinned(TasksFlyout.REF, false)
+	bar.rebuild()
+	check(Catalog.is_pinned(TasksFlyout.REF) and bar.button_for(TasksFlyout.REF) != null, "tasks: can't be unpinned")
+	main.open_tasks()
+	await _wait(0.6)
+	var tf: TasksFlyout = main.tasks
+	check(tf.is_open and not tf._rows.is_empty(), "tasks: opens from its button with rows")
+	check(btn.active, "tasks: its button is lit while open")
+	var tail: float = tf._glass.mat.get_shader_parameter("tail_x")
+	check(absf(tf.global_position.x + tail - btn.get_global_rect().get_center().x) < 2.0, "tasks: the tail points at its button")
+	check(tf.get_global_rect().end.y < bar.get_global_rect().position.y, "tasks: sits above the taskbar")
+	var chrome := {}
+	for g in tf._data["apps"]:
+		if g["ref"] == "app:Chrome":
+			chrome = g
+	check(not chrome.is_empty() and chrome["windows"].size() == 2 and chrome["pids"].size() > 2, "tasks: an app's windows and helper processes are one row")
+	var by_name := {}
+	for id in ["background", "system"]:
+		for g in tf._data[id]:
+			by_name[str(g["exe"]).get_file().to_lower() if g["exe"] != "" else str(g["name"]).to_lower()] = g
+	check(by_name.has("csrss") and by_name["csrss"]["protected"], "tasks: critical processes can't be ended")
+	check(by_name.has("searchhost.exe") and not by_name["searchhost.exe"]["protected"], "tasks: other Windows processes can")
+	var oazy_row := false
+	for g in tf._data["background"]:
+		if g["key"] == "oazy":
+			oazy_row = g["protected"]
+	check(oazy_row, "tasks: Oazy itself is shown but protected")
+	tf.end_group(by_name["searchhost.exe"])
+	check(tf.state_of(by_name["searchhost.exe"]["key"]) == &"confirm", "tasks: ending a Windows process asks first")
+	tf._search.text = "chrome"
+	tf._search.text_changed.emit("chrome")
+	check(tf._sections["apps"]["box"].visible and not tf._sections["system"]["box"].visible, "tasks: search filters rows")
+	tf._search.text = ""
+	tf._search.text_changed.emit("")
+	tf.close()
+	await _wait(0.3)
+	check(not tf.is_open and tf._timer.is_stopped(), "tasks: stops polling when closed")
 
 
 func _wait(seconds: float) -> void:

@@ -24,23 +24,56 @@ uniform int source = 1;
 uniform vec2 screen_px = vec2(1920.0, 1080.0);
 uniform vec4 glow_color : source_color = vec4(0.35, 0.95, 0.88, 1.0);
 uniform float glow : hint_range(0.0, 1.0) = 0.0;
+// Optional tail under the pane pointing down at what opened it (the task
+// manager's taskbar button): its tip's x in pixels (< 0: none), its height
+// (the bottom strip of the rect it hangs in) and its half width.
+uniform float tail_x = -1.0;
+uniform float tail_h = 0.0;
+uniform float tail_w = 11.0;
 
 float sd_box(vec2 p, vec2 b, float r) {
 	vec2 q = abs(p) - b + r;
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 }
 
-void fragment() {
-	vec2 hs = rect_size * 0.5;
-	vec2 p = UV * rect_size - hs;
+// Inigo Quilez's isosceles triangle: tip at the origin, base at y = q.y.
+float sd_tri(vec2 p, vec2 q) {
+	p.x = abs(p.x);
+	vec2 a = p - q * clamp(dot(p, q) / dot(q, q), 0.0, 1.0);
+	vec2 b = p - q * vec2(clamp(p.x / q.x, 0.0, 1.0), 1.0);
+	float s = -sign(q.y);
+	vec2 d = min(vec2(dot(a, a), s * (p.x * q.y - p.y * q.x)), vec2(dot(b, b), s * (p.y - q.y)));
+	return -sqrt(d.x) * sign(d.y);
+}
+
+// The pane's shape at pixel `q` of the rect: a rounded box, plus the tail
+// melted into its bottom edge when there is one.
+float shape(vec2 q) {
+	float th = tail_x >= 0.0 ? tail_h : 0.0;
+	vec2 hs = vec2(rect_size.x, rect_size.y - th) * 0.5;
 	float r = min(radius, min(hs.x, hs.y));
-	float d = sd_box(p, hs, r);
+	float d = sd_box(q - hs, hs, r);
+	if (tail_x >= 0.0) {
+		// Its tip is rounded off, and it joins the pane in a soft fillet.
+		float round_r = 2.5;
+		vec2 tp = vec2(q.x - tail_x, rect_size.y - round_r - q.y);
+		float t = sd_tri(tp, vec2(tail_w, th + 4.0)) - round_r;
+		float k = 7.0;
+		float h = max(k - abs(d - t), 0.0) / k;
+		d = min(d, t) - h * h * k * 0.25;
+	}
+	return d;
+}
+
+void fragment() {
+	vec2 q = UV * rect_size;
+	float d = shape(q);
 	float px = max(fwidth(d), 0.0001);
 	float alpha = clamp(0.5 - d / px, 0.0, 1.0);
 
 	vec2 n = vec2(
-		sd_box(p + vec2(0.5, 0.0), hs, r) - sd_box(p - vec2(0.5, 0.0), hs, r),
-		sd_box(p + vec2(0.0, 0.5), hs, r) - sd_box(p - vec2(0.0, 0.5), hs, r));
+		shape(q + vec2(0.5, 0.0)) - shape(q - vec2(0.5, 0.0)),
+		shape(q + vec2(0.0, 0.5)) - shape(q - vec2(0.0, 0.5)));
 	n = n / max(length(n), 0.0001);
 	float edge = clamp(1.0 + d / bevel, 0.0, 1.0);
 	float lens = edge * edge * edge;

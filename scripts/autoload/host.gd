@@ -448,6 +448,23 @@ func stats(done: Callable, cpu_temp: bool = false) -> void:
 	request(["stats", 1 if cpu_temp else 0], done)
 
 
+## Every running process: {pid, ppid, s (session), t (start), n (image name),
+## exe, d (description), cpu (share of all CPU time since the last call),
+## mem (private bytes)}, plus totals (cpu, mem_used, mem_total, cores) and
+## `self`, Oazy's own pid. For the task manager, only while it is open.
+func procs(done: Callable) -> void:
+	request(["procs"], done)
+
+
+## Ends these processes. `done` gets {ended, denied: [pid] (Windows said no:
+## elevated or another user's), refused: [pid] (critical, never ended)}.
+func kill(pids: Array, done: Callable = Callable()) -> void:
+	var parts := PackedStringArray()
+	for p in pids:
+		parts.append(str(int(p)))
+	request(["kill", ",".join(parts)], done)
+
+
 ## Shows a live DWM preview of `hwnd` inside `rect` (pixels of the window
 ## `dest`, Oazy's main window when 0), at `opacity` (0 hides it). `done`
 ## gets the fitted rect. Cheap enough to call every frame while it moves.

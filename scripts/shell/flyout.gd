@@ -76,7 +76,7 @@ func open(from: Control = null) -> void:
 		return
 	size = content.size + Vector2(PAD * 2.0, PAD * 2.0)
 	_place()
-	pivot_offset = Vector2(size.x * 0.5, size.y)
+	pivot_offset = _pivot()
 	modulate.a = 0.0
 	scale = Vector2.ONE * 0.97
 	var y := position.y
@@ -103,6 +103,11 @@ func close() -> void:
 	_tween.tween_property(self, "position:y", position.y + 10.0, 0.12)
 	_tween.chain().tween_callback(func() -> void: visible = false)
 	opened_changed.emit(false)
+
+
+## Where it grows from as it opens.
+func _pivot() -> Vector2:
+	return Vector2(size.x * 0.5, size.y)
 
 
 ## Sits above the anchor, right-aligned to it, inside the viewport.
