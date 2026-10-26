@@ -2612,7 +2612,11 @@ namespace OazyBrowser
 				// A web app, on a stand-in for its site: the slim window and the look.
 				step = 4;
 				WebAppDef flow = WebApps.Find("flow");
-				appWin = App.OpenWindow(new List<string> { "https://" + flow.Hosts[0] + "/flow-mock.html" }, 0, win.Bounds, false, flow);
+				Rectangle bounds = win.Bounds;
+				// Screenshots are taken off the screen, so the browser steps aside.
+				win.WindowState = FormWindowState.Minimized;
+				appWin = App.OpenWindow(new List<string> { "https://" + flow.Hosts[0] + "/flow-mock.html" }, 0, bounds, false, flow);
+				appWin.TopMost = true;
 				await Task.Delay(20000);
 				if (step == 4) { Log("the web app's look never reported"); Shot(appWin, "flow-app.png"); Finish(); }
 			}
