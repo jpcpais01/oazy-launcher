@@ -51,6 +51,8 @@ var _items_dirty := true
 ## Library entries by normalised name, for canonical().
 var _lib_names := {}
 var _tidy_queued := false
+## Install folder -> the exe its icon comes from (entry_icon_key).
+var _dir_exes := {}
 
 
 func _ready() -> void:
@@ -313,16 +315,36 @@ func item(ref: String) -> Dictionary:
 		it["name"] = str(e.get("name", "Missing"))
 		it["kind"] = "game" if e.get("kind", "game") == "game" else "libapp"
 		it["sub"] = Library.source_label(e) if not e.is_empty() else ""
-		var path := str(e.get("path", ""))
 		# Oazy's own apps keep their own icons.
 		it["oazy"] = str(e.get("oazy", ""))
-		if it["kind"] == "libapp" and path != "" and not path.contains("://") and path.get_file().to_lower() not in SHELLS:
-			it["icon_key"] = path.replace("/", "\\")
+		if not e.is_empty():
+			it["icon_key"] = entry_icon_key(e)
 	elif ref.begins_with("win:"):
 		it["kind"] = "window"
 		it["icon_key"] = ref.substr(4)
 		it["name"] = Fmt.pretty_name(ref.substr(4))
 	return it
+
+
+## Where Windows draws a library entry's real icon from: the Start app it
+## came from (or has its name), its exe, or for a store game the main exe in
+## its install folder. "" when it has none (a web link, a shell command).
+func entry_icon_key(e: Dictionary) -> String:
+	var app_id := str(e.get("app_id", ""))
+	if app_id != "":
+		return "shell:AppsFolder\\" + app_id
+	var path := str(e.get("path", "")).replace("\\", "/")
+	if path.get_file().to_lower() in SHELLS:
+		return ""
+	if path == "" or path.contains("://"):
+		var a := find_app_by_norm_name(str(e.get("name", "")))
+		return "shell:AppsFolder\\" + str(a["id"]) if not a.is_empty() else ""
+	if not path.get_extension().is_empty() and not DirAccess.dir_exists_absolute(path):
+		return path.replace("/", "\\")
+	# A folder (Steam installs): its biggest exe is the game. Looked up once.
+	if not _dir_exes.has(path):
+		_dir_exes[path] = Library._guess_exe(path).replace("/", "\\")
+	return _dir_exes[path]
 
 
 ## Oazy's apps that run as their own windows rather than inside the shell.

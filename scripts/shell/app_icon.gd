@@ -91,6 +91,13 @@ func refresh() -> void:
 	var name := str(item.get("name", "?"))
 	_key = str(item.get("icon_key", ""))
 	if kind == "game":
+		# A game's own icon when it has one; its cover only stands in.
+		var game_tex := Catalog.icon(_key) if _key != "" else null
+		if game_tex != null:
+			_tex.texture = game_tex
+			_tex.visible = true
+			_sync_tex()
+			return
 		if _cover == null:
 			_cover = CoverArt.new()
 			_cover.glow_enabled = false
