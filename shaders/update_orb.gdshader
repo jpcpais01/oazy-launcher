@@ -17,6 +17,8 @@ uniform float error : hint_range(0.0, 1.0) = 0.0;
 uniform float ripples : hint_range(0.0, 1.0) = 1.0;
 // Timeline of the completion shockwave, 0..1. Negative means off.
 uniform float pulse = -1.0;
+// The Browser's globe: lines of latitude and longitude on the glass, turning.
+uniform float globe : hint_range(0.0, 1.0) = 0.0;
 // Orb radius as a fraction of the rect's half size; the rest is ripples.
 uniform float orb = 0.56;
 
@@ -118,6 +120,14 @@ void fragment() {
 	float facing = dot(normalize(p + 0.0001), normalize(vec2(-0.55, -1.0)));
 	col += vec3(1.0) * line * mix(0.12, 0.6, facing * facing);
 	col += wa * sw * 0.18 * (1.0 - qr);
+	if (globe > 0.0) {
+		float lon = (atan(q.x, max(z, 0.001)) + t * 0.3) * 3.0 / 3.14159;
+		float lat = asin(clamp(q.y, -1.0, 1.0)) * 4.0 / 3.14159;
+		float dl = abs(fract(lon + 0.5) - 0.5) / max(fwidth(lon), 0.0001);
+		float dt = abs(fract(lat + 0.5) - 0.5) / max(fwidth(lat), 0.0001);
+		float grid = max(1.0 - smoothstep(0.4, 1.4, dl), 1.0 - smoothstep(0.4, 1.4, dt));
+		col += vec3(1.0) * grid * 0.28 * globe * smoothstep(0.05, 0.35, z);
+	}
 
 	float inside = 1.0 - outside;
 	vec3 rgb = mix(around_rgb, col, inside);

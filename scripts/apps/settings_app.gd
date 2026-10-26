@@ -132,7 +132,7 @@ func _build_updates() -> void:
 	_col.add_child(card)
 	var row := Kit.hbox(20)
 	card.add_child(row)
-	row.add_child(OazyMark.icon(64))
+	row.add_child(UpdateOrb.icon(64))
 	var text := Kit.vbox(4)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
