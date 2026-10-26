@@ -62,6 +62,7 @@ namespace OazyBrowser
 		[DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+		[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool ReleaseCapture();
 		[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern short GetKeyState(int vk);
@@ -1501,7 +1502,7 @@ namespace OazyBrowser
 		readonly List<object> outbox = new List<object>();
 		public readonly List<Tab> Tabs = new List<Tab>();
 		public Tab Active;
-		FormWindowState preFullState;
+		bool preFullZoom;
 		Rectangle preFullBounds;
 		int snapCount;
 		string suggestFor = "";
@@ -1592,7 +1593,7 @@ namespace OazyBrowser
 		protected override void OnShown(EventArgs e)
 		{
 			base.OnShown(e);
-			if (startMaximized) WindowState = FormWindowState.Maximized;
+			if (startMaximized) SetMaximized(true);
 			RefreshFrame();
 			BeginInvoke((Action)RefreshFrame);
 			Init();
@@ -1610,8 +1611,6 @@ namespace OazyBrowser
 			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 		}
 
-		bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
-
 		int TopStrip { get { return fullscreen || Maximized ? 0 : Math.Max(1, (int)Math.Round(3 * Scale_)); } }
 
 		protected override void WndProc(ref Message m)
@@ -1623,9 +1622,12 @@ namespace OazyBrowser
 					{
 						if (fullscreen) { m.Result = IntPtr.Zero; return; }
 						Native.NCCALCSIZE_PARAMS p = (Native.NCCALCSIZE_PARAMS)Marshal.PtrToStructure(m.LParam, typeof(Native.NCCALCSIZE_PARAMS));
+						Native.RECT whole = p.r0;
 						int top = p.r0.Top;
 						base.WndProc(ref m);
 						p = (Native.NCCALCSIZE_PARAMS)Marshal.PtrToStructure(m.LParam, typeof(Native.NCCALCSIZE_PARAMS));
+						// Maximized (by hand), no borders at all: the window is the work area.
+						if (zoomed) p.r0 = whole;
 						// Keep Windows' side and bottom borders (resizing, shadow), drop the title bar.
 						p.r0.Top = top;
 						if (Native.IsZoomed(m.HWnd))
@@ -1671,8 +1673,20 @@ namespace OazyBrowser
 				case WM_DPICHANGED:
 					Native.RECT r = (Native.RECT)Marshal.PtrToStructure(m.LParam, typeof(Native.RECT));
 					Native.SetWindowPos(Handle, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, 0x0004 | 0x0010);
+					if (zoomed) Bounds = Screen.FromHandle(Handle).WorkingArea;
 					DoLayout();
 					m.Result = IntPtr.Zero;
+					return;
+				case 0x112: // WM_SYSCOMMAND: maximize and restore (title double-click, Win+Up) by hand
+					{
+						int sc = (int)(m.WParam.ToInt64() & 0xFFF0);
+						if (sc == 0xF030 && !Native.IsIconic(Handle)) { SetMaximized(!zoomed); return; }
+						if (sc == 0xF120 && zoomed && !Native.IsIconic(Handle)) { SetMaximized(false); return; }
+					}
+					break;
+				case 0x1A: // WM_SETTINGCHANGE: the work area moved (taskbar)
+					base.WndProc(ref m);
+					if (zoomed && m.WParam.ToInt64() == 0x2F) Bounds = Screen.FromHandle(Handle).WorkingArea;
 					return;
 				case WM_MOVE:
 					base.WndProc(ref m);
@@ -1695,19 +1709,95 @@ namespace OazyBrowser
 			base.WndProc(ref m);
 		}
 
-		// DWM paints its dark caption strip again after maximizing or restoring;
-		// recalculating the frame clears it (FrameFix off only to test that).
-		public static bool FrameFix = true;
+		// --- Maximized ---------------------------------------------------------------------
+		// Oazy maximizes by hand: the window takes exactly the work area, flush on the
+		// taskbar, and stays a normal window to Windows. A real maximized window got a
+		// dark caption-high strip painted across its top by DWM and stopped short of the
+		// taskbar.
+		bool zoomed, zooming;
+		Rectangle unzoomed;
+
+		public bool Maximized { get { return zoomed; } }
+
+		public void SetMaximized(bool on)
+		{
+			if (on == zoomed || !IsHandleCreated) return;
+			zooming = true;
+			if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
+			// Square and without Windows' 1px outline while it fills the screen.
+			int corner = on ? 1 : 2, border = on ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
+			Native.DwmSetWindowAttribute(Handle, 33, ref corner, 4);
+			Native.DwmSetWindowAttribute(Handle, 34, ref border, 4);
+			if (on)
+			{
+				unzoomed = Bounds;
+				zoomed = true;
+				Bounds = Screen.FromHandle(Handle).WorkingArea;
+			}
+			else
+			{
+				zoomed = false;
+				Bounds = unzoomed;
+			}
+			zooming = false;
+			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+			DoLayout();
+			PostWinState();
+		}
+
+		// Where the window goes back to, for saving.
+		Rectangle NormalBounds { get { return zoomed ? unzoomed : (WindowState == FormWindowState.Normal ? Bounds : RestoreBounds); } }
+
+		// Dragging the title of a maximized window brings it back to its own size
+		// under the pointer once the pointer moves, and keeps dragging; a click or
+		// double-click leaves it as it is.
+		System.Windows.Forms.Timer dragWatch;
+
+		void BeginDrag()
+		{
+			if (!zoomed)
+			{
+				Native.ReleaseCapture();
+				Native.SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+				return;
+			}
+			Point start = Cursor.Position;
+			if (dragWatch == null)
+			{
+				dragWatch = new System.Windows.Forms.Timer { Interval = 15 };
+				dragWatch.Tick += delegate
+				{
+					if ((Control.MouseButtons & MouseButtons.Left) == 0 || !zoomed) { dragWatch.Stop(); return; }
+					Point c = Cursor.Position, from = (Point)dragWatch.Tag;
+					int slop = (int)Math.Round(6 * Scale_);
+					if (Math.Abs(c.X - from.X) < slop && Math.Abs(c.Y - from.Y) < slop) return;
+					dragWatch.Stop();
+					Rectangle full = Bounds, r = unzoomed;
+					double at = full.Width > 0 ? (double)(from.X - full.Left) / full.Width : 0.5;
+					SetMaximized(false);
+					Bounds = new Rectangle(c.X - (int)(r.Width * at), c.Y - (from.Y - full.Top), r.Width, r.Height);
+					Native.ReleaseCapture();
+					Native.SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+				};
+			}
+			dragWatch.Tag = start;
+			dragWatch.Start();
+		}
+
+		// Recalculate the frame on every state change, in case DWM brings its
+		// caption strip back.
 		FormWindowState shownState = FormWindowState.Normal;
 
 		protected override void OnResize(EventArgs e)
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			if (WindowState == FormWindowState.Maximized && !zooming && IsHandleCreated)
+				BeginInvoke((Action)delegate { SetMaximized(true); });
 			if (WindowState != shownState && IsHandleCreated)
 			{
 				shownState = WindowState;
-				if (!min && FrameFix) BeginInvoke((Action)RefreshFrame);
+				if (!min) BeginInvoke((Action)RefreshFrame);
 			}
 			if (chrome != null) try { chrome.IsVisible = !min; } catch { }
 			if (Active != null && Active.C != null) try { Active.C.IsVisible = !min && !pageHidden; } catch { }
@@ -1766,21 +1856,24 @@ namespace OazyBrowser
 			if (on == fullscreen) return;
 			if (on)
 			{
-				preFullState = WindowState;
-				if (WindowState == FormWindowState.Maximized) WindowState = FormWindowState.Normal;
+				preFullZoom = zoomed;
+				if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
+				zoomed = false;
 				preFullBounds = Bounds;
 				fullscreen = true;
-				int square = 1;
+				int square = 1, none = unchecked((int)0xFFFFFFFE);
 				Native.DwmSetWindowAttribute(Handle, 33, ref square, 4);
+				Native.DwmSetWindowAttribute(Handle, 34, ref none, 4);
 				Bounds = Screen.FromHandle(Handle).Bounds;
 			}
 			else
 			{
 				fullscreen = false;
-				int round = 2;
+				int round = preFullZoom ? 1 : 2, border = preFullZoom ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
 				Native.DwmSetWindowAttribute(Handle, 33, ref round, 4);
+				Native.DwmSetWindowAttribute(Handle, 34, ref border, 4);
 				Bounds = preFullBounds;
-				if (preFullState == FormWindowState.Maximized) WindowState = FormWindowState.Maximized;
+				zoomed = preFullZoom;
 			}
 			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 			DoLayout();
@@ -1810,9 +1903,9 @@ namespace OazyBrowser
 		{
 			List<object> urls = new List<object>();
 			foreach (Tab t in Tabs) urls.Add(t.IsNtp ? "" : t.ShownUrl);
-			Rectangle b = fullscreen ? preFullBounds : (WindowState == FormWindowState.Normal ? Bounds : RestoreBounds);
+			Rectangle b = fullscreen ? (preFullZoom ? unzoomed : preFullBounds) : NormalBounds;
 			return Json.Obj("tabs", urls.ToArray(), "active", Math.Max(0, Tabs.IndexOf(Active)),
-				"bounds", new object[] { b.X, b.Y, b.Width, b.Height }, "max", WindowState == FormWindowState.Maximized);
+				"bounds", new object[] { b.X, b.Y, b.Width, b.Height }, "max", fullscreen ? preFullZoom : zoomed);
 		}
 
 		// --- Chrome (tabs, address bar, panels) --------------------------------------------------
@@ -1934,8 +2027,7 @@ namespace OazyBrowser
 					DoLayout();
 					break;
 				case "drag":
-					Native.ReleaseCapture();
-					Native.SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+					BeginDrag();
 					break;
 				case "download": Downloads.Act(Json.Int(m, "dl"), Json.Str(m, "action")); break;
 				case "history":
@@ -2672,7 +2764,7 @@ namespace OazyBrowser
 				case "minimize": WindowState = FormWindowState.Minimized; break;
 				case "maximize":
 					if (fullscreen) SetFullscreen(false);
-					else WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+					else SetMaximized(!zoomed);
 					break;
 				case "close": Close(); break;
 				case "openUrl":
@@ -2962,23 +3054,21 @@ namespace OazyBrowser
 				await Task.Delay(600);
 				Shot("browser-backdrop.png");
 				glassOk = EvenGlass("browser-backdrop.png");
-				// Maximized too: once without the frame fix (to show the strip), once with it.
-				BrowserWindow.FrameFix = false;
-				win.WindowState = FormWindowState.Maximized;
-				await Task.Delay(1500);
-				Shot("browser-max-nofix.png");
-				EvenGlass("browser-max-nofix.png");
-				win.WindowState = FormWindowState.Normal;
-				await Task.Delay(800);
-				BrowserWindow.FrameFix = true;
+				// Maximized (as Windows does it, e.g. Win+Up): Oazy takes over and the
+				// window fills exactly the work area, with even glass along the top.
+				Rectangle normal = win.Bounds;
 				win.WindowState = FormWindowState.Maximized;
 				await Task.Delay(1500);
 				Shot("browser-max.png");
-				glassOk = EvenGlass("browser-max.png") && glassOk;
-				win.WindowState = FormWindowState.Normal;
+				Rectangle wa = Screen.FromHandle(win.Handle).WorkingArea;
+				bool flush = win.Maximized && win.WindowState == FormWindowState.Normal && win.Bounds == wa;
+				Log("maximized " + win.Maximized + ", bounds " + win.Bounds + " vs work area " + wa);
+				glassOk = EvenGlass("browser-max.png") && flush && glassOk;
+				win.SetMaximized(false);
 				await Task.Delay(1500);
 				Shot("browser-restored.png");
-				glassOk = EvenGlass("browser-restored.png") && glassOk;
+				Log("restored to " + win.Bounds + " (was " + normal + ")");
+				glassOk = EvenGlass("browser-restored.png") && win.Bounds == normal && !win.Maximized && glassOk;
 				win.TestShowChrome(true);
 				await Task.Delay(400);
 				Shot("browser-chrome-only.png");
@@ -3060,8 +3150,7 @@ namespace OazyBrowser
 			{
 				using (Bitmap bmp = new Bitmap(Path.Combine(dir, name)))
 				{
-					// Maximized, the window starts above the screen's edge.
-					int x = bmp.Width * 6 / 10, dy = win.WindowState == FormWindowState.Maximized ? Math.Max(0, Screen.FromHandle(win.Handle).WorkingArea.Top - win.Bounds.Top) : 0;
+					int x = bmp.Width * 6 / 10, dy = 0;
 					Color top = bmp.GetPixel(x, dy + 12), below = bmp.GetPixel(x, Math.Min(dy + 80, bmp.Height - 1));
 					int diff = Math.Abs(top.R - below.R) + Math.Abs(top.G - below.G) + Math.Abs(top.B - below.B);
 					Log(name + " glass top vs below: " + diff);

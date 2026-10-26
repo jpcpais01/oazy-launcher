@@ -69,6 +69,7 @@ namespace OazyClaude
 		[DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr h, ref MARGINS m);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+		[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool ReleaseCapture();
 		[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 		[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -915,7 +916,7 @@ namespace OazyClaude
 		protected override void OnShown(EventArgs e)
 		{
 			base.OnShown(e);
-			if (startMaximized) WindowState = FormWindowState.Maximized;
+			if (startMaximized) SetMaximized(true);
 			RefreshFrame();
 			BeginInvoke((Action)RefreshFrame);
 			Init();
@@ -930,8 +931,6 @@ namespace OazyClaude
 			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 		}
 
-		bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
-
 		int TopStrip { get { return Maximized ? 0 : Math.Max(1, (int)Math.Round(3 * Scale_)); } }
 
 		protected override void WndProc(ref Message m)
@@ -942,9 +941,12 @@ namespace OazyClaude
 					if (m.WParam != IntPtr.Zero)
 					{
 						Native.NCCALCSIZE_PARAMS p = (Native.NCCALCSIZE_PARAMS)Marshal.PtrToStructure(m.LParam, typeof(Native.NCCALCSIZE_PARAMS));
+						Native.RECT whole = p.r0;
 						int top = p.r0.Top;
 						base.WndProc(ref m);
 						p = (Native.NCCALCSIZE_PARAMS)Marshal.PtrToStructure(m.LParam, typeof(Native.NCCALCSIZE_PARAMS));
+						// Maximized (by hand), no borders at all: the window is the work area.
+						if (zoomed) p.r0 = whole;
 						p.r0.Top = top;
 						if (Native.IsZoomed(m.HWnd))
 						{
@@ -986,8 +988,20 @@ namespace OazyClaude
 				case WM_DPICHANGED:
 					Native.RECT r = (Native.RECT)Marshal.PtrToStructure(m.LParam, typeof(Native.RECT));
 					Native.SetWindowPos(Handle, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, 0x0004 | 0x0010);
+					if (zoomed) Bounds = Screen.FromHandle(Handle).WorkingArea;
 					DoLayout();
 					m.Result = IntPtr.Zero;
+					return;
+				case 0x112: // WM_SYSCOMMAND: maximize and restore (title double-click, Win+Up) by hand
+					{
+						int sc = (int)(m.WParam.ToInt64() & 0xFFF0);
+						if (sc == 0xF030 && !Native.IsIconic(Handle)) { SetMaximized(!zoomed); return; }
+						if (sc == 0xF120 && zoomed && !Native.IsIconic(Handle)) { SetMaximized(false); return; }
+					}
+					break;
+				case 0x1A: // WM_SETTINGCHANGE: the work area moved (taskbar)
+					base.WndProc(ref m);
+					if (zoomed && m.WParam.ToInt64() == 0x2F) Bounds = Screen.FromHandle(Handle).WorkingArea;
 					return;
 				case WM_MOVE:
 					base.WndProc(ref m);
@@ -1003,10 +1017,87 @@ namespace OazyClaude
 			base.WndProc(ref m);
 		}
 
+		// --- Maximized ---------------------------------------------------------------------
+		// Oazy maximizes by hand: the window takes exactly the work area, flush on the
+		// taskbar, and stays a normal window to Windows. A real maximized window got a
+		// dark caption-high strip painted across its top by DWM and stopped short of the
+		// taskbar.
+		bool zoomed, zooming;
+		Rectangle unzoomed;
+
+		public bool Maximized { get { return zoomed; } }
+
+		public void SetMaximized(bool on)
+		{
+			if (on == zoomed || !IsHandleCreated) return;
+			zooming = true;
+			if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
+			// Square and without Windows' 1px outline while it fills the screen.
+			int corner = on ? 1 : 2, border = on ? unchecked((int)0xFFFFFFFE) : unchecked((int)0xFFFFFFFF);
+			Native.DwmSetWindowAttribute(Handle, 33, ref corner, 4);
+			Native.DwmSetWindowAttribute(Handle, 34, ref border, 4);
+			if (on)
+			{
+				unzoomed = Bounds;
+				zoomed = true;
+				Bounds = Screen.FromHandle(Handle).WorkingArea;
+			}
+			else
+			{
+				zoomed = false;
+				Bounds = unzoomed;
+			}
+			zooming = false;
+			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+			DoLayout();
+			Post(Json.Obj("t", "win", "max", Maximized));
+		}
+
+		// Where the window goes back to, for saving.
+		Rectangle NormalBounds { get { return zoomed ? unzoomed : (WindowState == FormWindowState.Normal ? Bounds : RestoreBounds); } }
+
+		// Dragging the title of a maximized window brings it back to its own size
+		// under the pointer once the pointer moves, and keeps dragging; a click or
+		// double-click leaves it as it is.
+		System.Windows.Forms.Timer dragWatch;
+
+		void BeginDrag()
+		{
+			if (!zoomed)
+			{
+				Native.ReleaseCapture();
+				Native.SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+				return;
+			}
+			Point start = Cursor.Position;
+			if (dragWatch == null)
+			{
+				dragWatch = new System.Windows.Forms.Timer { Interval = 15 };
+				dragWatch.Tick += delegate
+				{
+					if ((Control.MouseButtons & MouseButtons.Left) == 0 || !zoomed) { dragWatch.Stop(); return; }
+					Point c = Cursor.Position, from = (Point)dragWatch.Tag;
+					int slop = (int)Math.Round(6 * Scale_);
+					if (Math.Abs(c.X - from.X) < slop && Math.Abs(c.Y - from.Y) < slop) return;
+					dragWatch.Stop();
+					Rectangle full = Bounds, r = unzoomed;
+					double at = full.Width > 0 ? (double)(from.X - full.Left) / full.Width : 0.5;
+					SetMaximized(false);
+					Bounds = new Rectangle(c.X - (int)(r.Width * at), c.Y - (from.Y - full.Top), r.Width, r.Height);
+					Native.ReleaseCapture();
+					Native.SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+				};
+			}
+			dragWatch.Tag = start;
+			dragWatch.Start();
+		}
+
 		protected override void OnResize(EventArgs e)
 		{
 			base.OnResize(e);
 			bool min = WindowState == FormWindowState.Minimized;
+			if (WindowState == FormWindowState.Maximized && !zooming && IsHandleCreated)
+				BeginInvoke((Action)delegate { SetMaximized(true); });
 			if (view != null) try { view.IsVisible = !min; } catch { }
 			if (!min) DoLayout();
 			Post(Json.Obj("t", "win", "max", Maximized));
@@ -1058,9 +1149,9 @@ namespace OazyClaude
 		void SaveBounds()
 		{
 			if (App.Test != null) return;
-			Rectangle b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+			Rectangle b = NormalBounds;
 			App.SetPref("bounds", new object[] { b.X, b.Y, b.Width, b.Height });
-			App.SetPref("max", WindowState == FormWindowState.Maximized);
+			App.SetPref("max", zoomed);
 			App.SaveNow();
 		}
 
@@ -1241,14 +1332,13 @@ namespace OazyClaude
 					}
 					break;
 				case "drag":
-					Native.ReleaseCapture();
-					Native.SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+					BeginDrag();
 					break;
 				case "cmd":
 					switch (Json.Str(m, "cmd"))
 					{
 						case "minimize": WindowState = FormWindowState.Minimized; break;
-						case "maximize": WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; break;
+						case "maximize": SetMaximized(!zoomed); break;
 						case "close": Close(); break;
 						case "forceClose": closeConfirmed = true; Close(); break;
 					}
