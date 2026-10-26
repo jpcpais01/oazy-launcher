@@ -209,6 +209,20 @@ func _logic_tests() -> void:
 	if App.is_windows():
 		var built_term := Terminal.build()
 		check(built_term.has("exe"), "terminal: compiles on Windows (%s)" % str(built_term.get("error", "ok")))
+	# Oazy Files: folders in an Oazy window, standing in for File Explorer.
+	check(Catalog.item(Files.REF)["kind"] == "oazy", "files: in the catalog")
+	check(Catalog.is_own_window_app(Files.REF), "files: its own window")
+	var fe_ref := Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\files\\app-1234abcd\\OazyFiles.exe", "title": "Downloads - Oazy Files"})
+	check(fe_ref == Files.REF or fe_ref.begins_with("app:"), "files: windows group under Files or File Explorer")
+	check(Files.is_explorer({"ref": "app:Microsoft.Windows.Explorer", "name": "File Explorer"}), "files: takes over File Explorer")
+	check(not Files.is_explorer({"ref": "app:Chrome", "name": "Google Chrome"}), "files: leaves other apps alone")
+	check(Settings.get_value("files_oazy") == true, "files: on by default")
+	var files_files := Files.files()
+	for f in files_files:
+		check(FileAccess.file_exists(str(files_files[f])), "files: packaged " + str(f))
+	if App.is_windows():
+		var built_files := Files.build()
+		check(built_files.has("exe"), "files: compiles on Windows (%s)" % str(built_files.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
 	check(Wallpaper.style_index("tide") == 2 and Wallpaper.style_index("gone") == 0, "wallpaper: styles, unknown falls back to Oasis")
@@ -465,6 +479,8 @@ func _ui_tests() -> void:
 	check(main.start.is_open, "start: opens")
 	check(main.get_viewport_rect().grow(1.0).encloses(main.start.get_global_rect()), "start: fits on screen")
 	check(main.start.get_global_rect().end.y <= main.taskbar.get_global_rect().position.y + 1.0, "start: sits above the taskbar")
+	check(main.desktop.modulate.a < 0.01 and main.desktop.scale.x < 1.0, "desktop: fades and eases back behind Start")
+	check(main.desktop._hero_glass._shadow.modulate.a < 0.01, "desktop: the hero card's shadow fades with it")
 	var inner: Rect2 = main.start._root.get_global_rect()
 	check(main.start.get_global_rect().grow(1.0).encloses(inner), "start: content stays inside the glass")
 	var sr: Rect2 = main.start._glass.shadow_rect()
@@ -480,7 +496,8 @@ func _ui_tests() -> void:
 	check(str(main.start._rows[0].get_meta("ref")) != "", "start: reused rows point at the new results")
 	var tiles: Array = main.start._pinned.get_children()
 	main.start.close()
-	await _wait(0.4)
+	await _wait(0.5)
+	check(is_equal_approx(main.desktop.modulate.a, 1.0) and main.desktop.scale.is_equal_approx(Vector2.ONE), "desktop: settles back fully when Start closes")
 	main.start.open()
 	await _wait(0.1)
 	check(main.start._pinned.get_children() == tiles, "start: reopening keeps its tiles")
@@ -526,6 +543,21 @@ func _ui_tests() -> void:
 	main.start._menu.hide()
 	main.start.close()
 	check(main.desktop._hero_id != "" and main.desktop._hero_glass.visible, "desktop: the game card shows a game")
+	var tile: Control = null
+	if not Library.entries.is_empty():
+		tile = main.desktop._recent_tile(str(Library.entries[0]["id"]))
+		main.desktop._recent.add_child(tile)
+		# A quick pass over a card: the "in" animation must not outlive the "out".
+		tile.mouse_entered.emit()
+		await get_tree().process_frame
+		tile.mouse_exited.emit()
+		await _wait(0.45)
+		var cover: CoverArt = tile.get_child(0)
+		var want := 0.85 if str(tile.get_meta("id")) == main.desktop._hero_id else 0.0
+		check(absf(cover.focus_amount - want) < 0.01 and tile.scale.is_equal_approx(Vector2.ONE), "desktop: a quick pass over a recent card leaves it unlit")
+		tile.queue_free()
+	else:
+		check(false, "desktop: test library has a game")
 	Catalog.favorites_changed.emit()
 	check(main.desktop._favs.get_child_count() == mini(Catalog.favorites().size(), Desktop.FAV_MAX) or (Catalog.favorites().is_empty() and main.desktop._favs.get_child_count() == 1), "desktop: favourites show")
 	for m in get_tree().get_nodes_in_group("modal"):

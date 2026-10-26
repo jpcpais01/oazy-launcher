@@ -420,12 +420,12 @@ func _fill_recent() -> void:
 		cover.setup(id, 12.0)
 		holder.pivot_offset = Vector2(47, 70)
 		holder.mouse_entered.connect(func() -> void:
-			var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+			var t := Kit.hover_tween(holder).set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 			t.tween_property(holder, "scale", Vector2.ONE * 1.025, 0.2)
 			t.tween_property(cover, "focus_amount", 1.0, 0.18)
 		)
 		holder.mouse_exited.connect(func() -> void:
-			var t := holder.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+			var t := Kit.hover_tween(holder).set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 			t.tween_property(holder, "scale", Vector2.ONE, 0.2)
 			t.tween_property(cover, "focus_amount", 0.0, 0.18)
 		)
@@ -662,14 +662,7 @@ func _run(cb: Callable) -> void:
 
 
 func _open_folder(path: String) -> void:
-	if not App.is_windows():
-		if path != "":
-			OS.shell_open(path)
-		return
-	if path == "":
-		OS.create_process("explorer.exe", [])
-	else:
-		OS.create_process("explorer.exe", [path.replace("/", "\\")])
+	Files.open_folder(path)
 
 
 func _show_menu(ref: String, at: Vector2) -> void:

@@ -59,6 +59,7 @@ func _ready() -> void:
 	if App.is_windows():
 		_toggle_row(you, "Open web links in Oazy Browser", "Web searches and addresses from Start open in Oazy's own browser instead of your default one.", "browser_links")
 		_toggle_row(you, "Open terminals in Oazy Terminal", "Terminal, Command Prompt, PowerShell and Claude Code open in Oazy's own terminal, with tabs and split panes.", "terminal_oazy")
+		_toggle_row(you, "Open folders in Oazy Files", "File Explorer, Start's folders and folders you find open in Oazy's own file explorer, with tabs, previews and search. Off brings back Windows Explorer.", "files_oazy")
 	_toggle_row(you, "Start with Windows", "Sign in and land straight on your Oazy desktop.", "launch_at_startup", func(on: bool) -> void: main.set_autostart(on))
 	var hk := _row(you, "Open Start from anywhere" if Shell.native else "Come back home from anywhere", "Press Ctrl + Alt + O in any app to open Start." if Shell.native else "Press Ctrl + Alt + O in any app to bring Oazy to the front.")
 	_hotkey_status = Kit.label("", 14, 600, App.TEXT_DIM)
@@ -90,7 +91,7 @@ func _ready() -> void:
 	)
 
 	var about := _section("About", "info")
-	_button_row(about, "Data folder", "Your library, settings and downloaded artwork live here.", "Open", "folder", func() -> void: OS.shell_open(App.data_dir()))
+	_button_row(about, "Data folder", "Your library, settings and downloaded artwork live here.", "Open", "folder", func() -> void: Files.open_folder(App.data_dir()))
 	var credits := Kit.label("Oazy %s  ·  Made with Godot  ·  Inter & Outfit typefaces (SIL OFL)" % App.version, 13, 500, App.TEXT_MUTE)
 	credits.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_col.add_child(Kit.spacer(0, 8))

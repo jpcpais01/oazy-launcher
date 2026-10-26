@@ -42,6 +42,7 @@ const DEFAULTS := {
 	"browser_pinned": false,
 	"terminal_oazy": true,
 	"terminal_pinned": false,
+	"files_oazy": true,
 	"cleaner_watch": true,
 	"pointer": "oazy",
 	"removed_imports": [],

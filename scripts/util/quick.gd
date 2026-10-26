@@ -5,7 +5,7 @@ class_name QuickAnswers
 ##
 ## Rows use the same shape as Catalog items, with refs of their own:
 ##   calc:<result>  copy the result      url:<address>   open in the browser
-##   path:<path>    open in Explorer     cmd:<id>        a command below
+##   path:<path>    open the folder      cmd:<id>        a command below
 
 ## [id, name, extra search words, glyph, what runs]. A "what runs" starting
 ## with ms-settings: or shell: is opened by Windows; the rest are handled in run().
@@ -110,7 +110,9 @@ static func run(ref: String, main: Node) -> void:
 			OS.shell_open(url)
 	elif ref.begins_with("path:"):
 		var p := ref.substr(5)
-		if App.is_windows():
+		if DirAccess.dir_exists_absolute(p):
+			Files.open_folder(p)
+		elif App.is_windows():
 			OS.create_process("explorer.exe", [p.replace("/", "\\")])
 		else:
 			OS.shell_open(p)
