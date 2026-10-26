@@ -92,6 +92,13 @@ func set_shadow_strength(a: float, spread: int = 34, offset_y: float = 14.0) -> 
 	_shadow_off = offset_y
 
 
+## Fades the shadow on its own. Modulate isn't group opacity, so when a whole
+## card fades, a shadow left at full strength shows through it as a dark smudge.
+func set_shadow_fade(v: float) -> void:
+	if _shadow:
+		_shadow.modulate.a = v
+
+
 ## The panel and its shadow in global coordinates: what a shell layer keeps on
 ## screen so the shadow fades out instead of being cut off.
 func shadow_rect() -> Rect2:
