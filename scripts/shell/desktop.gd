@@ -21,6 +21,10 @@ var _clock: Control
 var _date: Label
 var _time: Label
 var _greeting: Label
+var _greet_row: HBoxContainer
+var _weather_dot: Label
+var _weather_icon: TextureRect
+var _weather_text: Label
 var _clock_mat: ShaderMaterial
 var _hero_glass: GlassPanel
 var _hero_art: CoverArt
@@ -129,10 +133,40 @@ func _build_clock() -> void:
 	_time.material = _clock_mat
 	_time.resized.connect(func() -> void: _clock_mat.set_shader_parameter("height", _time.size.y))
 	_clock.add_child(_time)
+	# The greeting, and the weather beside it when there is some.
+	_greet_row = Kit.hbox(10)
+	_greet_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_greet_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_clock.add_child(_greet_row)
 	_greeting = Kit.label("", 17, 500, Color(1, 1, 1, 0.66))
-	_greeting.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_shadow(_greeting, 4)
-	_clock.add_child(_greeting)
+	_greet_row.add_child(_greeting)
+	_weather_dot = Kit.label("·", 17, 700, Color(1, 1, 1, 0.4))
+	_greet_row.add_child(_weather_dot)
+	_weather_icon = TextureRect.new()
+	_weather_icon.custom_minimum_size = Vector2(24, 24)
+	_weather_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_weather_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_weather_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_greet_row.add_child(_weather_icon)
+	_weather_text = Kit.label("", 17, 500, Color(1, 1, 1, 0.66))
+	_shadow(_weather_text, 4)
+	_greet_row.add_child(_weather_text)
+	Weather.changed.connect(_update_weather)
+	_update_weather()
+
+
+func _update_weather() -> void:
+	var now := Weather.current()
+	var on := not now.is_empty()
+	_weather_dot.visible = on
+	_weather_icon.visible = on
+	_weather_text.visible = on
+	if on:
+		var code := int(now["code"])
+		_weather_icon.texture = WeatherIcons.tex(Weather.kind_for(code), bool(now["day"]), 48)
+		_weather_text.text = "%s  %s" % [Weather.temp(now["temp"]), Weather.describe(code)]
+	_layout_clock()
 
 
 func _shadow(l: Label, size_px: int) -> void:
@@ -681,11 +715,11 @@ func _layout_clock() -> void:
 		return
 	var w := size.x
 	var shelf_top := _favs_glass.position.y
-	for l in [_date, _time, _greeting]:
+	for l in [_date, _time]:
 		l.size = Vector2(w, 0)
 	var dh := _date.get_combined_minimum_size().y
 	var th := _time.get_combined_minimum_size().y
-	var gh := _greeting.get_combined_minimum_size().y
+	var gh := _greet_row.get_combined_minimum_size().y
 	var block := dh + th + gh - 40.0
 	# Sit a little above the middle of the space over the shelf.
 	var top := roundf(maxf(28.0, (shelf_top - block) * 0.4))
@@ -693,10 +727,10 @@ func _layout_clock() -> void:
 	_clock.size = Vector2(w, block)
 	_date.position = Vector2(0, 0)
 	_time.position = Vector2(0, dh - 22.0)
-	_greeting.position = Vector2(0, dh + th - 40.0)
+	_greet_row.position = Vector2(0, dh + th - 40.0)
 	_date.size.x = w
 	_time.size.x = w
-	_greeting.size.x = w
+	_greet_row.size = Vector2(w, gh)
 
 
 func intro() -> void:

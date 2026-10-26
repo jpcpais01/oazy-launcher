@@ -1,5 +1,5 @@
 ### A calmer, more useful desktop
-- **A new centred clock** in liquid glass, with the date above and your greeting below.
+- **A new centred clock** in liquid glass, with the date above, and your greeting and the weather below.
 - **One shelf of widgets** on the horizon above the taskbar, all the same height and lined up: favourites, the game you're playing, and this PC.
 - **Recent apps** fill in under your favourites, so what you used last is one click away.
 - **Continue playing** now shows your next few games right on the banner; click one to switch, double-click to play, or jump to the full Library.
