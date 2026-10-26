@@ -2033,7 +2033,7 @@ namespace OazyBrowser
 			w.Settings.AreDevToolsEnabled = true;
 			w.SetVirtualHostNameToFolderMapping(App.UiHost, App.Ui, CoreWebView2HostResourceAccessKind.DenyCors);
 			// The self-test can't sign in to a web app; it gets a stand-in page on the app's own host.
-			if (WebApp != null && App.Test != null)
+			if (WebApp != null && !IsPopup && App.Test != null)
 				w.SetVirtualHostNameToFolderMapping(WebApp.Hosts[0], Path.Combine(App.Ui, "apps"), CoreWebView2HostResourceAccessKind.Allow);
 			c.AcceleratorKeyPressed += OnAccelerator;
 			c.ZoomFactorChanged += delegate { if (t == Active) PushNav(); };
