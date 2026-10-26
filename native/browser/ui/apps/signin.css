@@ -1,0 +1,37 @@
+/* Google's sign-in pages in Oazy's windows (see signin.js). Google draws them
+   dark here; this lets them sit on the window's glass. Nothing else changes:
+   it's still Google's page, buttons and all. */
+
+/* Until the page is known to be dark, it keeps a solid backdrop of its own. */
+html:not(.oazy-signin) { background-color: Canvas; }
+
+html.oazy-signin,
+html.oazy-signin body { background: transparent !important; }
+
+/* Full-window layers behind the page: a dark tint, so the glass shows through.
+   Not fully clear: the field labels sit on little patches of Google's own
+   backdrop colour, which would show as dark blocks on bare glass. */
+html.oazy-signin [data-oazy-clear] {
+	background-color: rgba(6, 12, 16, 0.8) !important;
+	background-image: none !important;
+	box-shadow: none !important;
+}
+
+/* The card the form sits on (wide windows): a quiet pane of tinted glass. */
+html.oazy-signin [data-oazy-card] {
+	background: rgba(14, 22, 28, 0.62) !important;
+	border-radius: 28px !important;
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07), 0 12px 32px rgba(0, 0, 0, 0.18) !important;
+	border-color: transparent !important;
+}
+
+html.oazy-signin ::selection { background: rgba(var(--oazy-accent-rgb), 0.35); }
+
+html.oazy-signin ::-webkit-scrollbar { width: 10px; height: 10px; }
+html.oazy-signin ::-webkit-scrollbar-track { background: transparent; }
+html.oazy-signin ::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.14);
+	border: 3px solid transparent;
+	border-radius: 999px;
+	background-clip: padding-box;
+}

@@ -207,6 +207,20 @@ func _logic_tests() -> void:
 	check(Catalog.search("flow").size() > 0 and Catalog.search("flow")[0]["ref"] == "oazy:flow", "flow: found from Start")
 	for f in Browser.FILES:
 		check(FileAccess.file_exists(Browser.SRC.path_join(f)), "browser: packaged " + f)
+
+	# Account: Google photo sizes, and who Oazy greets.
+	check(Account.big_photo("https://lh3.googleusercontent.com/a/ACg8x=s96-c") == "https://lh3.googleusercontent.com/a/ACg8x=s256-c", "account: photo asked for bigger")
+	check(Account.big_photo("https://lh3.googleusercontent.com/a/ACg8x") == "https://lh3.googleusercontent.com/a/ACg8x=s256-c", "account: photo without a size gets one")
+	check(Account.big_photo("https://lh3.googleusercontent.com/-a/AAAA/s64-c/photo.jpg") == "https://lh3.googleusercontent.com/-a/AAAA/s256-c/photo.jpg", "account: old-style photo url resized")
+	check(Account.big_photo("file:///x.png") == "", "account: only web photos")
+	check(not Account.signed_in(), "account: nobody signed in during the smoke test")
+	Account.set_mock({"name": "Ana Sousa", "email": "ana@example.com"})
+	check(Account.signed_in() and Account.display_name() == "Ana Sousa" and Account.first_name() == "Ana", "account: Google name in Start and the greeting")
+	Settings.set_value("user_name", "Nina")
+	check(Account.first_name() == "Nina" and Account.display_name() == "Ana Sousa", "account: your own greeting name wins over Google's")
+	Settings.set_value("user_name", "")
+	Account.set_mock({})
+	check(not Account.signed_in(), "account: mock signed out")
 	if App.is_windows():
 		var built := Browser.build()
 		check(built.has("exe"), "browser: compiles on Windows (%s)" % str(built.get("error", "ok")))

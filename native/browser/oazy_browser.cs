@@ -13,6 +13,8 @@
 //
 // Usage: OazyBrowser.exe --data <dir> [--accent <hex>] [--new-window] [url]
 //        OazyBrowser.exe --data <dir> --app <id>     (a web app, see WebApps)
+//        OazyBrowser.exe --data <dir> --signin <email|-> --result <file>   (Oazy's
+//            Google sign-in, see SignInJob; --signout signs every app out)
 //        OazyBrowser.exe --selftest <out dir>
 // A second launch hands its url to the running browser over a named pipe.
 
@@ -135,8 +137,8 @@ namespace OazyBrowser
 		[STAThread]
 		static int Main(string[] args)
 		{
-			string data = "", accent = "", selftest = "", app = "";
-			bool newWindow = false;
+			string data = "", accent = "", selftest = "", app = "", signin = null, result = "";
+			bool newWindow = false, signout = false;
 			List<string> urls = new List<string>();
 			for (int i = 0; i < args.Length; i++)
 			{
@@ -145,6 +147,9 @@ namespace OazyBrowser
 				else if (a == "--accent" && i + 1 < args.Length) accent = args[++i];
 				else if (a == "--selftest" && i + 1 < args.Length) selftest = args[++i];
 				else if (a == "--app" && i + 1 < args.Length) app = args[++i];
+				else if (a == "--signin" && i + 1 < args.Length) signin = args[++i];
+				else if (a == "--signout") signout = true;
+				else if (a == "--result" && i + 1 < args.Length) result = args[++i];
 				else if (a == "--new-window") newWindow = true;
 				else if (a.Trim() != "") urls.Add(a.Trim());
 			}
@@ -155,6 +160,8 @@ namespace OazyBrowser
 			string pipe = "OazyBrowser-" + App.Hash(Environment.UserName + "|" + data.ToLowerInvariant());
 			bool first;
 			Mutex single = new Mutex(true, "Local\\" + pipe, out first);
+			if (signout) { App.SignInMode = "signout"; App.SignInResult = result; }
+			else if (signin != null) { App.SignInMode = "signin"; App.SignInHint = signin.Trim() == "-" ? "" : signin.Trim(); App.SignInResult = result; }
 			if (!first && selftest == "")
 			{
 				if (Forward(pipe, newWindow, urls, app)) return 0;
@@ -187,7 +194,9 @@ namespace OazyBrowser
 						// Let the running browser bring its window to the front.
 						try { Native.AllowSetForegroundWindow(-1); } catch { }
 						StringBuilder sb = new StringBuilder();
-						if (app != "") sb.Append("app\t").Append(app).Append('\n');
+						// Result file first: the line's ends get trimmed and the hint can be empty.
+						if (App.SignInMode != "") sb.Append(App.SignInMode).Append('\t').Append(App.SignInResult.Replace("\t", " ")).Append('\t').Append(App.SignInHint).Append('\n');
+						else if (app != "") sb.Append("app\t").Append(app).Append('\n');
 						else if (urls.Count == 0) sb.Append(newWindow ? "window\t\n" : "open\t\n");
 						foreach (string u in urls) sb.Append(newWindow ? "window\t" : "open\t").Append(u.Replace("\n", " ")).Append('\n');
 						byte[] bytes = Encoding.UTF8.GetBytes(sb.ToString());
@@ -214,6 +223,8 @@ namespace OazyBrowser
 		public const string Name = "Oazy Browser";
 
 		public static string Data, Ui, Media, Accent = "#38d6c4", Version = "";
+		// Asked for on the command line: "signin" or "signout" (see SignInJob).
+		public static string SignInMode = "", SignInHint = "", SignInResult = "";
 		public static CoreWebView2Environment Env;
 		public static SynchronizationContext Sync;
 		public static readonly List<BrowserWindow> Windows = new List<BrowserWindow>();
@@ -304,7 +315,8 @@ namespace OazyBrowser
 				Test.Begin();
 				return;
 			}
-			// A web app opens on its own; your browser tabs wait until you open the browser.
+			// A web app or a sign-in opens on its own; your browser tabs wait until you open the browser.
+			if (SignInMode != "") { SignIn(SignInMode == "signout", SignInHint, SignInResult); return; }
 			if (WebApps.Find(app) != null) { OpenApp(WebApps.Find(app)); return; }
 			OpenBrowser(urls, newWindow);
 		}
@@ -389,7 +401,24 @@ namespace OazyBrowser
 
 		public static BrowserWindow OpenWindow(List<string> urls, int active, Rectangle? bounds, bool maximized, WebAppDef app)
 		{
+			return OpenWindow(urls, active, bounds, maximized, app, null, null);
+		}
+
+		public static BrowserWindow OpenWindow(List<string> urls, int active, Rectangle? bounds, bool maximized, WebAppDef app, Form owner, SignInJob job)
+		{
 			BrowserWindow w = new BrowserWindow(urls, active, bounds, maximized, app);
+			w.Job = job;
+			if (owner != null && !owner.IsDisposed)
+			{
+				// A site's sign-in popup sits over the window that asked for it.
+				w.Owner = owner;
+				Rectangle o = owner.Bounds;
+				Rectangle wa = Screen.FromRectangle(o).WorkingArea;
+				Rectangle r = w.Bounds;
+				r.X = Math.Max(wa.Left, Math.Min(wa.Right - r.Width, o.Left + (o.Width - r.Width) / 2));
+				r.Y = Math.Max(wa.Top, Math.Min(wa.Bottom - r.Height, o.Top + (o.Height - r.Height) / 2));
+				w.Bounds = r;
+			}
 			Windows.Add(w);
 			LastActive = w;
 			w.FormClosed += delegate
@@ -402,6 +431,16 @@ namespace OazyBrowser
 			w.Show();
 			w.Activate();
 			return w;
+		}
+
+		// Oazy's own sign-in (or sign-out) window. One at a time: asking again
+		// brings the open one up.
+		public static void SignIn(bool signOut, string hint, string result)
+		{
+			foreach (BrowserWindow x in Windows)
+				if (x.Job != null && !x.Job.Finished) { x.BringUp(); return; }
+			SignInJob job = new SignInJob(signOut, hint, result);
+			OpenWindow(new List<string> { job.StartUrl() }, 0, null, false, WebApps.SignInDef, null, job);
 		}
 
 		public static void Quit()
@@ -476,6 +515,11 @@ namespace OazyBrowser
 				if (kind == "app")
 				{
 					if (WebApps.Find(url) != null) OpenApp(WebApps.Find(url));
+				}
+				else if (kind == "signin" || kind == "signout")
+				{
+					string[] parts = url.Split('\t');
+					SignIn(kind == "signout", parts.Length > 1 ? parts[1].Trim() : "", parts[0].Trim());
 				}
 				else if (!sessionLoaded || last == null)
 				{
@@ -575,7 +619,10 @@ namespace OazyBrowser
 				foreach (BrowserWindow w in Windows)
 				{
 					// A web app keeps only where its window was; it isn't part of the session.
-					if (w.WebApp != null) { Prefs["app_" + w.WebApp.Id] = w.SessionInfo(); prefsDirty = true; }
+					if (w.WebApp != null)
+					{
+						if (!w.WebApp.Popup) { Prefs["app_" + w.WebApp.Id] = w.SessionInfo(); prefsDirty = true; }
+					}
 					else wins.Add(w.SessionInfo());
 				}
 				if (wins.Count > 0 && sessionLoaded) Json.Save(Path.Combine(Data, "session.json"), Json.Obj("windows", wins.ToArray()));
@@ -1079,6 +1126,8 @@ namespace OazyBrowser
 		public string Id, Name, Url, Script, Style;
 		public string[] Hosts;
 		public Color A, B;
+		// A small window of its own for signing in (SignInDef), not an app you keep.
+		public bool Popup;
 	}
 
 	static class WebApps
@@ -1096,6 +1145,39 @@ namespace OazyBrowser
 
 		// Signing in happens on Google's account pages, inside the app's window.
 		static readonly string[] SignIn = { "accounts.google.com", "accounts.youtube.com", "gds.google.com" };
+		// Other sites' sign-in pages, which get the same small Oazy window when a
+		// site opens them as a popup ("Sign in with ...").
+		static readonly string[] OtherSignIn = { "login.microsoftonline.com", "login.live.com", "appleid.apple.com", "discord.com", "www.facebook.com", "api.twitter.com", "x.com" };
+
+		// The small Oazy window that sign-ins open in: Oazy's own Google sign-in
+		// (SignInJob), and the popups sites open to sign you in. It wears a light
+		// look (ui/apps/signin.*) on Google's account pages, which go dark to match.
+		public static readonly WebAppDef SignInDef = new WebAppDef
+		{
+			Id = "signin", Name = "Sign in", Url = "",
+			Hosts = SignIn, Script = "signin.js", Style = "signin.css", Popup = true,
+			A = Color.FromArgb(56, 214, 196), B = Color.FromArgb(24, 120, 150),
+		};
+
+		public static bool IsSignIn(string url)
+		{
+			return HostIn(App.HostOf(url), SignIn);
+		}
+
+		// Whether a window a page opens is a sign-in popup (rather than a link
+		// meant for a tab): a sign-in page, or anything opened with a size, the
+		// way sites open "Sign in with Google" (often via a page of their own
+		// that forwards to Google).
+		public static bool WantsPopup(CoreWebView2NewWindowRequestedEventArgs e)
+		{
+			string url = e.Uri ?? "";
+			if (HostIn(App.HostOf(url), SignIn)) return true;
+			string host = App.HostOf(url);
+			if (HostIn(host, OtherSignIn) && (url.Contains("oauth") || url.Contains("login") || url.Contains("authorize") || url.Contains("auth"))) return true;
+			if (url.StartsWith("https://github.com/login", StringComparison.OrdinalIgnoreCase)) return true;
+			try { return e.WindowFeatures != null && e.WindowFeatures.HasSize && (url == "" || url.StartsWith("about:") || url.StartsWith("http")); }
+			catch { return false; }
+		}
 
 		public static WebAppDef Find(string id)
 		{
@@ -1172,6 +1254,198 @@ namespace OazyBrowser
 		}
 	}
 
+	// --- Signing in to Oazy with Google ----------------------------------------------
+	// Oazy (Settings, Start) asks for this with --signin <email> --result <file>.
+	// Google's own pages do the signing in, in a small Oazy window; the email
+	// (picked from your Chrome accounts in Oazy) is filled in for you. Every web
+	// page in Oazy shares this profile, so once it's done the browser, Flow and
+	// any other web app are signed in too. Then the account (name, email, photo)
+	// is read from Google the way Chrome itself does (ListAccounts, with this
+	// profile's cookies) and written to the result file for Oazy's profile.
+	// Nothing about your password ever passes through Oazy.
+	//
+	// --signout does the reverse: Google's sign-out page, then this profile's
+	// Google cookies cleared, so nothing in Oazy stays signed in.
+
+	class SignInJob
+	{
+		public const string DoneUrl = "https://oazy.example/signin-done.html";
+		// Where Google sends you once you're in; reaching it means it worked.
+		const string Landing = "https://myaccount.google.com/?utm_source=oazy";
+		public readonly bool SignOut;
+		public readonly string Hint, Result;
+		public bool Finished;
+		bool loggedOut;
+
+		public SignInJob(bool signOut, string hint, string result)
+		{
+			SignOut = signOut;
+			Hint = hint ?? "";
+			Result = result ?? "";
+		}
+
+		public string StartUrl()
+		{
+			if (SignOut) return "https://accounts.google.com/Logout?hl=" + Lang();
+			string cont = Uri.EscapeDataString(Landing);
+			if (Hint != "") return "https://accounts.google.com/AccountChooser?Email=" + Uri.EscapeDataString(Hint) + "&continue=" + cont + "&hl=" + Lang();
+			return "https://accounts.google.com/ServiceLogin?continue=" + cont + "&hl=" + Lang();
+		}
+
+		static string Lang()
+		{
+			try { return Uri.EscapeDataString(System.Globalization.CultureInfo.CurrentUICulture.Name); } catch { return "en"; }
+		}
+
+		// Called as the window's page starts going somewhere. True when it's handled.
+		public bool Navigating(BrowserWindow w, Tab t, CoreWebView2NavigationStartingEventArgs e)
+		{
+			if (Finished || SignOut) return false;
+			if (App.HostOf(e.Uri) != "myaccount.google.com") return false;
+			// Signed in: Google's cookies are set by now. Stay put and look the account up.
+			e.Cancel = true;
+			Finish(w, t);
+			return true;
+		}
+
+		public void Navigated(BrowserWindow w, Tab t, bool ok)
+		{
+			if (Finished || !SignOut || loggedOut) return;
+			if (!WebApps.IsSignIn(t.Url) && !t.Url.StartsWith("https://www.google.")) return;
+			loggedOut = true;
+			FinishSignOut(w, t);
+		}
+
+		async void Finish(BrowserWindow w, Tab t)
+		{
+			Finished = true;
+			Dictionary<string, object> acc = null;
+			try { acc = await GoogleAccount(t.W, Hint); } catch { }
+			if (acc == null) acc = Json.Obj("email", Hint, "name", "", "photo", "");
+			acc["ok"] = true;
+			Write(acc);
+			Dictionary<string, object> page = new Dictionary<string, object>(acc);
+			page["accent"] = App.Accent;
+			if (App.Test != null) page["test"] = true;
+			w.ShowPage(DoneUrl + "#" + Uri.EscapeDataString(Json.S.Serialize(page)));
+		}
+
+		async void FinishSignOut(BrowserWindow w, Tab t)
+		{
+			Finished = true;
+			try
+			{
+				// Google's page signs you out on Google's side; clearing the cookies
+				// makes sure nothing in Oazy holds on to a session.
+				List<CoreWebView2Cookie> all = await t.W.CookieManager.GetCookiesAsync(null);
+				foreach (CoreWebView2Cookie c in all)
+				{
+					string d = (c.Domain ?? "").TrimStart('.').ToLowerInvariant();
+					if (d == "google.com" || d.EndsWith(".google.com") || d.StartsWith("google.") || d.Contains(".google.") || d == "youtube.com" || d.EndsWith(".youtube.com"))
+						t.W.CookieManager.DeleteCookie(c);
+				}
+			}
+			catch { }
+			Write(Json.Obj("ok", true, "signedOut", true));
+			w.ShowPage(DoneUrl + "#" + Uri.EscapeDataString(Json.S.Serialize(Json.Obj("signedOut", true, "accent", App.Accent))));
+		}
+
+		// The window closed: if it wasn't done, Oazy hears that you closed it.
+		public void Closed()
+		{
+			if (Finished) return;
+			Finished = true;
+			Write(Json.Obj("ok", false, "cancelled", true));
+		}
+
+		void Write(Dictionary<string, object> m)
+		{
+			if (Result == "") return;
+			try
+			{
+				string tmp = Result + ".tmp";
+				File.WriteAllText(tmp, Json.S.Serialize(m), new UTF8Encoding(false));
+				if (File.Exists(Result)) File.Delete(Result);
+				File.Move(tmp, Result);
+			}
+			catch { }
+		}
+
+		// The signed-in Google account (the one matching `hint`, else the first),
+		// from Google's account list, as Chrome reads it: {name, email, photo}.
+		public static async Task<Dictionary<string, object>> GoogleAccount(CoreWebView2 w, string hint)
+		{
+			if (w == null) return null;
+			const string Url = "https://accounts.google.com/ListAccounts?gpsia=1&source=ChromiumBrowser&json=standard";
+			List<CoreWebView2Cookie> cookies = await w.CookieManager.GetCookiesAsync(Url);
+			StringBuilder jar = new StringBuilder();
+			foreach (CoreWebView2Cookie c in cookies)
+			{
+				if (jar.Length > 0) jar.Append("; ");
+				jar.Append(c.Name).Append('=').Append(c.Value);
+			}
+			string ua = "";
+			try { ua = w.Settings.UserAgent; } catch { }
+			string header = jar.ToString();
+			string text = await Task.Run<string>(new Func<string>(delegate
+			{
+				string r = Fetch(Url, header, ua, true);
+				if (Parse(r, hint) == null) r = Fetch(Url, header, ua, false);
+				return r;
+			}));
+			return Parse(text, hint);
+		}
+
+		static string Fetch(string url, string cookies, string ua, bool post)
+		{
+			try
+			{
+				HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+				req.Method = post ? "POST" : "GET";
+				req.Timeout = 15000;
+				req.AllowAutoRedirect = false;
+				if (ua != "") req.UserAgent = ua;
+				req.Headers["Cookie"] = cookies;
+				if (post)
+				{
+					byte[] body = Encoding.ASCII.GetBytes(" ");
+					req.ContentType = "application/x-www-form-urlencoded";
+					req.ContentLength = body.Length;
+					using (Stream s = req.GetRequestStream()) s.Write(body, 0, body.Length);
+				}
+				using (HttpWebResponse res = (HttpWebResponse)req.GetResponse())
+				using (StreamReader r = new StreamReader(res.GetResponseStream(), Encoding.UTF8))
+					return r.ReadToEnd();
+			}
+			catch { return ""; }
+		}
+
+		// ["gaia.l.a.r", [["gaia.l.a", 1, "Name", "email", "photo url", ...], ...]]
+		public static Dictionary<string, object> Parse(string text, string hint)
+		{
+			if (string.IsNullOrEmpty(text)) return null;
+			int start = text.IndexOf('[');
+			if (start < 0) return null;
+			object[] root;
+			try { root = Json.S.DeserializeObject(text.Substring(start)) as object[]; } catch { return null; }
+			if (root == null || root.Length < 2 || !(root[1] is object[])) return null;
+			Dictionary<string, object> first = null;
+			foreach (object o in (object[])root[1])
+			{
+				object[] a = o as object[];
+				if (a == null || a.Length < 4) continue;
+				string name = a[2] as string ?? "", email = a[3] as string ?? "", photo = a.Length > 4 ? a[4] as string ?? "" : "";
+				if (email.IndexOf('@') < 0) continue;
+				// Accounts Google remembers but you've signed out of come last.
+				bool signedOut = a.Length > 14 && a[14] != null && Convert.ToString(a[14]) == "1";
+				Dictionary<string, object> acc = Json.Obj("name", name, "email", email, "photo", photo);
+				if (hint != "" && email.Equals(hint, StringComparison.OrdinalIgnoreCase)) return acc;
+				if (first == null && !signedOut) first = acc;
+			}
+			return first;
+		}
+	}
+
 	// --- A tab ------------------------------------------------------------------------
 
 	class Tab
@@ -1186,7 +1460,9 @@ namespace OazyBrowser
 		public string Url = "", Title = "", Icon = "";
 		public bool Loading, Audio, Muted, Crashed, Transparent;
 		public int Opener;
-		public string ScriptId;
+		public string ScriptId, SignInScriptId;
+		// Google's account pages asked to draw dark (see BrowserWindow.SetDark).
+		public bool Dark;
 
 		public bool IsNtp
 		{
@@ -1207,7 +1483,10 @@ namespace OazyBrowser
 		// A web app's window (WebApps) has a slim title bar instead of tabs and
 		// an address bar, and Oazy's look laid over the site.
 		public readonly WebAppDef WebApp;
+		// Oazy's own sign-in, when this window is one (SignInJob).
+		public SignInJob Job;
 		bool look;
+		bool IsPopup { get { return WebApp != null && WebApp.Popup; } }
 		int ChromeDip { get { return WebApp != null ? 40 : 88; } }
 		string ChromePage { get { return WebApp != null ? App.AppChromeUrl : App.ChromeUrl; } }
 		const int WM_GETMINMAXINFO = 0x24, WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84, WM_DPICHANGED = 0x2E0, WM_MOVE = 0x3, WM_ACTIVATE = 0x6, WM_NCLBUTTONDOWN = 0xA1;
@@ -1242,13 +1521,13 @@ namespace OazyBrowser
 			FormBorderStyle = FormBorderStyle.Sizable;
 			StartPosition = FormStartPosition.Manual;
 			KeyPreview = false;
-			try { Icon = app != null ? WebApps.MakeIcon(app) : Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+			try { Icon = app != null && !app.Popup ? WebApps.MakeIcon(app) : Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 			contentPanel.BackColor = Color.Black;
 			Controls.Add(contentPanel);
 
 			Rectangle work = Screen.FromPoint(Cursor.Position).WorkingArea;
 			float scale = DpiScale(work);
-			int w = (int)((app != null ? 1440 : 1320) * scale), h = (int)((app != null ? 900 : 860) * scale);
+			int w = (int)((app != null ? (app.Popup ? 480 : 1440) : 1320) * scale), h = (int)((app != null ? (app.Popup ? 700 : 900) : 860) * scale);
 			w = Math.Min(w, work.Width - 40);
 			h = Math.Min(h, work.Height - 40);
 			Rectangle r = new Rectangle(work.Left + (work.Width - w) / 2, work.Top + (work.Height - h) / 2, w, h);
@@ -1257,7 +1536,7 @@ namespace OazyBrowser
 			else if (App.Windows.Count > 0 && app == null)
 				r.Offset((int)(32 * scale * App.Windows.Count), (int)(32 * scale * App.Windows.Count));
 			Bounds = r;
-			MinimumSize = new Size((int)(560 * scale), (int)(380 * scale));
+			MinimumSize = app != null && app.Popup ? new Size((int)(360 * scale), (int)(420 * scale)) : new Size((int)(560 * scale), (int)(380 * scale));
 		}
 
 		static float DpiScale(Rectangle area)
@@ -1521,6 +1800,7 @@ namespace OazyBrowser
 
 		protected override void OnFormClosed(FormClosedEventArgs e)
 		{
+			if (Job != null) Job.Closed();
 			foreach (Tab t in Tabs) if (t.C != null) try { t.C.Close(); } catch { }
 			if (chrome != null) try { chrome.Close(); } catch { }
 			base.OnFormClosed(e);
@@ -1586,7 +1866,8 @@ namespace OazyBrowser
 				string u = initialUrls[i];
 				AddTab(u == "" ? App.NewTabUrl : App.FixUrl(u), i == Math.Min(initialActive, initialUrls.Count - 1), -1);
 			}
-			if (Tabs.Count == 0) AddTab(App.NewTabUrl, true, -1);
+			// A site's popup gets its page from the site (AdoptPopup).
+			if (Tabs.Count == 0 && !IsPopup) AddTab(App.NewTabUrl, true, -1);
 		}
 
 		public void Post(object msg)
@@ -1612,7 +1893,7 @@ namespace OazyBrowser
 					chromeReady = true;
 					Post(Json.Obj("t", "init", "glass", glass, "accent", App.Accent, "engine", App.Engine(), "engines", EngineList(),
 						"restore", !Json.Bool(App.Prefs, "no_restore"), "version", App.Version, "nativeDrag", nativeDrag,
-						"app", WebApp != null ? WebApp.Name : "", "look", look));
+						"app", WebApp != null ? WebApp.Name : "", "look", look, "popup", IsPopup));
 					foreach (object o in outbox) Post(o);
 					outbox.Clear();
 					PostWinState();
@@ -1735,6 +2016,7 @@ namespace OazyBrowser
 			SetupTab(t);
 			SetTransparent(t, Glassy(t.ShownUrl));
 			if (WebApp != null) await InjectApp(t);
+			if (WebApp != null && !IsPopup) await InjectSignIn(t);
 			if (t.Pending != null)
 			{
 				string url = t.Pending;
@@ -1751,7 +2033,7 @@ namespace OazyBrowser
 			w.Settings.AreDevToolsEnabled = true;
 			w.SetVirtualHostNameToFolderMapping(App.UiHost, App.Ui, CoreWebView2HostResourceAccessKind.DenyCors);
 			// The self-test can't sign in to a web app; it gets a stand-in page on the app's own host.
-			if (WebApp != null && App.Test != null)
+			if (WebApp != null && !IsPopup && App.Test != null)
 				w.SetVirtualHostNameToFolderMapping(WebApp.Hosts[0], Path.Combine(App.Ui, "apps"), CoreWebView2HostResourceAccessKind.Allow);
 			c.AcceleratorKeyPressed += OnAccelerator;
 			c.ZoomFactorChanged += delegate { if (t == Active) PushNav(); };
@@ -1776,8 +2058,10 @@ namespace OazyBrowser
 				t.Loading = true;
 				t.Crashed = false;
 				SetTransparent(t, Glassy(e.Uri));
+				SetDark(t, WebApp != null && look && WebApps.IsSignIn(e.Uri));
+				if (Job != null && Job.Navigating(this, t, e)) return;
 				// Links out of a web app open in the browser proper.
-				if (WebApp != null && e.IsUserInitiated && !WebApps.Stays(WebApp, e.Uri) && e.Uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+				if (WebApp != null && !IsPopup && e.IsUserInitiated && !WebApps.Stays(WebApp, e.Uri) && e.Uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
 				{
 					e.Cancel = true;
 					t.Loading = false;
@@ -1790,7 +2074,9 @@ namespace OazyBrowser
 			w.NavigationCompleted += delegate(object o, CoreWebView2NavigationCompletedEventArgs e)
 			{
 				t.Loading = false;
-				if (e.IsSuccess) History.Visit(w.Source, w.DocumentTitle);
+				if (e.IsSuccess && !IsPopup) History.Visit(w.Source, w.DocumentTitle);
+				if (t.Dark) SetDark(t, true, true);
+				if (Job != null) Job.Navigated(this, t, e.IsSuccess);
 				if (t == Active) PushNav();
 				PushTabs();
 				if (App.Test != null) App.Test.Navigated(this, t, e.IsSuccess);
@@ -1799,6 +2085,26 @@ namespace OazyBrowser
 			w.WindowCloseRequested += delegate { CloseTab(t); };
 			w.NewWindowRequested += async delegate(object o, CoreWebView2NewWindowRequestedEventArgs e)
 			{
+				// "Sign in with ..." popups get a small Oazy window of their own,
+				// still connected to the page that opened them.
+				if (!IsPopup && WebApps.WantsPopup(e))
+				{
+					CoreWebView2Deferral pd = e.GetDeferral();
+					try
+					{
+						BrowserWindow pw = App.OpenWindow(new List<string>(), 0, null, false, WebApps.SignInDef, this, null);
+						CoreWebView2 nw = await pw.AdoptPopup(e.Uri ?? "");
+						if (nw != null)
+						{
+							e.NewWindow = nw;
+							e.Handled = true;
+						}
+						else pw.Close();
+					}
+					catch { }
+					finally { pd.Complete(); }
+					return;
+				}
 				// A web app's links to other sites open in the browser proper.
 				if (WebApp != null && !WebApps.Stays(WebApp, e.Uri))
 				{
@@ -1839,7 +2145,7 @@ namespace OazyBrowser
 			{
 				// A web app's script reports how its look went (nothing it says is acted on
 				// beyond showing it).
-				if (WebApp != null && WebApps.Owns(WebApp, e.Source)) { OnAppMessage(t, e.WebMessageAsJson); return; }
+				if (WebApp != null && !IsPopup && WebApps.Owns(WebApp, e.Source)) { OnAppMessage(t, e.WebMessageAsJson); return; }
 				// Only Oazy's own pages (the new tab page) may talk to the browser.
 				if (!e.Source.StartsWith("https://" + App.UiHost + "/", StringComparison.OrdinalIgnoreCase)) return;
 				OnPageMessage(t, e.WebMessageAsJson);
@@ -1893,6 +2199,8 @@ namespace OazyBrowser
 		{
 			if (url == null) return false;
 			if (url == "" || url.StartsWith(App.NewTabUrl, StringComparison.OrdinalIgnoreCase)) return WebApp == null;
+			// Google's account pages (dark, see SetDark) and Oazy's own sign-in pages.
+			if (WebApp != null && look && (WebApps.IsSignIn(url) || url.StartsWith(SignInJob.DoneUrl, StringComparison.OrdinalIgnoreCase))) return true;
 			return WebApp != null && look && WebApps.Owns(WebApp, url);
 		}
 
@@ -1906,7 +2214,9 @@ namespace OazyBrowser
 			{
 				if (t.W == null) continue;
 				InjectApp(t);
+				if (!IsPopup) InjectSignIn(t);
 				SetTransparent(t, Glassy(t.Url));
+				SetDark(t, look && WebApps.IsSignIn(t.Url));
 				try { t.W.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('oazy:look', { detail: " + (on ? "true" : "false") + " }))"); } catch { }
 			}
 			Post(Json.Obj("t", "look", "on", look));
@@ -1925,6 +2235,51 @@ namespace OazyBrowser
 				t.ScriptId = id;
 			}
 			catch { }
+		}
+
+		// Google's sign-in pages in an app's own window get the sign-in look too.
+		async Task InjectSignIn(Tab t)
+		{
+			if (t.W == null) return;
+			try
+			{
+				if (t.SignInScriptId != null) t.W.RemoveScriptToExecuteOnDocumentCreated(t.SignInScriptId);
+				t.SignInScriptId = null;
+				t.SignInScriptId = await t.W.AddScriptToExecuteOnDocumentCreatedAsync(WebApps.Bootstrap(WebApps.SignInDef, look, App.Accent, App.Test != null));
+			}
+			catch { }
+		}
+
+		// Google's account pages follow the system's light or dark; in Oazy's
+		// windows they're asked for dark, so they sit on the glass like the rest.
+		// Only this tab is affected, not the browser's other pages.
+		void SetDark(Tab t, bool on) { SetDark(t, on, false); }
+
+		void SetDark(Tab t, bool on, bool force)
+		{
+			if (t.W == null || (t.Dark == on && !force)) return;
+			t.Dark = on;
+			string features = on ? "[{\"name\":\"prefers-color-scheme\",\"value\":\"dark\"}]" : "[]";
+			try { t.W.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia", "{\"features\":" + features + "}"); } catch { }
+		}
+
+		// A sign-in popup's page: the WebView the site's window.open() gets.
+		public async Task<CoreWebView2> AdoptPopup(string url)
+		{
+			Tab t = new Tab { Url = url };
+			Tabs.Add(t);
+			Activate(t);
+			await Ensure(t);
+			if (t.W != null) SetDark(t, look && (url == "" || url.StartsWith("about:") || WebApps.IsSignIn(url)));
+			return t.W;
+		}
+
+		// Oazy's sign-in shows how it went on a page of its own (ui/signin-done.html).
+		public void ShowPage(string url)
+		{
+			if (Active == null) return;
+			SetTransparent(Active, true);
+			Navigate(Active, url);
 		}
 
 		async void LoadFavicon(Tab t)
@@ -2485,6 +2840,10 @@ namespace OazyBrowser
 			if (m == null) return;
 			switch (Json.Str(m, "t"))
 			{
+				case "signinDone":
+					// Oazy's sign-in page has shown how it went; the window's job is done.
+					if (Job != null) Close();
+					break;
 				case "ntpReady":
 					SendNtp(t);
 					if (App.Test != null) App.Test.NtpReady(this);
@@ -2542,7 +2901,7 @@ namespace OazyBrowser
 		readonly string dir;
 		readonly List<string> log = new List<string>();
 		public int ExitCode = 1;
-		BrowserWindow win, appWin;
+		BrowserWindow win, appWin, signWin;
 		bool chromeOk, ntpOk, pageOk, glassOk, appOk, done;
 		int step, retries;
 		const string TestUrl = "https://en.wikipedia.org/wiki/Oasis";
@@ -2559,7 +2918,7 @@ namespace OazyBrowser
 		public void Begin()
 		{
 			Log("runtime " + App.Version);
-			timeout = new System.Windows.Forms.Timer { Interval = 90000 };
+			timeout = new System.Windows.Forms.Timer { Interval = 120000 };
 			timeout.Tick += delegate { Log("timed out at step " + step); Finish(); };
 			timeout.Start();
 			Rectangle work = Screen.PrimaryScreen.WorkingArea;
@@ -2572,6 +2931,7 @@ namespace OazyBrowser
 
 		public void Navigated(BrowserWindow w, Tab t, bool ok)
 		{
+			if (step == 6) Log("sign-in window: " + ok + " " + t.Url);
 			if (step != 2 || t.IsNtp) return;
 			Log("page loaded: " + ok + " " + t.Url);
 			// A navigation that gets cancelled or blips on the network reports
@@ -2660,6 +3020,19 @@ namespace OazyBrowser
 				appWin.TestLook(false);
 				await Task.Delay(1800);
 				Shot(appWin, "flow-plain.png");
+				// Oazy's sign-in window on Google's real page (signed out, so the
+				// email step), then how a finished sign-in looks. Only screenshots:
+				// whether Google answers a CI runner doesn't decide the test.
+				step = 6;
+				appWin.WindowState = FormWindowState.Minimized;
+				SignInJob job = new SignInJob(false, "", "");
+				signWin = App.OpenWindow(new List<string> { job.StartUrl() }, 0, null, false, WebApps.SignInDef, null, job);
+				signWin.TopMost = true;
+				await Task.Delay(9000);
+				Shot(signWin, "signin-google.png");
+				signWin.ShowPage(SignInJob.DoneUrl + "#" + Uri.EscapeDataString(Json.S.Serialize(Json.Obj("name", "Oazy Tester", "email", "tester@gmail.com", "photo", "", "accent", App.Accent, "test", true))));
+				await Task.Delay(2500);
+				Shot(signWin, "signin-done.png");
 				Finish();
 			}
 		}

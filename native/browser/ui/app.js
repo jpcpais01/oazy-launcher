@@ -10,7 +10,7 @@ const send = (t, o) => {
 };
 const $ = id => document.getElementById(id);
 const body = document.body;
-const S = { tabs: [], active: 0, nav: {}, look: true, lost: false };
+const S = { tabs: [], active: 0, nav: {}, look: true, lost: false, popup: false };
 
 $('mark').innerHTML = icon('sparkle', 13);
 $('back').innerHTML = icon('back', 17);
@@ -31,7 +31,12 @@ function onMessage(m) {
 			$('name').textContent = m.app || '';
 			document.title = m.app || document.title;
 			S.look = m.look !== false;
+			// A sign-in window: a lock for a mark, and where you're signing in always in view.
+			S.popup = !!m.popup;
+			body.classList.toggle('popup', S.popup);
+			if (S.popup) $('mark').innerHTML = icon('lock', 12);
 			renderLook();
+			renderNav();
 			break;
 		case 'tabs': S.tabs = m.tabs; S.active = m.active; renderTabs(); break;
 		case 'nav': S.nav = m; renderNav(); break;
@@ -62,6 +67,13 @@ function renderNav() {
 	$('reload').innerHTML = icon(n.loading ? 'stop' : 'reload', n.loading ? 15 : 16);
 	$('reload').title = n.loading ? 'Stop' : 'Reload (Ctrl+R)';
 	$('progress').classList.toggle('on', !!n.loading);
+	if (S.popup) {
+		const site = $('site');
+		const host = n.host || '';
+		const own = !host || host === 'oazy.example';
+		site.classList.toggle('show', !own);
+		if (!own) site.innerHTML = (n.kind === 'https' ? icon('lock', 12) : icon('warn', 12)) + '<span>' + esc(host) + '</span>';
+	}
 }
 
 function renderLook() {

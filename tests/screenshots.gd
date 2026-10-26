@@ -134,6 +134,7 @@ func _ready() -> void:
 	await shot("01d-network-key")
 	main.network.close()
 	await _wait(0.3)
+	Account.set_mock({"name": "João Pais", "email": "joao.pais@gmail.com"}, _mock_photo(Color("2b6f8f"), Color("f2b27a")))
 	main.start.open()
 	await _wait(0.9)
 	await shot("02-start")
@@ -141,6 +142,21 @@ func _ready() -> void:
 	await _wait(0.6)
 	await shot("03-search")
 	main.start.close()
+	await _wait(0.5)
+	# Signing in: the picker with the accounts Chrome knows.
+	Account.set_mock({})
+	Account.set_mock_chrome([
+		{"name": "João Pais", "email": "joao.pais@gmail.com", "from": "Chrome", "texture": _mock_photo(Color("2b6f8f"), Color("f2b27a"))},
+		{"name": "João Pais", "email": "joao@studio.pt", "from": "Chrome · Work", "texture": _mock_photo(Color("5b3f8f"), Color("9fd6c8"))},
+		{"name": "", "email": "oazy.tests@gmail.com", "from": "Chrome · Testing"},
+	])
+	main.show_account_picker()
+	await _wait(1.0)
+	await shot("02c-account-picker")
+	for m in main.overlay_layer.get_children():
+		if m is AccountPicker:
+			(m as AccountPicker).close()
+	Account.set_mock({"name": "João Pais", "email": "joao.pais@gmail.com"}, _mock_photo(Color("2b6f8f"), Color("f2b27a")))
 	await _wait(0.5)
 	var lib: ShellWindow = main.open_app(&"library")
 	await _wait(1.5)
@@ -151,7 +167,10 @@ func _ready() -> void:
 	await shot("05-game")
 	var settings: ShellWindow = main.open_app(&"settings")
 	await _wait(1.2)
+	await _wait(0.3)
 	await shot("06-settings")
+	(settings.body.get_child(0) as SettingsApp).open_page("personalise")
+	await _wait(0.5)
 	var icons := settings.find_child("CustomIcons", true, false) as Control
 	var scroller := settings.find_child("*ScrollContainer*", true, false) as ScrollContainer
 	if icons and scroller:
@@ -325,6 +344,22 @@ func _close_modals() -> void:
 	for m in get_tree().get_nodes_in_group("modal"):
 		if m.has_method("close"):
 			m.close()
+
+
+## A stand-in profile photo: a soft sky with a figure, like a portrait.
+func _mock_photo(sky: Color, glow: Color) -> Texture2D:
+	var n := 192
+	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	for y in n:
+		for x in n:
+			var u := Vector2(x, y) / float(n)
+			var c := sky.lerp(glow, clampf(u.y * 1.1 - 0.1, 0.0, 1.0))
+			var head := (u - Vector2(0.5, 0.42)).length() < 0.17
+			var body := (u - Vector2(0.5, 1.02)).length() < 0.38
+			if head or body:
+				c = c.darkened(0.55)
+			img.set_pixel(x, y, c)
+	return ImageTexture.create_from_image(img)
 
 
 func shot(name: String) -> void:

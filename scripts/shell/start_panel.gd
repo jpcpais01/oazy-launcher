@@ -34,7 +34,9 @@ var _menu: PopupMenu
 var _menu_ref := ""
 var _power: PopupMenu
 var _user_name: Label
-var _avatar_letter: Label
+var _user_sub: Label
+var _avatar: Avatar
+var _account: PopupMenu
 
 
 func _ready() -> void:
@@ -83,6 +85,10 @@ func _ready() -> void:
 	_power = PopupMenu.new()
 	_power.id_pressed.connect(_on_power)
 	add_child(_power)
+	_account = PopupMenu.new()
+	_account.id_pressed.connect(_on_account)
+	add_child(_account)
+	Account.changed.connect(_sync_user)
 
 	Catalog.pins_changed.connect(func() -> void:
 		if is_open:
@@ -103,7 +109,7 @@ func _ready() -> void:
 			# Opening one of Start's own menus can blink focus too; only close
 			# if focus is still elsewhere a moment later.
 			await get_tree().create_timer(0.15).timeout
-			if is_open and not surface.has_focus() and not surface.just_shown(400) and not _menu.visible and not _power.visible:
+			if is_open and not surface.has_focus() and not surface.just_shown(400) and not _menu.visible and not _power.visible and not _account.visible:
 				close()
 		)
 
@@ -151,25 +157,40 @@ func _build_home() -> Control:
 	var right := Kit.vbox(4)
 	right.custom_minimum_size.x = 188
 	view.add_child(right)
+	# You: your Google photo and name once you've signed in (Account).
+	var user_btn := Button.new()
+	user_btn.custom_minimum_size.y = 58
+	user_btn.focus_mode = Control.FOCUS_NONE
+	user_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	user_btn.add_theme_stylebox_override("normal", Kit.empty())
+	user_btn.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.07), 14, Color(0, 0, 0, 0), 0))
+	user_btn.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.12), 14, Color(0, 0, 0, 0), 0))
+	user_btn.pressed.connect(func() -> void: _open_account(user_btn))
+	right.add_child(user_btn)
 	var user := Kit.hbox(12)
-	user.custom_minimum_size.y = 56
-	right.add_child(user)
-	var avatar := Panel.new()
-	avatar.custom_minimum_size = Vector2(42, 42)
-	avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	avatar.add_theme_stylebox_override("panel", Kit.box(Color(App.accent, 0.35), 999, Color(1, 1, 1, 0.3), 1))
-	_avatar_letter = Kit.label("", 18, 700, Color.WHITE, true)
-	_avatar_letter.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_avatar_letter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_avatar_letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	avatar.add_child(_avatar_letter)
-	user.add_child(avatar)
+	user.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	user.offset_left = 6
+	user.offset_right = -6
+	user.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	user_btn.add_child(user)
+	_avatar = Avatar.new(42)
+	_avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	user.add_child(_avatar)
+	var who := Kit.vbox(0)
+	who.alignment = BoxContainer.ALIGNMENT_CENTER
+	who.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	who.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	user.add_child(who)
 	_user_name = Kit.label("", 16, 700, Color.WHITE)
-	_user_name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_user_name.clip_text = true
-	_user_name.custom_minimum_size.x = 120
+	_user_name.custom_minimum_size.x = 110
 	_user_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	user.add_child(_user_name)
+	who.add_child(_user_name)
+	_user_sub = Kit.label("", 12, 500, App.TEXT_MUTE)
+	_user_sub.clip_text = true
+	_user_sub.custom_minimum_size.x = 110
+	_user_sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	who.add_child(_user_sub)
 	right.add_child(Kit.spacer(0, 6))
 	right.add_child(_place("Library", "grid", func() -> void: _run(func() -> void: main.open_app(&"library"))))
 	right.add_child(_place("File Explorer", "folder", func() -> void: _run(func() -> void: _open_folder(""))))
@@ -458,13 +479,42 @@ func _fill_all() -> void:
 
 
 func _sync_user() -> void:
-	var name := str(Settings.get_value("user_name")).strip_edges()
-	if name == "":
-		name = App.user_name()
+	var name := Account.display_name()
 	if name == "":
 		name = "You"
 	_user_name.text = name
-	_avatar_letter.text = name.substr(0, 1).to_upper()
+	_user_sub.text = Account.email if Account.signed_in() else "Sign in with Google"
+	_avatar.set_person(name, Account.photo)
+
+
+## Signed in: a menu for your account. Not yet: the account picker.
+func _open_account(btn: Control) -> void:
+	Sfx.play(&"select")
+	if not Account.signed_in():
+		_run(func() -> void: main.show_account_picker())
+		return
+	_account.clear()
+	_account.add_icon_item(Icons.tex("user", 18), "Google Account", 0)
+	_account.add_icon_item(Icons.tex("refresh", 18), "Switch account", 1)
+	_account.add_icon_item(Icons.tex("settings", 18), "Account settings", 2)
+	_account.add_separator()
+	_account.add_icon_item(Icons.tex("power", 18), "Sign out", 3)
+	_account.reset_size()
+	var r := btn.get_global_rect()
+	_account.position = Vector2i(int(r.position.x), int(r.end.y + 6))
+	Shell.popup(_account)
+
+
+func _on_account(id: int) -> void:
+	match id:
+		0:
+			_run(func() -> void: Account.manage())
+		1:
+			_run(func() -> void: main.show_account_picker())
+		2:
+			_run(func() -> void: main.open_settings("account"))
+		3:
+			_run(func() -> void: main.confirm_sign_out())
 
 
 ## Builds everything Start shows ahead of time (after loading), so the first

@@ -532,6 +532,31 @@ func show_shortcuts() -> void:
 	overlay_layer.add_child(ShortcutsSheet.dialog())
 
 
+## Opens Settings on one of its sections (SettingsApp.PAGES).
+func open_settings(page: String) -> void:
+	var win := open_app(&"settings")
+	if win and win.body.get_child_count() > 0 and win.body.get_child(0) is SettingsApp:
+		(win.body.get_child(0) as SettingsApp).open_page(page)
+
+
+## Sign in to Oazy with Google: pick one of your Chrome accounts, or another.
+func show_account_picker() -> void:
+	start.close()
+	if Account.busy:
+		Account.sign_in()
+		return
+	overlay_layer.add_child(AccountPicker.new())
+
+
+func confirm_sign_out() -> void:
+	var d := ConfirmDialog.new()
+	d.title = "Sign out of Oazy?"
+	d.message = "Your profile goes back to your Windows name, and Oazy Browser, Flow and your other web apps are signed out of Google too. Chrome isn't touched."
+	d.confirm_text = "Sign out"
+	d.on_confirm = func() -> void: Account.sign_out()
+	overlay_layer.add_child(d)
+
+
 func set_autostart(on: bool) -> void:
 	if not (App.is_windows() and App.is_packaged()):
 		App.toast("Start with Windows works in the installed app")

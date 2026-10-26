@@ -7,6 +7,7 @@ const SIDEBAR := 248.0
 const SIDEBAR_COMPACT := 76.0
 const COLUMN := 760.0
 const PAGES := [
+	["account", "Account", "user", "Your Google account: your Oazy profile, and one sign-in for Oazy Browser, Flow and your other web apps."],
 	["personalise", "Personalise", "palette", "Colours, wallpaper, pointer, icons and sounds."],
 	["desktop", "Desktop & taskbar", "desktop", "How Oazy sits on your PC, its shortcuts and the desktop's cards."],
 	["apps", "Apps & library", "grid", "Your games and apps, where they come from and how they launch."],
@@ -18,7 +19,7 @@ const PAGES := [
 ]
 
 var main: Node
-var _page := "personalise"
+var _page := "account"
 var _query := ""
 var _compact := false
 var _nav := {}
@@ -55,6 +56,12 @@ var _net_sub: Label
 var _net_radio: ToggleSwitch
 var _net_choose: FxButton
 var _fade: Tween
+var _acct_avatar: Avatar
+var _acct_name: Label
+var _acct_mail: Label
+var _acct_in: FxButton
+var _acct_switch: FxButton
+var _acct_out: FxButton
 
 
 func _ready() -> void:
@@ -89,6 +96,7 @@ func _ready() -> void:
 	_pages_box.custom_minimum_size.x = COLUMN
 	pad.add_child(_pages_box)
 
+	_build_account()
 	_build_personalise()
 	_build_desktop()
 	_build_apps()
@@ -106,6 +114,9 @@ func _ready() -> void:
 	Host.status_changed.connect(func(_ok: bool) -> void: _sync_hotkey())
 	Cursors.applied.connect(func(_id: String, _wide: bool) -> void: _sync_pointer())
 	Network.changed.connect(_sync_network)
+	Account.changed.connect(_sync_account)
+	Account.busy_changed.connect(func(_b: bool) -> void: _sync_account())
+	_sync_account()
 	_sync_update()
 	_sync_hotkey()
 	_sync_pointer()
@@ -506,6 +517,59 @@ static func _select(store: Dictionary, value: String) -> void:
 		(store[key] as FxButton).selected = key == value
 
 
+# --- Account ------------------------------------------------------------------------------
+
+func _build_account() -> void:
+	_page_node("account")
+	var you := _group("account", "")
+	var row := _row(you, "", "", "google profile photo picture sign in log in login out email chrome name")
+	row.custom_minimum_size.y = 104
+	var text := row.get_child(0) as VBoxContainer
+	_acct_name = text.get_child(0) as Label
+	_acct_name.add_theme_font_override("font", Kit.font(700, true))
+	_acct_name.add_theme_font_size_override("font_size", 20)
+	_acct_name.clip_text = true
+	_acct_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_acct_mail = Kit.label("", 14, 500, App.TEXT_DIM)
+	_acct_mail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.add_child(_acct_mail)
+	_acct_avatar = Avatar.new(64)
+	_acct_avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_acct_avatar)
+	row.move_child(_acct_avatar, 0)
+	var buttons := Kit.hbox(8)
+	buttons.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(buttons)
+	_acct_in = FxButton.make("Sign in with Google", "user", FxButton.Style.PRIMARY, 42)
+	_acct_in.pressed.connect(func() -> void: main.show_account_picker())
+	buttons.add_child(_acct_in)
+	_acct_switch = FxButton.make("Switch", "refresh", FxButton.Style.GHOST, 40)
+	_acct_switch.pressed.connect(func() -> void: main.show_account_picker())
+	buttons.add_child(_acct_switch)
+	_acct_out = FxButton.make("Sign out", "", FxButton.Style.GHOST, 40)
+	_acct_out.pressed.connect(func() -> void: main.confirm_sign_out())
+	buttons.add_child(_acct_out)
+
+	var web := _group("account", "Across Oazy")
+	_row(web, "One sign-in for the web", "Oazy Browser, Flow and your other web apps share one sign-in: sign in to Google once and they all are. Sites that sign you in with a popup open it in a small Oazy window.", "browser flow apps cookies session shared popup")
+	_button_row(web, "Google Account", "Your Google settings, privacy and security, in Oazy Browser.", "Open", "external", func() -> void: Account.manage(), "manage privacy security password")
+	_row(web, "Chrome", "Picking an account from Chrome fills in your email. Chrome keeps its own sign-in (it's locked to Chrome), so Google asks for your password or passkey once here.", "chrome profile accounts import")
+
+
+func _sync_account() -> void:
+	if _acct_name == null:
+		return
+	var on := Account.signed_in()
+	var name := Account.display_name()
+	_acct_name.text = Account.full_name if Account.full_name != "" else (name if name != "" else "Not signed in")
+	_acct_mail.text = Account.email if on else ("Waiting for you to finish signing in on Google's page…" if Account.busy else "Sign in with Google to bring your name and photo to Oazy, and sign in to its browser and apps in one go.")
+	_acct_avatar.set_person(name if name != "" else "?", Account.photo)
+	_acct_in.visible = not on
+	_acct_in.text = "Finish signing in" if Account.busy else "Sign in with Google"
+	_acct_switch.visible = on
+	_acct_out.visible = on
+
+
 # --- Personalise -------------------------------------------------------------------------
 
 func _build_personalise() -> void:
@@ -730,7 +794,7 @@ func _slider_row(list: VBoxContainer, title: String, desc: String, key: String, 
 
 
 func _name_row(list: VBoxContainer) -> void:
-	var row := _row(list, "Your name", "Used for the greeting on your desktop.", "user greeting hello")
+	var row := _row(list, "Your name", "Used for the greeting on your desktop. Empty uses your Google first name, or your Windows name.", "user greeting hello")
 	var edit := LineEdit.new()
 	edit.placeholder_text = App.user_name() if App.user_name() != "" else "Your name"
 	edit.text = str(Settings.get_value("user_name"))
