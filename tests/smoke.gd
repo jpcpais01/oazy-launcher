@@ -167,6 +167,9 @@ func _logic_tests() -> void:
 	check(Catalog.ref_for_window({"exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "aumid": "Chrome"}) == "app:Chrome", "catalog: window matched by app id")
 	check(Catalog.ref_for_window({"exe": "C:\\Apps\\app.exe"}).begins_with("lib:"), "catalog: window matched to a library entry")
 	check(Catalog.ref_for_window({"exe": "C:\\Tools\\mystery.exe", "hwnd": 5}) == "win:C:/Tools/mystery.exe", "catalog: unknown windows group by exe")
+	check(Catalog.ref_for_window({"exe": "C:\\Windows\\explorer.exe", "name": "Windows Explorer"}) == "app:Microsoft.Windows.Explorer", "catalog: folder windows group with File Explorer")
+	check(Catalog.ref_for_window({"exe": "C:\\Program Files\\WindowsApps\\5319275A.WhatsAppDesktop_2.2540.6.0_x64__cv1g1gvanyjgm\\WhatsApp.Root.exe", "name": "WhatsApp.Root"}) == "app:5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", "catalog: Store app windows group with their app")
+	check(Catalog.ref_for_window({"exe": "D:\\Apps\\WhatsApp.Root.exe"}) == "app:5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", "catalog: window matched by its file name's first word")
 	check(Catalog.window_group_name({"title": "Inbox - Mail"}) == "Mail", "catalog: group name from title")
 	check(Catalog.search("chro").size() > 0 and Catalog.search("chro")[0]["name"] == "Google Chrome", "catalog: search finds apps")
 	check(Catalog.search("smoke").size() > 0, "catalog: search finds library entries")
@@ -289,6 +292,7 @@ func _mock_apps() -> Array:
 		{"name": "Steam", "id": "C:/Program Files (x86)/Steam/steam.exe"},
 		{"name": "Visual Studio Code", "id": "Microsoft.VisualStudioCode"},
 		{"name": "Terminal", "id": "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"},
+		{"name": "WhatsApp", "id": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"},
 	]
 
 
@@ -493,6 +497,8 @@ func _ui_tests() -> void:
 	main.start._menu.hide()
 	main.start.close()
 	check(main.desktop._hero_id != "" and main.desktop._hero_glass.visible, "desktop: the game card shows a game")
+	Catalog.favorites_changed.emit()
+	check(main.desktop._favs.get_child_count() == mini(Catalog.favorites().size(), Desktop.FAV_MAX) or (Catalog.favorites().is_empty() and main.desktop._favs.get_child_count() == 1), "desktop: favourites show")
 	for m in get_tree().get_nodes_in_group("modal"):
 		m.close()
 	await _wait(0.60)

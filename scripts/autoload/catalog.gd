@@ -338,9 +338,42 @@ func ref_for_window(w: Dictionary) -> String:
 		var byname := find_app_by_name(name)
 		if not byname.is_empty():
 			return "app:" + str(byname["id"])
+	var packaged := _app_for_package(exe)
+	if packaged != "":
+		return packaged
+	if file == "explorer.exe":
+		# Folder windows rarely carry an app id; they're File Explorer's.
+		var fe := find_app("Microsoft.Windows.Explorer")
+		if fe.is_empty():
+			fe = find_app_by_name("File Explorer")
+		if not fe.is_empty():
+			return "app:" + str(fe["id"])
+	# "WhatsApp.Root.exe" is WhatsApp: the first word of the file name.
+	var stem := file.get_basename().get_slice(".", 0)
+	if stem.length() >= 4:
+		var bystem := find_app_by_name(stem)
+		if not bystem.is_empty():
+			return "app:" + str(bystem["id"])
 	if aumid != "":
 		return "win:" + "shell:AppsFolder\\" + aumid
 	return "win:" + (exe if exe != "" else "hwnd:%d" % int(w.get("hwnd", 0)))
+
+
+## A Store app's window: its exe lives in WindowsApps/<Name>_<ver>_<arch>__<publisher>/,
+## and its Start id is <Name>_<publisher>!<App>. "" when it isn't one.
+func _app_for_package(exe: String) -> String:
+	var lower := exe.to_lower()
+	var at := lower.find("/windowsapps/")
+	if at < 0:
+		return ""
+	var folder := lower.substr(at + 13).get_slice("/", 0)
+	if not folder.contains("__"):
+		return ""
+	var family := folder.get_slice("_", 0) + "_" + folder.get_slice("__", 1)
+	for a in apps:
+		if str(a["id"]).to_lower().begins_with(family + "!"):
+			return "app:" + str(a["id"])
+	return ""
 
 
 ## A friendly name for a window group that matched nothing.

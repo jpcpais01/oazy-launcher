@@ -54,6 +54,8 @@ func _ready() -> void:
 		if str(e["name"]) == "Claude Code":
 			Catalog.set_favorite("lib:" + str(e["id"]), true)
 	Catalog.set_favorite("app:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", true)
+	for r in ["app:5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", "app:com.squirrel.Discord.Discord", "app:Microsoft.Windows.Explorer", "oazy:browser"]:
+		Catalog.set_favorite(r, true)
 	for r in ["app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App", "app:com.squirrel.figma.Figma", "app:Microsoft.VisualStudioCode", "app:com.squirrel.Discord.Discord"]:
 		Catalog.note_recent(r)
 	await _wait(0.2)

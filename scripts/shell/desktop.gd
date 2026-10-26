@@ -1,14 +1,17 @@
 class_name Desktop
 extends Control
 ## What's on the desktop behind your windows: the clock, the date and the
-## weather, a "Continue playing" card with the last game's artwork, recently
-## played covers, and a small system glance.
+## weather with a slim system glance under them, your favourites, a "Continue
+## playing" card with the last game's artwork and recently played covers.
 
 const LEFT := 64.0
 const TOP := 52.0
 const HERO_W := 600.0
 const RECENT_MAX := 5
 const RECENT_GAP := 14.0
+const FAV_COLS := 6
+const FAV_MAX := 12
+const FAV_TILE := Vector2(100, 104)
 const CLOCK := preload("res://shaders/clock.gdshader")
 const SHADE := preload("res://shaders/hero_shade.gdshader")
 
@@ -28,6 +31,8 @@ var _empty_box: VBoxContainer
 var _recent_title: Label
 var _recent: HBoxContainer
 var _system: GlassPanel
+var _favs_title: Label
+var _favs: GridContainer
 var _date_row: HBoxContainer
 var _weather_icon: TextureRect
 var _weather_text: Label
@@ -47,6 +52,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_clock()
 	_build_hero()
+	_build_favorites()
 	_build_system()
 
 	var tick := Timer.new()
@@ -61,6 +67,9 @@ func _ready() -> void:
 	add_child(_stats_timer)
 
 	Library.changed.connect(refresh)
+	Library.changed.connect(_fill_favorites)
+	Catalog.favorites_changed.connect(_fill_favorites)
+	Catalog.apps_changed.connect(_fill_favorites)
 	Library.entry_changed.connect(func(id: String) -> void:
 		if id == _hero_id:
 			_show_hero(id)
@@ -82,6 +91,7 @@ func _ready() -> void:
 	resized.connect(_layout)
 	_tick()
 	refresh()
+	_fill_favorites()
 	_sync_system()
 	_layout()
 
@@ -407,56 +417,156 @@ func _recent_tile(id: String) -> Control:
 	return holder
 
 
+# --- Favourites -----------------------------------------------------------------------------
+# Straight on the wallpaper, like the recent covers opposite: no box, just
+# your apps, a little lift and a glow when you point at one.
+
+func _build_favorites() -> void:
+	_favs_title = Kit.label("Favourites", 15, 700, Color(1, 1, 1, 0.82))
+	_shadow(_favs_title, 3)
+	add_child(_favs_title)
+	_favs = GridContainer.new()
+	_favs.columns = FAV_COLS
+	_favs.add_theme_constant_override("h_separation", 4)
+	_favs.add_theme_constant_override("v_separation", 4)
+	add_child(_favs)
+
+
+func _fill_favorites() -> void:
+	if _favs == null:
+		return
+	for c in _favs.get_children():
+		_favs.remove_child(c)
+		c.queue_free()
+	var refs := Catalog.favorites().slice(0, FAV_MAX)
+	for ref in refs:
+		_favs.add_child(_fav_tile(Catalog.item(ref)))
+	if refs.is_empty():
+		# Nothing yet: one quiet tile that says how, and opens Start.
+		_favs.add_child(_fav_tile({"ref": "", "name": "Add favourites"}))
+	_layout()
+
+
+func _fav_tile(it: Dictionary) -> Control:
+	var ref := str(it.get("ref", ""))
+	var b := Button.new()
+	b.custom_minimum_size = FAV_TILE
+	b.pivot_offset = FAV_TILE / 2.0
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.tooltip_text = str(it["name"]) if ref != "" else "Right-click any app or game and choose Add to favourites"
+	b.add_theme_stylebox_override("normal", Kit.empty())
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.07), 18, Color(1, 1, 1, 0.1), 1))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.12), 18, Color(1, 1, 1, 0.12), 1))
+	b.add_theme_stylebox_override("hover_pressed", Kit.box(Color(1, 1, 1, 0.12), 18, Color(1, 1, 1, 0.12), 1))
+	var c := Kit.vbox(9)
+	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	c.alignment = BoxContainer.ALIGNMENT_CENTER
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(c)
+	var ic: Control
+	if ref == "":
+		ic = Panel.new()
+		ic.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.05), 16, Color(1, 1, 1, 0.22), 1))
+		var plus := Kit.icon_rect("plus", 24, Color(1, 1, 1, 0.7))
+		plus.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		plus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ic.add_child(plus)
+	else:
+		ic = AppIcon.new()
+		(ic as AppIcon).set_item(it)
+	ic.custom_minimum_size = Vector2(56, 56)
+	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.add_child(ic)
+	var l := Kit.label(str(it["name"]), 13, 600, Color(1, 1, 1, 0.9 if ref != "" else 0.6))
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.custom_minimum_size.x = FAV_TILE.x - 10.0
+	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shadow(l, 3)
+	c.add_child(l)
+	b.mouse_entered.connect(func() -> void:
+		var t := b.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		t.tween_property(b, "scale", Vector2.ONE * 1.05, 0.25)
+		Sfx.play(&"move", 1.2)
+	)
+	b.mouse_exited.connect(func() -> void:
+		var t := b.create_tween().set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		t.tween_property(b, "scale", Vector2.ONE, 0.3)
+	)
+	b.pressed.connect(func() -> void:
+		Sfx.play(&"select")
+		if ref == "":
+			main.start.open()
+		else:
+			Catalog.launch(ref)
+	)
+	if ref != "":
+		b.gui_input.connect(func(e: InputEvent) -> void:
+			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_RIGHT:
+				main.show_ref_menu(ref, b.get_global_mouse_position())
+		)
+	return b
+
+
 # --- System glance -------------------------------------------------------------------------
+# One slim glass strip under the date: processor, graphics and memory, each a
+# number over a hairline bar. Clocks and temperatures are in the tooltips.
 
 func _build_system() -> void:
-	_system = GlassPanel.new(false, 22.0, GlassPanel.TINT_WIDGET)
-	_system.set_shadow_strength(0.3, 30, 12.0)
+	_system = GlassPanel.new(false, 20.0, GlassPanel.TINT_WIDGET)
+	_system.set_shadow_strength(0.25, 24, 8.0)
+	_system.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(_system)
-	var col := Kit.vbox(12)
-	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	col.offset_left = 22
-	col.offset_right = -22
-	col.offset_top = 18
-	col.offset_bottom = -18
-	_system.add_child(col)
-	_system.set_meta("col", col)
-	_cpu = _meter(col, "cpu", "Processor")
-	_gpu = _meter(col, "monitor", "Graphics")
+	var row := Kit.hbox(18)
+	row.position = Vector2(18, 0)
+	_system.add_child(row)
+	_system.set_meta("col", row)
+	_cpu = _meter(row, "cpu", "CPU", "Processor")
+	_gpu = _meter(row, "monitor", "GPU", "Graphics")
 	_gpu[4].visible = false
-	_mem = _meter(col, "memory", "Memory")
+	_mem = _meter(row, "memory", "RAM", "Memory")
 
 
-func _meter(parent: Control, icon_name: String, title: String) -> Array:
-	var row := Kit.hbox(12)
+func _meter(parent: Control, icon_name: String, title: String, full: String) -> Array:
+	var row := Kit.hbox(9)
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.tooltip_text = full
+	row.set_meta("full", full)
 	parent.add_child(row)
-	var ic := Kit.icon_rect(icon_name, 18, Color(1, 1, 1, 0.8))
+	var ic := Kit.icon_rect(icon_name, 16, Color(1, 1, 1, 0.75))
 	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(ic)
-	var col := Kit.vbox(6)
-	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var col := Kit.vbox(5)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(col)
 	var head := Kit.hbox(6)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(head)
-	var name := Kit.label(title, 13, 600, App.TEXT_DIM)
+	var name := Kit.label(title, 12, 600, Color(1, 1, 1, 0.55))
 	head.add_child(name)
-	# Clock speed, temperature or size, when the PC tells us.
-	var detail := Kit.label("", 12, 500, Color(1, 1, 1, 0.42))
-	head.add_child(detail)
 	head.add_child(Kit.spacer(0, 0, true))
 	var pct := Kit.label("–", 13, 700, App.TEXT)
 	head.add_child(pct)
+	# Clock speed, temperature or size, when the PC tells us (in the tooltip).
+	var detail := Kit.label("", 12, 500, Color(1, 1, 1, 0.42))
+	detail.visible = false
+	head.add_child(detail)
 	var track := Panel.new()
-	track.custom_minimum_size.y = 6
-	track.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.1), 3))
+	track.custom_minimum_size = Vector2(64, 4)
+	track.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.12), 2))
 	col.add_child(track)
 	var fill := Panel.new()
-	fill.add_theme_stylebox_override("panel", Kit.box(App.accent, 3))
-	fill.size = Vector2(0, 6)
+	fill.add_theme_stylebox_override("panel", Kit.box(App.accent, 2))
+	fill.size = Vector2(0, 4)
 	track.add_child(fill)
 	# A meter that was hidden has no width yet: fill it once it gets one.
 	track.resized.connect(func() -> void:
-		fill.size.x = maxf(6.0, track.size.x * clampf(float(track.get_meta("v", 0.0)), 0.0, 1.0))
+		fill.size.x = maxf(4.0, track.size.x * clampf(float(track.get_meta("v", 0.0)), 0.0, 1.0))
 	)
 	return [pct, track, fill, detail, row]
 
@@ -475,11 +585,11 @@ func _set_meter(m: Array, v: float) -> void:
 	track.set_meta("v", v)
 	pct.text = "%d%%" % int(round(v * 100.0))
 	var col := App.accent if v < 0.85 else App.WARNING
-	fill.add_theme_stylebox_override("panel", Kit.box(col, 3))
+	fill.add_theme_stylebox_override("panel", Kit.box(col, 2))
 	if track.size.x <= 0.0:
 		return
 	var t := create_tween().set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	t.tween_property(fill, "size:x", maxf(6.0, track.size.x * clampf(v, 0.0, 1.0)), 0.6)
+	t.tween_property(fill, "size:x", maxf(4.0, track.size.x * clampf(v, 0.0, 1.0)), 0.6)
 
 
 ## Clocks and temperatures from the companion's sensor thread. Anything it
@@ -506,6 +616,7 @@ func set_sensors(d: Dictionary) -> void:
 	var mem := float(d.get("mem", -1.0))
 	if total > 0.0 and mem >= 0.0:
 		(_mem[3] as Label).text = "%.1f of %d GB" % [mem * total, roundi(total)]
+		_tip(_mem)
 
 
 func _set_detail(m: Array, mhz: float, temp: float, hot: float, prefix: String = "") -> void:
@@ -519,6 +630,16 @@ func _set_detail(m: Array, mhz: float, temp: float, hot: float, prefix: String =
 	var l: Label = m[3]
 	l.text = " · ".join(parts)
 	l.add_theme_color_override("font_color", App.WARNING if temp >= hot else Color(1, 1, 1, 0.42))
+	# A hot part shows its temperature in amber on the strip itself.
+	var name: Label = (m[0] as Label).get_parent().get_child(0)
+	name.add_theme_color_override("font_color", App.WARNING if temp >= hot else Color(1, 1, 1, 0.55))
+	_tip(m)
+
+
+func _tip(m: Array) -> void:
+	var row: Control = m[4]
+	var d := (m[3] as Label).text
+	row.tooltip_text = str(row.get_meta("full")) + ("  ·  " + d if d != "" else "")
 
 
 ## "NVIDIA GeForce RTX 4070 SUPER" -> "RTX 4070 SUPER", short enough for a caption.
@@ -584,13 +705,22 @@ func _layout() -> void:
 	_recent_title.position = Vector2(hero_x + 4.0, TOP + 8.0 + hero_h + 24.0)
 	_recent.position = Vector2(hero_x, _recent_title.position.y + 32.0)
 	_recent.size = Vector2(n * cw + (n - 1) * RECENT_GAP, card.y)
+	# The system strip sits under the date; favourites line up with the
+	# recent covers across the way.
 	var inner: Control = _system.get_meta("col")
-	_system.size = Vector2(360, inner.get_combined_minimum_size().y + 36.0)
-	_system.position = Vector2(LEFT, size.y - Taskbar.RESERVE - 30.0 - _system.size.y)
+	var ins := inner.get_combined_minimum_size()
+	_system.size = Vector2(ins.x + 36.0, 50.0)
+	inner.size = Vector2(ins.x, 50.0)
+	_system.position = Vector2(LEFT, _date_row.position.y + 50.0)
+	var room := hero_x - LEFT - 48.0
+	_favs.columns = clampi(floori((room + 4.0) / (FAV_TILE.x + 4.0)), 2, FAV_COLS)
+	_favs_title.position = Vector2(LEFT + 4.0, _recent_title.position.y)
+	_favs.position = Vector2(LEFT - 10.0, _recent.position.y - 6.0)
+	_favs.size = _favs.get_combined_minimum_size()
 
 
 func intro() -> void:
-	var items: Array[Control] = [_greeting, _time, _date_row, _hero_glass, _recent_title, _recent, _system]
+	var items: Array[Control] = [_greeting, _time, _date_row, _system, _hero_glass, _favs_title, _favs, _recent_title, _recent]
 	for i in items.size():
 		var c := items[i]
 		var y := c.position.y
