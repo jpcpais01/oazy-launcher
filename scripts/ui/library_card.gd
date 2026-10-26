@@ -43,6 +43,10 @@ func _ready() -> void:
 	_play_btn = FxButton.icon_only("play", "Play", 20, 46)
 	_play_btn.variant = FxButton.Style.PRIMARY
 	_play_btn._apply_style()
+	# PRIMARY pads for text labels; an icon-only round button needs none, or it
+	# grows into a wide pill that spills past the card's edge.
+	for st in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
+		_play_btn.get_theme_stylebox(st).set_content_margin_all(0)
 	_play_btn.size = Vector2(46, 46)
 	_play_btn.modulate.a = 0.0
 	_play_btn.focus_mode = Control.FOCUS_NONE
@@ -89,7 +93,8 @@ func _layout() -> void:
 	custom_minimum_size = Vector2(card_w, h + 58)
 	_holder.size = Vector2(card_w, h)
 	_holder.pivot_offset = _holder.size / 2.0
-	_play_btn.position = Vector2(card_w - 58, h - 58)
+	_play_btn.size = _play_btn.get_combined_minimum_size()
+	_play_btn.position = Vector2(card_w, h) - _play_btn.size - Vector2(12, 12)
 	_name.position = Vector2(2, h + 12)
 	_name.size = Vector2(card_w - 4, 20)
 	_meta.position = Vector2(2, h + 34)
