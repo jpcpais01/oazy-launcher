@@ -55,6 +55,8 @@ namespace OazyBrowser
 
 		[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
 		[DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr h, ref MARGINS m);
+		[DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
+		[DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr h, int index, IntPtr value);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
 		[DllImport("user32.dll")] public static extern bool ReleaseCapture();
@@ -1125,7 +1127,21 @@ namespace OazyBrowser
 		{
 			base.OnShown(e);
 			if (startMaximized) WindowState = FormWindowState.Maximized;
+			RefreshFrame();
+			BeginInvoke((Action)RefreshFrame);
 			Init();
+		}
+
+		// Until the frame is recalculated once the window is on screen, DWM keeps
+		// painting a dark caption strip across the top of the glass (behind the
+		// tabs), even though the window has no title bar.
+		void RefreshFrame()
+		{
+			int color = unchecked((int)0xFFFFFFFF); // DWMWA_COLOR_DEFAULT
+			Native.DwmSetWindowAttribute(Handle, 35, ref color, 4);
+			long style = Native.GetWindowLongPtr(Handle, -16).ToInt64() & ~0x00C00000L;
+			Native.SetWindowLongPtr(Handle, -16, new IntPtr(style));
+			Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
 		}
 
 		bool Maximized { get { return IsHandleCreated && Native.IsZoomed(Handle); } }
@@ -2209,6 +2225,8 @@ namespace OazyBrowser
 
 		public void TestOpenPanel(string name) { Post(Json.Obj("t", "openPanel", "name", name)); }
 		public void TestNavigate(string url) { Navigate(Active, url); }
+		public void TestShowChrome(bool on) { try { chrome.IsVisible = on; } catch { } }
+		public void TestShowPage(bool on) { try { Active.C.IsVisible = on; } catch { } }
 	}
 
 	// --- Self-test: proves the browser works on a real Windows box (CI) ------------------
@@ -2219,7 +2237,7 @@ namespace OazyBrowser
 		readonly List<string> log = new List<string>();
 		public int ExitCode = 1;
 		BrowserWindow win;
-		bool chromeOk, ntpOk, pageOk, done;
+		bool chromeOk, ntpOk, pageOk, glassOk, done;
 		int step, retries;
 		const string TestUrl = "https://en.wikipedia.org/wiki/Oasis";
 		System.Windows.Forms.Timer timeout;
@@ -2272,6 +2290,16 @@ namespace OazyBrowser
 				step = 1;
 				await Task.Delay(1500);
 				Shot("browser-newtab.png");
+				// The bare window behind the chrome and the page, to check the glass.
+				win.TestShowChrome(false);
+				win.TestShowPage(false);
+				await Task.Delay(600);
+				Shot("browser-backdrop.png");
+				glassOk = EvenGlass("browser-backdrop.png");
+				win.TestShowChrome(true);
+				await Task.Delay(400);
+				Shot("browser-chrome-only.png");
+				win.TestShowPage(true);
 				step = 2;
 				win.TestNavigate(TestUrl);
 			}
@@ -2300,6 +2328,24 @@ namespace OazyBrowser
 			try { File.WriteAllLines(Path.Combine(dir, "browser-selftest.log"), log.ToArray()); } catch { }
 		}
 
+		// The bare window should be one even sheet of glass from the top edge down,
+		// with no caption strip behind the tabs.
+		bool EvenGlass(string name)
+		{
+			try
+			{
+				using (Bitmap bmp = new Bitmap(Path.Combine(dir, name)))
+				{
+					int x = bmp.Width * 6 / 10;
+					Color top = bmp.GetPixel(x, 12), below = bmp.GetPixel(x, Math.Min(80, bmp.Height - 1));
+					int diff = Math.Abs(top.R - below.R) + Math.Abs(top.G - below.G) + Math.Abs(top.B - below.B);
+					Log("glass top vs below: " + diff);
+					return diff < 30;
+				}
+			}
+			catch (Exception e) { Log("glass check failed: " + e.Message); return false; }
+		}
+
 		void Shot(string name)
 		{
 			try
@@ -2309,6 +2355,14 @@ namespace OazyBrowser
 				{
 					using (Graphics g = Graphics.FromImage(bmp)) g.CopyFromScreen(b.Location, Point.Empty, b.Size);
 					bmp.Save(Path.Combine(dir, name), System.Drawing.Imaging.ImageFormat.Png);
+					// A column of pixels down the empty part of the tab strip, for the log.
+					List<string> col = new List<string>();
+					for (int y = 0; y < Math.Min(80, b.Height); y += 4)
+					{
+						Color c = bmp.GetPixel(b.Width * 6 / 10, y);
+						col.Add(y + ":" + c.R + "," + c.G + "," + c.B);
+					}
+					Log(name + " column " + string.Join(" ", col.ToArray()));
 				}
 				Log("saved " + name);
 			}
@@ -2319,8 +2373,8 @@ namespace OazyBrowser
 		{
 			if (done) return;
 			done = true;
-			ExitCode = chromeOk && ntpOk && pageOk ? 0 : 1;
-			Log("chrome=" + chromeOk + " ntp=" + ntpOk + " page=" + pageOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
+			ExitCode = chromeOk && ntpOk && pageOk && glassOk ? 0 : 1;
+			Log("chrome=" + chromeOk + " ntp=" + ntpOk + " page=" + pageOk + " glass=" + glassOk + " -> " + (ExitCode == 0 ? "PASS" : "FAIL"));
 			try { File.WriteAllLines(Path.Combine(dir, "browser-selftest.log"), log.ToArray()); } catch { }
 			App.Quit();
 		}
