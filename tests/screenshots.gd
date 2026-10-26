@@ -99,6 +99,11 @@ func _ready() -> void:
 		]})
 	await _wait(2.5)
 	await shot("01-desktop")
+	for size_id in ["small", "large"]:
+		Settings.set_value("fav_icon_size", size_id)
+		await _wait(0.6)
+		await shot("01f-desktop-favs-" + size_id)
+	Settings.set_value("fav_icon_size", "medium")
 	# Each wallpaper: on the desktop, then on its own.
 	for id in Wallpaper.STYLES:
 		Settings.set_value("wallpaper", id)
