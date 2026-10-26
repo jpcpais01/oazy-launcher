@@ -11,6 +11,7 @@ const DEFAULTS := {
 	"shell_mode": true,
 	"hide_windows_taskbar": true,
 	"theme_app_windows": true,
+	"alt_tab": true,
 	"favorites": [],
 	"auto_check_updates": true,
 	"ui_sounds": true,

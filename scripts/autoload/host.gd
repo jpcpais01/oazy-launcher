@@ -13,6 +13,9 @@ signal hotkey(was_foreground: bool)
 ## Ctrl+Alt+D, from any app.
 signal desktop_hotkey
 signal status_changed(available: bool)
+## Alt+Tab while Oazy's switcher is on: "open", "open_back", "next", "prev",
+## "left", "right", "up", "down", "close", "done" (Alt let go) or "cancel".
+signal switch_key(key: String)
 ## Another app went fullscreen (a game, a video) or came back out of it.
 signal fullscreen_changed(on: bool)
 
@@ -176,6 +179,13 @@ func _on_line(line: String) -> void:
 				hotkey.emit(bool(d.get("was_fg", false)))
 			"desktop_key":
 				desktop_hotkey.emit()
+			"switch":
+				var key := str(d.get("key", ""))
+				if key.begins_with("open"):
+					# Tells the companion Oazy is alive; if this never arrives the
+					# next Alt+Tab goes to Windows' own switcher.
+					request(["switcher_ack"])
+				switch_key.emit(key)
 			"ready":
 				hotkey_ok = bool(d.get("hotkey", false))
 		return
@@ -328,6 +338,11 @@ func thumb(hwnd: int, rect: Rect2i, done: Callable = Callable(), dest: int = 0) 
 
 func thumb_clear() -> void:
 	request(["thumb_clear"])
+
+
+## Alt+Tab opens Oazy's switcher instead of Windows' own (see switch_key).
+func set_switcher(on: bool) -> void:
+	request(["switcher", 1 if on else 0])
 
 
 func lock_pc() -> void:

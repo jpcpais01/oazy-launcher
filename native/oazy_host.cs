@@ -35,6 +35,7 @@ namespace Oazy
 		public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 		public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time);
 		public delegate IntPtr WndProc(IntPtr h, uint msg, IntPtr w, IntPtr l);
+		public delegate IntPtr KeyboardProc(int code, IntPtr w, IntPtr l);
 
 		[StructLayout(LayoutKind.Sequential)]
 		public struct RECT { public int Left, Top, Right, Bottom; }
@@ -95,6 +96,16 @@ namespace Oazy
 			public int biXPelsPerMeter, biYPelsPerMeter;
 			public uint biClrUsed, biClrImportant;
 			[MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public uint[] colors;
+		}
+
+		[StructLayout(LayoutKind.Sequential)]
+		public struct KBDLLHOOKSTRUCT
+		{
+			public uint vkCode;
+			public uint scanCode;
+			public uint flags;
+			public uint time;
+			public UIntPtr dwExtraInfo;
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
@@ -244,6 +255,9 @@ namespace Oazy
 		[DllImport("user32.dll")] public static extern IntPtr DispatchMessage(ref MSG msg);
 		[DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint pid, uint thread, uint flags);
 		[DllImport("user32.dll")] public static extern bool LockWorkStation();
+		[DllImport("user32.dll")] public static extern IntPtr SetWindowsHookEx(int id, KeyboardProc proc, IntPtr module, uint thread);
+		[DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr w, IntPtr l);
+		[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
 		[DllImport("user32.dll", EntryPoint = "SetWindowLongW")] public static extern int SetWindowLong(IntPtr h, int index, int value);
 		[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 		[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -352,7 +366,7 @@ namespace Oazy
 		static int Ticking;
 		static Native.WinEventProc HookProc;
 		static Timer Ticker;
-		static readonly Dictionary<long, IntPtr> Thumbs = new Dictionary<long, IntPtr>();
+		static readonly Dictionary<string, IntPtr> Thumbs = new Dictionary<string, IntPtr>();
 		static readonly Dictionary<string, string> Descriptions = new Dictionary<string, string>();
 		static readonly Dictionary<long, string> Aumids = new Dictionary<long, string>();
 		static ulong LastIdle, LastBusy;
@@ -383,6 +397,19 @@ namespace Oazy
 		static int ThemeBorder, ThemeCaption, ThemeText;
 		static readonly Dictionary<long, int> Themed = new Dictionary<long, int>();
 		static string RestorePath = "";
+		// Alt+Tab: Oazy asked for it, it is open right now, Oazy answered the last one.
+		static volatile bool SwitchWanted;
+		static volatile bool Switching;
+		static volatile bool SwitchAcked = true;
+		static IntPtr KeyHook = IntPtr.Zero;
+		static Native.KeyboardProc KeyProc;
+		const int WH_KEYBOARD_LL = 13;
+		const uint WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104;
+		const uint LLKHF_ALTDOWN = 0x20, LLKHF_INJECTED = 0x10;
+		const uint VK_TAB = 0x09, VK_RETURN = 0x0D, VK_SHIFT = 0x10, VK_MENU = 0x12, VK_ESCAPE = 0x1B;
+		const uint VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_DELETE = 0x2E;
+		const uint VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1, VK_LMENU = 0xA4, VK_RMENU = 0xA5;
+		const byte VK_MASK = 0xE8;
 
 		[STAThread, HandleProcessCorruptedStateExceptions, SecurityCritical]
 		static int Main(string[] args)
@@ -530,6 +557,14 @@ namespace Oazy
 					return Volume(null, Arg(p, 2) == "1" ? 1 : 0);
 				case "media":
 					return "\"ok\":" + Json.Bool(MediaKey(Arg(p, 2)));
+				case "switcher":
+					SwitchWanted = Arg(p, 2) == "1";
+					if (!SwitchWanted) Switching = false;
+					SwitchAcked = true;
+					return "\"ok\":true,\"hook\":" + Json.Bool(KeyHook != IntPtr.Zero);
+				case "switcher_ack":
+					SwitchAcked = true;
+					return "\"ok\":true";
 				case "ping":
 					return "\"ok\":true";
 			}
@@ -703,10 +738,13 @@ namespace Oazy
 			IntPtr thumb;
 			lock (Thumbs)
 			{
-				if (!Thumbs.TryGetValue(src.ToInt64(), out thumb))
+				// One per source and destination: the taskbar preview and the
+				// switcher are different windows.
+				string key = dest.ToInt64() + ":" + src.ToInt64();
+				if (!Thumbs.TryGetValue(key, out thumb))
 				{
 					if (Native.DwmRegisterThumbnail(dest, src, out thumb) != 0) return "\"ok\":false";
-					Thumbs[src.ToInt64()] = thumb;
+					Thumbs[key] = thumb;
 				}
 			}
 			Native.SIZE s;
@@ -1458,6 +1496,8 @@ namespace Oazy
 			Native.SetWinEventHook(0x800B, 0x800C, IntPtr.Zero, HookProc, 0, 0, 0);
 			bool hotkey = Native.RegisterHotKey(IntPtr.Zero, (int)HOTKEY_HOME, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4F);
 			Native.RegisterHotKey(IntPtr.Zero, (int)HOTKEY_DESKTOP, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x44);
+			KeyProc = new Native.KeyboardProc(OnKey);
+			KeyHook = Native.SetWindowsHookEx(WH_KEYBOARD_LL, KeyProc, Native.GetModuleHandle(null), 0);
 			try { CreateAppBarWindow(); }
 			catch (Exception) { AppBarWnd = IntPtr.Zero; }
 			Write("{\"ev\":\"ready\",\"hotkey\":" + Json.Bool(hotkey) + "}");
@@ -1500,6 +1540,92 @@ namespace Oazy
 			bool wasForeground = fg != IntPtr.Zero && (fg == Self || (ParentPid != 0 && pid == (uint)ParentPid));
 			if (!wasForeground && Self != IntPtr.Zero && !ShellOn) Focus(Self);
 			Write("{\"ev\":\"hotkey\",\"was_fg\":" + Json.Bool(wasForeground) + "}");
+		}
+
+		// --- Alt+Tab ------------------------------------------------------------------
+		// While Oazy is the desktop, Alt+Tab opens Oazy's own switcher: the hook
+		// swallows Tab (and the keys used to steer) and tells Oazy, which draws
+		// it and switches when Alt comes up. Windows' own one still shows over
+		// apps running as administrator (their keys never reach this hook), over
+		// fullscreen games, and whenever Oazy didn't answer the last time.
+
+		static IntPtr OnKey(int code, IntPtr w, IntPtr l)
+		{
+			if (code >= 0)
+			{
+				Native.KBDLLHOOKSTRUCT k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(l, typeof(Native.KBDLLHOOKSTRUCT));
+				uint msg = (uint)w.ToInt64();
+				try
+				{
+					if ((k.flags & LLKHF_INJECTED) == 0 && SwitchKey(k.vkCode, msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN, (k.flags & LLKHF_ALTDOWN) != 0))
+						return new IntPtr(1);
+				}
+				catch (Exception) { Switching = false; }
+			}
+			return Native.CallNextHookEx(KeyHook, code, w, l);
+		}
+
+		// True to swallow the key.
+		static bool SwitchKey(uint vk, bool down, bool alt)
+		{
+			bool isAlt = vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU;
+			if (!Switching)
+			{
+				if (!down || vk != VK_TAB || !alt || !SwitchWanted) return false;
+				if (!SwitchAcked) return false;
+				IntPtr fg = Native.GetForegroundWindow();
+				uint pid;
+				Native.GetWindowThreadProcessId(fg, out pid);
+				bool self = fg == Self || (ParentPid != 0 && pid == (uint)ParentPid);
+				if (!self && IsFullscreen(fg)) return false;
+				Switching = true;
+				SwitchAcked = false;
+				// A key between Alt going down and up, so the app underneath
+				// doesn't open its menu bar when Alt is let go.
+				Native.keybd_event(VK_MASK, 0, 0, UIntPtr.Zero);
+				Native.keybd_event(VK_MASK, 0, 2, UIntPtr.Zero);
+				SwitchEvent(Shift() ? "open_back" : "open");
+				return true;
+			}
+			if (isAlt)
+			{
+				if (!down) { Switching = false; SwitchEvent("done"); }
+				return false;
+			}
+			if (!alt)
+			{
+				// Alt came up without us seeing it (a secure desktop took the keys).
+				Switching = false;
+				SwitchEvent("cancel");
+				return false;
+			}
+			string key = null;
+			switch (vk)
+			{
+				case VK_TAB: key = Shift() ? "prev" : "next"; break;
+				case VK_LEFT: key = "left"; break;
+				case VK_RIGHT: key = "right"; break;
+				case VK_UP: key = "up"; break;
+				case VK_DOWN: key = "down"; break;
+				case VK_DELETE: key = "close"; break;
+				case VK_RETURN: key = "done"; break;
+				case VK_ESCAPE: key = "cancel"; break;
+				case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT: return false;
+			}
+			if (key == null) return false;
+			if (down)
+			{
+				if (key == "done" || key == "cancel") Switching = false;
+				SwitchEvent(key);
+			}
+			return true;
+		}
+
+		static bool Shift() { return (Native.GetAsyncKeyState((int)VK_SHIFT) & 0x8000) != 0; }
+
+		static void SwitchEvent(string key)
+		{
+			Write("{\"ev\":\"switch\",\"key\":" + Json.Str(key) + "}");
 		}
 
 		static void Tick(object state)

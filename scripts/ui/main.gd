@@ -16,6 +16,7 @@ var layer: WindowLayer
 var taskbar: Taskbar
 var start: StartPanel
 var preview: TaskPreview
+var switcher: Switcher
 var overlay_layer: Control
 var toasts: Toasts
 var loaded := false
@@ -86,6 +87,9 @@ func _ready() -> void:
 	_menus.add_child(overlay_layer)
 	toasts = Toasts.new()
 	Shell.layer("toasts", {"top": true}).add_child(toasts)
+	switcher = Switcher.new()
+	switcher.main = self
+	Shell.layer("switcher", {"top": true}).add_child(switcher)
 
 	# Menus share the dialog layer so they open above other apps too.
 	_menu = PopupMenu.new()
@@ -109,6 +113,7 @@ func _ready() -> void:
 	Updater.state_changed.connect(_on_update_state)
 	Host.hotkey.connect(_on_hotkey)
 	Host.desktop_hotkey.connect(show_desktop)
+	Host.switch_key.connect(switcher.handle_key)
 	Host.status_changed.connect(_on_host_status)
 	Host.fullscreen_changed.connect(_on_fullscreen_app)
 	Settings.changed.connect(_on_setting)
@@ -713,6 +718,7 @@ func _enter_shell() -> void:
 	var reserve := int(round(Shell.reserve * Shell.scale))
 	Host.enter_shell(Host.self_hwnd, reserve, bool(Settings.get_value("hide_windows_taskbar")))
 	_theme_apps()
+	Host.set_switcher(bool(Settings.get_value("alt_tab")))
 
 
 func _theme_apps() -> void:
@@ -728,6 +734,8 @@ func _on_setting(key: String, _value: Variant) -> void:
 			_enter_shell()
 		"theme_app_windows", "accent":
 			_theme_apps()
+		"alt_tab":
+			Host.set_switcher(bool(Settings.get_value("alt_tab")))
 
 
 func _on_fullscreen_app(on: bool) -> void:

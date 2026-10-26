@@ -49,6 +49,7 @@ func _ready() -> void:
 		)
 	if Shell.native:
 		_toggle_row(you, "Hide the Windows taskbar", "Oazy's taskbar takes its place while Oazy is running.", "hide_windows_taskbar")
+		_toggle_row(you, "Oazy's Alt + Tab", "Alt + Tab shows every open window as a live preview on Oazy's glass. Off brings back Windows' own.", "alt_tab")
 		_toggle_row(you, "Match app title bars to Oazy", "Gives other apps' title bars and borders Oazy's colours (Windows 11).", "theme_app_windows")
 	else:
 		_toggle_row(you, "Open in fullscreen", "Oazy covers the whole screen like a real desktop. F11 switches any time.", "shell_fullscreen", func(on: bool) -> void: main.apply_window_mode(on))
