@@ -53,6 +53,12 @@ const GAMESDB := "https://gamesdb.gog.com/platforms/%s/external_releases/%s"
 const GOG_PRODUCT := "https://api.gog.com/products/%s"
 const WIKI_SEARCH := "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrlimit=5&prop=pageimages&piprop=thumbnail&pithumbsize=640&gsrsearch=%s"
 const LAZY := "lazy:"
+## File names (any image extension) that count as art when placed next to the exe.
+const SIDECAR_NAMES := {
+	&"cover": ["cover", "capsule", "boxart", "poster"],
+	&"hero": ["hero", "banner", "background", "splash"],
+	&"logo": ["logo"],
+}
 const LOOKUPS_PATH := CACHE_DIR + "/lookups.json"
 ## How long "found nothing" is trusted before we look again.
 const MISS_TTL := 3 * 86400
@@ -137,6 +143,7 @@ func _start(id: String, kind: StringName) -> void:
 	var custom := str(e.get(String(kind), ""))
 	if custom != "":
 		candidates.append(custom)
+	candidates.append_array(sidecar_art(str(e.get("path", "")), kind))
 	for ext in ["jpg", "png", "webp"]:
 		candidates.append(_cache_file(id, kind, ext))
 	var steam_id := str(e.get("steam_appid", ""))
@@ -587,6 +594,18 @@ static func epic_ids(e: Dictionary) -> Dictionary:
 		var parts := uri.get_slice("/apps/", 1).get_slice("?", 0).replace("%3A", ":").replace("%3a", ":").split(":")
 		if parts.size() >= 3:
 			out = {"ns": parts[0], "item": parts[1], "app": parts[2]}
+	return out
+
+
+## Images dropped next to a game's exe (cover.png, banner.jpg, logo.png...).
+static func sidecar_art(path: String, kind: StringName) -> PackedStringArray:
+	var out := PackedStringArray()
+	if path == "" or path.contains("://") or path.begins_with("shell:") or not path.to_lower().ends_with(".exe"):
+		return out
+	var dir := path.get_base_dir()
+	for n in SIDECAR_NAMES[kind]:
+		for ext in ["png", "jpg", "jpeg", "webp"]:
+			out.append(dir.path_join("%s.%s" % [n, ext]))
 	return out
 
 

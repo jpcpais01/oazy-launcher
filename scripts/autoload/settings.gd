@@ -36,6 +36,7 @@ const DEFAULTS := {
 	"weather_unit": "auto",
 	"cleaner_watch": true,
 	"pointer": "oazy",
+	"removed_imports": [],
 }
 
 var _values := {}
