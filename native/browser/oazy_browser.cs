@@ -2209,6 +2209,8 @@ namespace OazyBrowser
 
 		public void TestOpenPanel(string name) { Post(Json.Obj("t", "openPanel", "name", name)); }
 		public void TestNavigate(string url) { Navigate(Active, url); }
+		public void TestShowChrome(bool on) { try { chrome.IsVisible = on; } catch { } }
+		public void TestShowPage(bool on) { try { Active.C.IsVisible = on; } catch { } }
 	}
 
 	// --- Self-test: proves the browser works on a real Windows box (CI) ------------------
@@ -2272,6 +2274,15 @@ namespace OazyBrowser
 				step = 1;
 				await Task.Delay(1500);
 				Shot("browser-newtab.png");
+				// The bare window behind the chrome and the page, to check the glass.
+				win.TestShowChrome(false);
+				win.TestShowPage(false);
+				await Task.Delay(600);
+				Shot("browser-backdrop.png");
+				win.TestShowChrome(true);
+				await Task.Delay(400);
+				Shot("browser-chrome-only.png");
+				win.TestShowPage(true);
 				step = 2;
 				win.TestNavigate(TestUrl);
 			}
