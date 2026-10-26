@@ -54,14 +54,14 @@ func _restyle() -> void:
 func _set_hot(on: bool) -> void:
 	_hot = on
 	_fade_halo()
-	var t := create_tween()
+	var t := Kit.hover_tween(self)
 	t.tween_property(self, "scale", Vector2.ONE * (1.04 if on else 1.0), 0.22).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	if on:
 		Sfx.play(&"move", 1.25)
 
 
 func _fade_halo() -> void:
-	var t := create_tween()
+	var t := Kit.hover_tween(_halo)
 	t.tween_property(_halo, "modulate:a", 1.0 if (_hot or open) else 0.0, 0.25)
 	if _look:
 		_look.kill()
@@ -71,7 +71,7 @@ func _fade_halo() -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var t := create_tween()
+		var t := Kit.hover_tween(self)
 		t.tween_property(self, "scale", Vector2.ONE * 0.93, 0.06)
 		t.tween_property(self, "scale", Vector2.ONE * (1.04 if _hot else 1.0), 0.24).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 		_orb.shockwave(0.6)
