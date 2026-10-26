@@ -102,6 +102,11 @@ func refresh() -> void:
 			add_child(_globe)
 		_globe.visible = true
 		return
+	if str(item.get("ref", "")) == "oazy:flow":
+		# Flow keeps its own colours: a violet-to-blue tile with a spark.
+		_show_plate(Color("7c6cff"), Color("265cd6"))
+		_show_glyph("sparkles")
+		return
 	if kind == "oazy":
 		_show_plate(App.accent.lightened(0.05), App.accent.darkened(0.4))
 		_show_glyph(str(item.get("glyph", "grid")))

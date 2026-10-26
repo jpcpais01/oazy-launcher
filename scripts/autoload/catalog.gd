@@ -19,6 +19,7 @@ const OAZY_APPS := {
 	"oazy:settings": {"name": "Settings", "glyph": "settings", "desc": "Make Oazy yours"},
 	"oazy:browser": {"name": "Browser", "glyph": "browser", "desc": "Oazy's web browser"},
 	"oazy:terminal": {"name": "Terminal", "glyph": "terminal", "desc": "PowerShell, WSL and Claude Code in Oazy's glass"},
+	"oazy:flow": {"name": "Flow", "glyph": "sparkles", "desc": "Make images and videos with Google Flow, in Oazy's look"},
 	"oazy:cleaner": {"name": "Cleaner", "glyph": "wand", "desc": "Keep Windows lean, fast and private"},
 }
 ## Start menu clutter that ships next to real apps.
@@ -175,7 +176,7 @@ func item(ref: String) -> Dictionary:
 
 ## Oazy's apps that run as their own windows rather than inside the shell.
 static func is_own_window_app(ref: String) -> bool:
-	return ref == Browser.REF or ref == Terminal.REF
+	return ref == Browser.REF or ref == Terminal.REF or Browser.APPS.has(ref)
 
 
 func launch(ref: String) -> bool:
@@ -185,6 +186,9 @@ func launch(ref: String) -> bool:
 	if ref == Terminal.REF:
 		note_recent(ref)
 		return Terminal.open()
+	if Browser.APPS.has(ref):
+		note_recent(ref)
+		return Browser.open_app(ref)
 	if OAZY_APPS.has(ref):
 		App.open_page.emit(StringName(ref.substr(5)))
 		return true
@@ -323,7 +327,8 @@ static func match_score(name: String, needle: String) -> int:
 ## Which item a running window belongs to (so it groups with its pin).
 func ref_for_window(w: Dictionary) -> String:
 	if Browser.owns_window(w):
-		return Browser.REF
+		var app := Browser.app_for_window(w)
+		return app if app != "" else Browser.REF
 	if Terminal.owns_window(w):
 		# A Claude Code tab groups with its pin; any other tab is the Terminal's.
 		var t := str(w.get("title", "")).to_lower()
@@ -463,16 +468,21 @@ func _ensure_default_pins() -> void:
 			Settings.set_value("browser_pinned", true)
 		if not Settings.get_value("terminal_pinned") and App.is_windows():
 			_pin_terminal()
+		if not Settings.get_value("flow_pinned") and App.is_windows():
+			_pin_flow()
 		return
 	var list: Array = ["oazy:library", Browser.REF]
 	Settings.set_value("browser_pinned", true)
 	Settings.set_value("terminal_pinned", true)
+	Settings.set_value("flow_pinned", true)
 	for want in DEFAULT_PINS:
 		for a in apps:
 			if str(a["name"]).to_lower() == want:
 				list.append("app:" + str(a["id"]))
 				break
 	list.append(Terminal.REF)
+	if App.is_windows():
+		list.append("oazy:flow")
 	for e in Library.entries:
 		if str(e["name"]) == "Claude Code":
 			list.append("lib:" + str(e["id"]))
@@ -497,6 +507,21 @@ func _pin_terminal() -> void:
 		list[at] = Terminal.REF
 	else:
 		list.insert(mini(list.find(Browser.REF) + 1, list.size()), Terminal.REF)
+	Settings.set_value("pins", list)
+	pins_changed.emit()
+
+
+## Flow joins the taskbar once, after the Terminal, for people who set up
+## their pins before it existed.
+func _pin_flow() -> void:
+	Settings.set_value("flow_pinned", true)
+	var list: Array = Settings.get_value("pins").duplicate()
+	if list.has("oazy:flow"):
+		return
+	var after := list.find(Terminal.REF)
+	if after < 0:
+		after = list.find(Browser.REF)
+	list.insert(clampi(after + 1, 0, list.size()) if after >= 0 else list.size(), "oazy:flow")
 	Settings.set_value("pins", list)
 	pins_changed.emit()
 

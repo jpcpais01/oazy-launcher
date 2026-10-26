@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flow</title>
+<!-- A stand-in for a signed-in Flow project, for Oazy Browser's self-test
+     (CI can't sign in to Google). Built like a web app with generated class
+     names, so flow.js has to find its way by what things are, as on the real site. -->
+<style>
+	html, body { margin: 0; height: 100%; background: #131314; color: #e3e3e3; font-family: Arial, sans-serif; }
+	.a1 { position: fixed; inset: 0; background: #131314; display: flex; flex-direction: column; }
+	.b2 { height: 64px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: #1b1b1d; border-bottom: 1px solid #2a2a2c; }
+	.b2 .c3 { font-size: 20px; font-weight: 500; }
+	.b2 .d4 { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; background: #8ab4f8; }
+	.b2 .e5 { padding: 8px 14px; border-radius: 18px; background: #2a2a2c; color: #e3e3e3; border: 0; }
+	.f6 { flex: 1; display: flex; min-height: 0; }
+	.g7 { width: 72px; flex: none; background: #1b1b1d; display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 16px; }
+	.g7 span { width: 40px; height: 40px; border-radius: 12px; background: #2a2a2c; display: block; }
+	.h8 { flex: 1; overflow: auto; padding: 24px 24px 180px; }
+	.h8 h2 { font-weight: 400; margin: 0 0 16px; }
+	.i9 { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+	.j0 { position: relative; background: #1e1f20; border-radius: 4px; }
+	.j0 img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+	.j0 .k1 { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.55); font-size: 12px; }
+	.l2 { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(820px, calc(100% - 140px)); background: #1e1f20; border: 1px solid #3c4043; border-radius: 8px; padding: 12px; }
+	.l2 textarea { width: 100%; box-sizing: border-box; min-height: 52px; background: #1e1f20; border: 0; color: #e3e3e3; font: 15px Arial, sans-serif; resize: none; outline: none; }
+	.m3 { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+	.m3 button { height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid #3c4043; background: #2a2a2c; color: #e3e3e3; }
+	.m3 .n4 { margin-left: auto; width: 40px; padding: 0; border-radius: 50%; background: #8ab4f8; color: #131314; font-size: 18px; }
+</style>
+</head>
+<body>
+<div class="a1">
+	<div class="b2"><div class="c3">Flow</div><button class="e5">Scenebuilder</button><button class="e5">Collections</button><div class="d4"></div></div>
+	<div class="f6">
+		<nav class="g7"><span></span><span></span><span></span><span></span></nav>
+		<main class="h8">
+			<h2>Oasis at dusk</h2>
+			<div class="i9" id="grid"></div>
+		</main>
+	</div>
+	<div class="l2">
+		<textarea placeholder="What do you want to create?"></textarea>
+		<div class="m3">
+			<button>Image</button><button>Video</button><button>Nano Banana</button><button>16:9</button>
+			<button class="n4" aria-label="Create">&#x2192;</button>
+		</div>
+	</div>
+</div>
+<script>
+	// Pictures "you made": soft gradient landscapes.
+	const hues = [[28, 200], [190, 260], [340, 30], [160, 210], [260, 320], [40, 180], [200, 230], [10, 290]];
+	const grid = document.getElementById('grid');
+	hues.forEach(([a, b], i) => {
+		const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">' +
+			'<stop offset="0" stop-color="hsl(' + a + ',70%,62%)"/><stop offset="1" stop-color="hsl(' + b + ',55%,22%)"/></linearGradient></defs>' +
+			'<rect width="160" height="100" fill="url(#g)"/><circle cx="' + (40 + i * 11) + '" cy="38" r="12" fill="hsla(' + a + ',90%,85%,0.85)"/>' +
+			'<path d="M0 78 Q40 60 80 74 T160 70 V100 H0z" fill="hsla(' + b + ',40%,12%,0.9)"/></svg>';
+		const card = document.createElement('div');
+		card.className = 'j0';
+		card.innerHTML = '<img alt="" src="data:image/svg+xml,' + encodeURIComponent(svg) + '"><div class="k1">' + (i % 3 === 0 ? 'Video · 8s' : 'Image') + '</div>';
+		grid.appendChild(card);
+	});
+</script>
+</body>
+</html>
