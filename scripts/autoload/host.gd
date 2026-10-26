@@ -348,6 +348,19 @@ func toggle(hwnd: int) -> void:
 	request(["toggle", hwnd])
 
 
+## Something is about to be launched: its first window comes up in front with
+## focus, even when started from the taskbar (which never takes focus, so the
+## new app wouldn't get to come forward by itself).
+func expect_window() -> void:
+	request(["expect"])
+
+
+## Un-minimises a window without activating it (Oazy's desktop after Win+D).
+func restore_quietly(hwnd: int) -> void:
+	if hwnd != 0:
+		request(["restore_quietly", hwnd])
+
+
 func minimize(hwnd: int) -> void:
 	request(["minimize", hwnd])
 
@@ -492,13 +505,20 @@ func style_window(hwnd: int, kind: String, done: Callable = Callable()) -> void:
 	request(["style", hwnd, kind], done)
 
 
-## Gives other apps' title bars and borders Oazy's colours.
+## Gives other apps' window borders Oazy's accent. (The companion ignores
+## the caption and text colours: see Theme in oazy_host.cs.)
 func theme_apps(on: bool, border: Color, caption: Color, text: Color) -> void:
 	request(["theme", 1 if on else 0, _colorref(border), _colorref(caption), _colorref(text)])
 
 
-func show_desktop() -> void:
-	request(["show_desktop"])
+## Show desktop for other apps' windows, decided together with Oazy's own:
+## `oazy_open` says whether any of Oazy's windows (in the OS window `layer`)
+## is showing. `done` gets {"action": "hide"} (minimise yours too) or
+## {"action": "restore", "restored": bool, "oazy_front": bool} (bring yours
+## back; `restored` if other apps came back, `oazy_front` if yours were in
+## front of them and should get focus).
+func show_desktop(oazy_open: bool, layer: int, done: Callable = Callable()) -> void:
+	request(["show_desktop", 1 if oazy_open else 0, layer], done)
 
 
 static func _colorref(c: Color) -> int:
