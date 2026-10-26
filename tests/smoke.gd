@@ -560,14 +560,17 @@ func _host_tests() -> void:
 	Host.request(["apps"], func(d: Dictionary) -> void: got["apps"] = d)
 	Host.request(["stats"], func(d: Dictionary) -> void: got["stats"] = d)
 	Host.render_icon("C:/Windows/explorer.exe", 64, ProjectSettings.globalize_path("user://smoke/explorer.png"), func(d: Dictionary) -> void: got["icon"] = d)
+	Host.request(["wifi", "1"], func(d: Dictionary) -> void: got["wifi"] = d)
 	waited = 0.0
-	while got.size() < 4 and waited < 30.0:
+	while got.size() < 5 and waited < 30.0:
 		await _wait(0.2)
 		waited += 0.2
 	check(got.has("windows") and got["windows"].get("ok", false), "host: lists windows")
 	check(got.has("apps") and got["apps"].get("apps", []).size() > 0, "host: lists installed apps")
 	check(got.has("stats") and got["stats"].has("cpu"), "host: system stats")
 	check(got.has("icon") and FileAccess.file_exists("user://smoke/explorer.png"), "host: renders icons (%s)" % str(got.get("icon", {}).get("error", "no reply")))
+	# CI machines have no Wi-Fi adapter, but the answer (and the cable list) must still come back.
+	check(got.has("wifi") and got["wifi"].get("ok", false) and got["wifi"].has("ethernet"), "host: network status (%s)" % str(got.get("wifi", {})))
 	await _capture_test()
 	check(Host.available, "host: still running after the checks")
 

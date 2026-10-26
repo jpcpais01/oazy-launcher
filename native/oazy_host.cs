@@ -21,6 +21,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
@@ -441,6 +442,7 @@ namespace Oazy
 			Out = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
 			Out.AutoFlush = true;
 			Out.NewLine = "\n";
+			Wifi.Emit = Write;
 			StreamReader input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
 
 			Thread loop = new Thread(MessageLoop);
@@ -606,6 +608,18 @@ namespace Oazy
 					return "\"ok\":true";
 				case "ping":
 					return "\"ok\":true";
+				case "wifi":
+					return Wifi.Status(Arg(p, 2) == "1");
+				case "wifi_scan":
+					return Wifi.Scan();
+				case "wifi_connect":
+					return Wifi.Connect(Arg(p, 2), Arg(p, 3), Arg(p, 4) != "0");
+				case "wifi_disconnect":
+					return Wifi.Disconnect();
+				case "wifi_forget":
+					return Wifi.Forget(Arg(p, 2));
+				case "wifi_radio":
+					return Wifi.SetRadio(Arg(p, 2) == "1");
 				case "webview2":
 					return "\"ok\":true,\"version\":" + Json.Str(WebView2Version());
 			}
@@ -2410,6 +2424,529 @@ namespace Oazy
 			catch (Exception) { }
 			AcpiRetry = DateTime.UtcNow.AddSeconds(60);
 			return -1;
+		}
+	}
+
+	// --- Wi-Fi and wired networks ----------------------------------------------
+	//
+	// The Native Wifi API (wlanapi.dll) works for a standard user: listing the
+	// networks around, scanning, connecting with a profile written for the
+	// network, disconnecting and forgetting. Structs are read by offset so
+	// the layout stays visible next to the docs.
+
+	static class Wifi
+	{
+		public delegate void NotifyProc(IntPtr data, IntPtr ctx);
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct ConnectParams
+		{
+			public int Mode;
+			[MarshalAs(UnmanagedType.LPWStr)] public string Profile;
+			public IntPtr Ssid;
+			public IntPtr BssidList;
+			public int BssType;
+			public uint Flags;
+		}
+
+		[DllImport("wlanapi.dll")] static extern uint WlanOpenHandle(uint version, IntPtr reserved, out uint negotiated, out IntPtr handle);
+		[DllImport("wlanapi.dll")] static extern uint WlanEnumInterfaces(IntPtr h, IntPtr reserved, out IntPtr list);
+		[DllImport("wlanapi.dll")] static extern uint WlanGetAvailableNetworkList(IntPtr h, ref Guid iface, uint flags, IntPtr reserved, out IntPtr list);
+		[DllImport("wlanapi.dll")] static extern uint WlanGetNetworkBssList(IntPtr h, ref Guid iface, IntPtr ssid, int bssType, bool secure, IntPtr reserved, out IntPtr list);
+		[DllImport("wlanapi.dll")] static extern uint WlanScan(IntPtr h, ref Guid iface, IntPtr ssid, IntPtr ie, IntPtr reserved);
+		[DllImport("wlanapi.dll")] static extern uint WlanQueryInterface(IntPtr h, ref Guid iface, int opcode, IntPtr reserved, out uint size, out IntPtr data, out int valueType);
+		[DllImport("wlanapi.dll")] static extern uint WlanSetInterface(IntPtr h, ref Guid iface, int opcode, uint size, IntPtr data, IntPtr reserved);
+		[DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] static extern uint WlanSetProfile(IntPtr h, ref Guid iface, uint flags, string xml, string security, bool overwrite, IntPtr reserved, out uint reason);
+		[DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] static extern uint WlanDeleteProfile(IntPtr h, ref Guid iface, string name, IntPtr reserved);
+		[DllImport("wlanapi.dll")] static extern uint WlanConnect(IntPtr h, ref Guid iface, ref ConnectParams p, IntPtr reserved);
+		[DllImport("wlanapi.dll")] static extern uint WlanDisconnect(IntPtr h, ref Guid iface, IntPtr reserved);
+		[DllImport("wlanapi.dll")] static extern uint WlanRegisterNotification(IntPtr h, uint sources, bool ignoreDup, NotifyProc cb, IntPtr ctx, IntPtr reserved, out uint prev);
+		[DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] static extern uint WlanReasonCodeToString(uint reason, int size, StringBuilder text, IntPtr reserved);
+		[DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
+
+		const int OP_RADIO = 4, OP_CONNECTION = 7;
+		const uint SOURCE_ACM = 0x08, SOURCE_MSM = 0x10;
+		const int AVAILABLE_SIZE = 628, IFACE_SIZE = 532, BSS_SIZE = 360;
+
+		public static Action<string> Emit;
+		static IntPtr Handle = IntPtr.Zero;
+		static uint OpenError;
+		static NotifyProc Callback;
+		static bool Internet;
+		static DateTime InternetAt = DateTime.MinValue;
+
+		static bool Open()
+		{
+			if (Handle != IntPtr.Zero) return true;
+			uint v;
+			IntPtr h;
+			try { OpenError = WlanOpenHandle(2, IntPtr.Zero, out v, out h); }
+			catch (Exception) { OpenError = 1; return false; }
+			if (OpenError != 0) return false;
+			Handle = h;
+			Callback = OnNotify;
+			uint prev;
+			WlanRegisterNotification(Handle, SOURCE_ACM | SOURCE_MSM, true, Callback, IntPtr.Zero, IntPtr.Zero, out prev);
+			return true;
+		}
+
+		// The first wireless adapter (most PCs have one) and its state.
+		static bool Adapter(out Guid id, out int state)
+		{
+			id = Guid.Empty;
+			state = 0;
+			IntPtr list;
+			if (!Open() || WlanEnumInterfaces(Handle, IntPtr.Zero, out list) != 0) return false;
+			try
+			{
+				int n = Marshal.ReadInt32(list, 0);
+				if (n < 1) return false;
+				IntPtr e = new IntPtr(list.ToInt64() + 8);
+				byte[] g = new byte[16];
+				Marshal.Copy(e, g, 0, 16);
+				id = new Guid(g);
+				state = Marshal.ReadInt32(e, 16 + 512);
+				return true;
+			}
+			finally { WlanFreeMemory(list); }
+		}
+
+		static byte[] Ssid(IntPtr at)
+		{
+			int len = Math.Min(32, Math.Max(0, Marshal.ReadInt32(at, 0)));
+			byte[] b = new byte[len];
+			if (len > 0) Marshal.Copy(new IntPtr(at.ToInt64() + 4), b, 0, len);
+			return b;
+		}
+
+		static string Hex(byte[] b)
+		{
+			StringBuilder sb = new StringBuilder(b.Length * 2);
+			foreach (byte x in b) sb.Append(x.ToString("x2"));
+			return sb.ToString();
+		}
+
+		static string Name(byte[] b)
+		{
+			try { return new UTF8Encoding(false, true).GetString(b); }
+			catch (Exception) { return Encoding.Default.GetString(b); }
+		}
+
+		static string Text(IntPtr at, int chars)
+		{
+			string s = Marshal.PtrToStringUni(at, chars);
+			int z = s.IndexOf('\0');
+			return z >= 0 ? s.Substring(0, z) : s;
+		}
+
+		static string Auth(int a)
+		{
+			switch (a)
+			{
+				case 1: return "open";
+				case 2: return "wep";
+				case 3: case 6: case 8: case 11: return "enterprise";
+				case 4: return "wpa";
+				case 7: return "wpa2";
+				case 9: return "wpa3";
+				case 10: return "owe";
+			}
+			return "other";
+		}
+
+		class Net
+		{
+			public byte[] Raw;
+			public string Profile = "";
+			public int Signal, AuthAlgo, Cipher;
+			public bool Secure, Connected, Known, Connectable;
+		}
+
+		// One entry per name: Windows lists a network once per saved profile
+		// and once more without one.
+		static List<Net> Networks(Guid id)
+		{
+			List<Net> all = new List<Net>();
+			IntPtr list;
+			if (WlanGetAvailableNetworkList(Handle, ref id, 0, IntPtr.Zero, out list) != 0) return all;
+			Dictionary<string, Net> seen = new Dictionary<string, Net>();
+			try
+			{
+				int n = Marshal.ReadInt32(list, 0);
+				for (int i = 0; i < n; i++)
+				{
+					IntPtr e = new IntPtr(list.ToInt64() + 8 + (long)i * AVAILABLE_SIZE);
+					Net net = new Net();
+					net.Raw = Ssid(new IntPtr(e.ToInt64() + 512));
+					if (net.Raw.Length == 0 || Marshal.ReadInt32(e, 548) != 1) continue;
+					net.Profile = Text(e, 256);
+					net.Connectable = Marshal.ReadInt32(e, 556) != 0;
+					net.Signal = Marshal.ReadInt32(e, 604);
+					net.Secure = Marshal.ReadInt32(e, 608) != 0;
+					net.AuthAlgo = Marshal.ReadInt32(e, 612);
+					net.Cipher = Marshal.ReadInt32(e, 616);
+					int flags = Marshal.ReadInt32(e, 620);
+					net.Connected = (flags & 1) != 0;
+					net.Known = (flags & 2) != 0;
+					string key = Hex(net.Raw);
+					Net had;
+					if (seen.TryGetValue(key, out had))
+					{
+						had.Connected |= net.Connected;
+						had.Signal = Math.Max(had.Signal, net.Signal);
+						if (net.Known && !had.Known) { had.Known = true; had.Profile = net.Profile; }
+						continue;
+					}
+					seen[key] = net;
+					all.Add(net);
+				}
+			}
+			finally { WlanFreeMemory(list); }
+			all.Sort(delegate(Net a, Net b)
+			{
+				if (a.Connected != b.Connected) return a.Connected ? -1 : 1;
+				return b.Signal.CompareTo(a.Signal);
+			});
+			return all;
+		}
+
+		// Radio: [software on, hardware on].
+		static bool[] Radio(Guid id)
+		{
+			bool[] r = { true, true };
+			uint size;
+			IntPtr data;
+			int type;
+			if (WlanQueryInterface(Handle, ref id, OP_RADIO, IntPtr.Zero, out size, out data, out type) != 0) return r;
+			try
+			{
+				int n = Marshal.ReadInt32(data, 0);
+				bool sw = false, hw = false;
+				for (int i = 0; i < n && i < 64; i++)
+				{
+					if (Marshal.ReadInt32(data, 4 + i * 12 + 4) == 1) sw = true;
+					if (Marshal.ReadInt32(data, 4 + i * 12 + 8) == 1) hw = true;
+				}
+				if (n > 0) { r[0] = sw; r[1] = hw; }
+			}
+			finally { WlanFreeMemory(data); }
+			return r;
+		}
+
+		// The live link: name, speed and band.
+		static string Current(Guid id)
+		{
+			uint size;
+			IntPtr data;
+			int type;
+			if (WlanQueryInterface(Handle, ref id, OP_CONNECTION, IntPtr.Zero, out size, out data, out type) != 0) return "";
+			try
+			{
+				if (Marshal.ReadInt32(data, 0) != 1) return "";
+				byte[] raw = Ssid(new IntPtr(data.ToInt64() + 520));
+				byte[] bssid = new byte[6];
+				Marshal.Copy(new IntPtr(data.ToInt64() + 560), bssid, 0, 6);
+				long rx = (uint)Marshal.ReadInt32(data, 580);
+				long tx = (uint)Marshal.ReadInt32(data, 584);
+				int signal = Marshal.ReadInt32(data, 576);
+				return "{\"id\":" + Json.Str(Hex(raw)) + ",\"ssid\":" + Json.Str(Name(raw))
+					+ ",\"signal\":" + signal + ",\"mbps\":" + (Math.Max(rx, tx) / 1000)
+					+ ",\"ghz\":" + Json.Str(Band(id, bssid)) + "}";
+			}
+			finally { WlanFreeMemory(data); }
+		}
+
+		static string Band(Guid id, byte[] bssid)
+		{
+			IntPtr list;
+			try { if (WlanGetNetworkBssList(Handle, ref id, IntPtr.Zero, 1, false, IntPtr.Zero, out list) != 0) return ""; }
+			catch (Exception) { return ""; }
+			try
+			{
+				int n = Marshal.ReadInt32(list, 4);
+				byte[] b = new byte[6];
+				for (int i = 0; i < n; i++)
+				{
+					IntPtr e = new IntPtr(list.ToInt64() + 8 + (long)i * BSS_SIZE);
+					Marshal.Copy(new IntPtr(e.ToInt64() + 40), b, 0, 6);
+					bool same = true;
+					for (int k = 0; k < 6; k++) if (b[k] != bssid[k]) same = false;
+					if (!same) continue;
+					long khz = (uint)Marshal.ReadInt32(e, 92);
+					if (khz >= 5925000 && khz < 7200000) return "6";
+					if (khz >= 4900000 && khz < 5925000) return "5";
+					if (khz >= 2400000 && khz < 2500000) return "2.4";
+					return "";
+				}
+			}
+			finally { WlanFreeMemory(list); }
+			return "";
+		}
+
+		static bool Virtual(NetworkInterface ni)
+		{
+			string d = (ni.Description + " " + ni.Name).ToLowerInvariant();
+			foreach (string w in new string[] { "virtual", "hyper-v", "vmware", "vbox", "tap-", "tap ", "wintun", "wireguard", "loopback", "bluetooth", "vethernet", "npcap", "zerotier", "tailscale" })
+				if (d.Contains(w)) return true;
+			return false;
+		}
+
+		static string Wired()
+		{
+			StringBuilder sb = new StringBuilder("[");
+			try
+			{
+				foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+				{
+					if (ni.NetworkInterfaceType != NetworkInterfaceType.Ethernet && ni.NetworkInterfaceType != NetworkInterfaceType.GigabitEthernet) continue;
+					if (Virtual(ni)) continue;
+					if (sb.Length > 1) sb.Append(',');
+					bool up = ni.OperationalStatus == OperationalStatus.Up;
+					sb.Append("{\"name\":").Append(Json.Str(ni.Name))
+						.Append(",\"device\":").Append(Json.Str(ni.Description))
+						.Append(",\"up\":").Append(Json.Bool(up))
+						.Append(",\"mbps\":").Append(up ? Math.Max(0, ni.Speed / 1000000) : 0).Append('}');
+				}
+			}
+			catch (Exception) { }
+			return sb.Append(']').ToString();
+		}
+
+		// Windows' own "is there internet" answer (Network List Manager).
+		static bool HasInternet()
+		{
+			if ((DateTime.UtcNow - InternetAt).TotalSeconds < 4) return Internet;
+			InternetAt = DateTime.UtcNow;
+			try
+			{
+				Type t = Type.GetTypeFromCLSID(new Guid("DCB00C01-570F-4A9B-8D69-199FDBA5723B"));
+				object nlm = Activator.CreateInstance(t);
+				Internet = (bool)t.InvokeMember("IsConnectedToInternet", BindingFlags.GetProperty, null, nlm, null);
+				Marshal.ReleaseComObject(nlm);
+			}
+			catch (Exception) { Internet = NetworkInterface.GetIsNetworkAvailable(); }
+			return Internet;
+		}
+
+		static string StateName(int s)
+		{
+			switch (s)
+			{
+				case 1: return "connected";
+				case 3: return "disconnecting";
+				case 4: return "disconnected";
+				case 5: case 6: case 7: return "connecting";
+			}
+			return "off";
+		}
+
+		// list: also the networks around (the tray icon only needs the link).
+		public static string Status(bool list)
+		{
+			StringBuilder sb = new StringBuilder("\"ok\":true");
+			sb.Append(",\"internet\":").Append(Json.Bool(HasInternet()));
+			sb.Append(",\"ethernet\":").Append(Wired());
+			Guid id;
+			int state;
+			if (!Adapter(out id, out state))
+				return sb.Append(",\"wifi\":false").ToString();
+			bool[] radio = Radio(id);
+			sb.Append(",\"wifi\":true,\"radio\":").Append(Json.Bool(radio[0] && radio[1]))
+				.Append(",\"hw_off\":").Append(Json.Bool(!radio[1]))
+				.Append(",\"state\":").Append(Json.Str(StateName(state)));
+			string cur = state == 1 ? Current(id) : "";
+			if (cur != "") sb.Append(",\"current\":").Append(cur);
+			if (list && radio[0] && radio[1])
+			{
+				sb.Append(",\"networks\":[");
+				bool first = true;
+				foreach (Net n in Networks(id))
+				{
+					if (!first) sb.Append(',');
+					first = false;
+					sb.Append("{\"id\":").Append(Json.Str(Hex(n.Raw)))
+						.Append(",\"ssid\":").Append(Json.Str(Name(n.Raw)))
+						.Append(",\"signal\":").Append(n.Signal)
+						.Append(",\"secure\":").Append(Json.Bool(n.Secure))
+						.Append(",\"auth\":").Append(Json.Str(Auth(n.AuthAlgo)))
+						.Append(",\"known\":").Append(Json.Bool(n.Known))
+						.Append(",\"connected\":").Append(Json.Bool(n.Connected))
+						.Append(",\"connectable\":").Append(Json.Bool(n.Connectable)).Append('}');
+				}
+				sb.Append(']');
+			}
+			return sb.ToString();
+		}
+
+		static string Fail(string why) { return "\"ok\":false,\"error\":" + Json.Str(why); }
+
+		public static string Scan()
+		{
+			Guid id;
+			int state;
+			if (!Adapter(out id, out state)) return Fail("No Wi-Fi adapter");
+			return "\"ok\":" + Json.Bool(WlanScan(Handle, ref id, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) == 0);
+		}
+
+		static string Xml(string s) { return SecurityElement.Escape(s); }
+
+		// A profile like the one Windows writes when you join from its flyout.
+		static string ProfileXml(Net n, string name, string key, bool auto)
+		{
+			string auth, enc, keyType = "passPhrase";
+			switch (n.AuthAlgo)
+			{
+				case 1: auth = "open"; enc = n.Secure ? "WEP" : "none"; if (n.Secure) keyType = "networkKey"; break;
+				case 2: auth = "shared"; enc = "WEP"; keyType = "networkKey"; break;
+				case 4: auth = "WPAPSK"; enc = n.Cipher == 2 ? "TKIP" : "AES"; break;
+				case 7: auth = "WPA2PSK"; enc = n.Cipher == 2 ? "TKIP" : "AES"; break;
+				case 9: auth = "WPA3SAE"; enc = "AES"; break;
+				case 10: auth = "OWE"; enc = "AES"; break;
+				default: return "";
+			}
+			StringBuilder x = new StringBuilder();
+			x.Append("<?xml version=\"1.0\"?><WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">");
+			x.Append("<name>").Append(Xml(name)).Append("</name><SSIDConfig><SSID><hex>").Append(Hex(n.Raw).ToUpperInvariant())
+				.Append("</hex><name>").Append(Xml(name)).Append("</name></SSID></SSIDConfig>");
+			x.Append("<connectionType>ESS</connectionType><connectionMode>").Append(auto ? "auto" : "manual").Append("</connectionMode>");
+			x.Append("<MSM><security><authEncryption><authentication>").Append(auth).Append("</authentication><encryption>").Append(enc)
+				.Append("</encryption><useOneX>false</useOneX>");
+			if (auth == "WPA3SAE") x.Append("<transitionMode xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v4\">true</transitionMode>");
+			x.Append("</authEncryption>");
+			if (key != "")
+				x.Append("<sharedKey><keyType>").Append(keyType).Append("</keyType><protected>false</protected><keyMaterial>")
+					.Append(Xml(key)).Append("</keyMaterial></sharedKey>");
+			x.Append("</security></MSM></WLANProfile>");
+			return x.ToString();
+		}
+
+		static string Unbase(string b64)
+		{
+			if (b64 == "") return "";
+			try { return Encoding.UTF8.GetString(Convert.FromBase64String(b64)); }
+			catch (Exception) { return ""; }
+		}
+
+		// Joins a network: with its saved profile when there's one and no new
+		// key, otherwise writes a profile first. The outcome arrives as a
+		// "wifi" event once Windows has tried.
+		public static string Connect(string hex, string keyB64, bool auto)
+		{
+			Guid id;
+			int state;
+			if (!Adapter(out id, out state)) return Fail("No Wi-Fi adapter");
+			Net net = null;
+			foreach (Net n in Networks(id))
+				if (Hex(n.Raw) == hex) net = n;
+			if (net == null) return Fail("That network is out of range");
+			string key = Unbase(keyB64);
+			string profile = net.Profile;
+			bool created = false;
+			if (!net.Known || key != "")
+			{
+				if (net.AuthAlgo == 3 || net.AuthAlgo == 6 || net.AuthAlgo == 8 || net.AuthAlgo == 11)
+					return "\"ok\":false,\"error\":\"enterprise\"";
+				profile = Name(net.Raw);
+				string xml = ProfileXml(net, profile, key, auto);
+				if (xml == "") return Fail("Windows needs to join this one");
+				uint reason;
+				uint err = WlanSetProfile(Handle, ref id, 0, xml, null, true, IntPtr.Zero, out reason);
+				// Standard users can't always write all-user profiles: keep it to this user then.
+				if (err == 5) err = WlanSetProfile(Handle, ref id, 2, xml, null, true, IntPtr.Zero, out reason);
+				if (err != 0) return Fail(reason != 0 ? Reason(reason) : "Windows didn't accept that key (error " + err + ")");
+				created = !net.Known;
+			}
+			ConnectParams p = new ConnectParams();
+			p.Mode = 0;
+			p.Profile = profile;
+			p.BssType = 1;
+			uint e = WlanConnect(Handle, ref id, ref p, IntPtr.Zero);
+			return e == 0 ? "\"ok\":true,\"created\":" + Json.Bool(created) : Fail("Couldn't start connecting (error " + e + ")");
+		}
+
+		public static string Disconnect()
+		{
+			Guid id;
+			int state;
+			if (!Adapter(out id, out state)) return Fail("No Wi-Fi adapter");
+			return "\"ok\":" + Json.Bool(WlanDisconnect(Handle, ref id, IntPtr.Zero) == 0);
+		}
+
+		public static string Forget(string hex)
+		{
+			Guid id;
+			int state;
+			if (!Adapter(out id, out state)) return Fail("No Wi-Fi adapter");
+			foreach (Net n in Networks(id))
+			{
+				if (Hex(n.Raw) != hex || !n.Known) continue;
+				uint e = WlanDeleteProfile(Handle, ref id, n.Profile, IntPtr.Zero);
+				return e == 0 ? "\"ok\":true" : Fail(e == 5 ? "Only an administrator can forget this network" : "Couldn't forget it (error " + e + ")");
+			}
+			return Fail("Not a saved network");
+		}
+
+		// Turning the radio off and on; Windows may keep that for administrators.
+		public static string SetRadio(bool on)
+		{
+			Guid id;
+			int state;
+			if (!Adapter(out id, out state)) return Fail("No Wi-Fi adapter");
+			IntPtr data = Marshal.AllocHGlobal(12);
+			try
+			{
+				Marshal.WriteInt32(data, 0, 0);
+				Marshal.WriteInt32(data, 4, on ? 1 : 2);
+				Marshal.WriteInt32(data, 8, on ? 1 : 2);
+				uint e = WlanSetInterface(Handle, ref id, OP_RADIO, 12, data, IntPtr.Zero);
+				return e == 0 ? "\"ok\":true" : "\"ok\":false,\"error\":" + Json.Str(e == 5 ? "denied" : "error " + e);
+			}
+			finally { Marshal.FreeHGlobal(data); }
+		}
+
+		static string Reason(uint code)
+		{
+			StringBuilder sb = new StringBuilder(512);
+			try
+			{
+				if (WlanReasonCodeToString(code, sb.Capacity, sb, IntPtr.Zero) == 0) return sb.ToString().Trim();
+			}
+			catch (Exception) { }
+			return "Reason " + code;
+		}
+
+		static void OnNotify(IntPtr data, IntPtr ctx)
+		{
+			try
+			{
+				uint source = (uint)Marshal.ReadInt32(data, 0);
+				int code = Marshal.ReadInt32(data, 4);
+				int size = Marshal.ReadInt32(data, 24);
+				IntPtr p = Marshal.ReadIntPtr(data, IntPtr.Size == 8 ? 32 : 28);
+				string what = "";
+				string extra = "";
+				if (source == SOURCE_ACM)
+				{
+					switch (code)
+					{
+						case 7: what = "scan"; break;
+						case 8: what = "scan"; break;
+						case 9: what = "connecting"; break;
+						case 13: case 14: what = "adapter"; break;
+						case 21: what = "disconnected"; break;
+						case 10: case 11:
+							if (p == IntPtr.Zero || size < 564) { what = code == 10 ? "connected" : "failed"; break; }
+							uint reason = (uint)Marshal.ReadInt32(p, 560);
+							what = code == 10 && reason == 0 ? "connected" : "failed";
+							extra = ",\"ssid\":" + Json.Str(Name(Ssid(new IntPtr(p.ToInt64() + 516))));
+							if (what == "failed") extra += ",\"reason\":" + Json.Str(Reason(reason)) + ",\"code\":" + reason;
+							break;
+					}
+				}
+				else if (source == SOURCE_MSM && code == 7) what = "radio";
+				if (what != "" && Emit != null) Emit("{\"ev\":\"wifi\",\"what\":\"" + what + "\"" + extra + "}");
+			}
+			catch (Exception) { }
 		}
 	}
 }

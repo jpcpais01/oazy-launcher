@@ -2,9 +2,9 @@ class_name Taskbar
 extends Control
 ## The glass taskbar. Left: the Start orb and search. Middle: pinned and
 ## running apps, real Windows windows and Oazy's own side by side, with a
-## liquid "lens" that glides to whichever one is active. Right: updates, sound
-## (quick settings), the weather (forecast), the clock (calendar) and a sliver
-## that shows the desktop.
+## liquid "lens" that glides to whichever one is active. Right: updates,
+## the network (Wi-Fi and cable), sound (quick settings), the weather, the
+## clock (calendar) and a sliver that shows the desktop.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
@@ -22,6 +22,7 @@ var preview: TaskPreview
 var quick: QuickSettings
 var calendar: CalendarFlyout
 var weather: WeatherFlyout
+var network: NetworkFlyout
 var orb: StartOrb
 var _glass: GlassPanel
 var _apps: HBoxContainer
@@ -31,6 +32,9 @@ var _date: Label
 var _update_btn: FxButton
 var _battery: Label
 var _sound: Button
+var _net: Button
+var _net_glyph: SignalGlyph
+var _net_wired: TextureRect
 var _clock_btn: Button
 var _weather_btn: Button
 var _weather_icon: TextureRect
@@ -93,20 +97,14 @@ func _ready() -> void:
 	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_battery)
 
-	var desk := _tray_button(Vector2(36, 36), "Show desktop (Ctrl + Alt + D)")
-	desk.icon = Icons.tex("desktop", 18, Color(1, 1, 1, 0.85))
-	desk.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	desk.pressed.connect(func() -> void: main.show_desktop())
-	row.add_child(desk)
+	row.add_child(_network_button())
 
 	_sound = _tray_button(Vector2(36, 36), "Sound and quick settings")
 	_sound.icon = Icons.tex("volume", 18, Color(1, 1, 1, 0.85))
 	_sound.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_sound.pressed.connect(func() -> void:
 		if quick:
-			calendar.close()
-			if weather:
-				weather.close()
+			_close_flyouts(quick)
 			quick.toggle(_sound)
 	)
 	_sound.gui_input.connect(_on_sound_input)
@@ -117,9 +115,7 @@ func _ready() -> void:
 	_clock_btn = _tray_button(Vector2(88, 40), "")
 	_clock_btn.pressed.connect(func() -> void:
 		if calendar:
-			quick.close()
-			if weather:
-				weather.close()
+			_close_flyouts(calendar)
 			calendar.toggle(_clock_btn)
 	)
 	row.add_child(_clock_btn)
@@ -593,8 +589,7 @@ func _weather_chip() -> Button:
 	_weather_btn.visible = false
 	_weather_btn.pressed.connect(func() -> void:
 		if weather:
-			quick.close()
-			calendar.close()
+			_close_flyouts(weather)
 			weather.toggle(_weather_btn)
 	)
 	var row := Kit.hbox(6)
@@ -641,6 +636,61 @@ func _update_weather() -> void:
 func attach_weather(w: WeatherFlyout) -> void:
 	weather = w
 	_update_weather()
+
+
+## The network flyout lives in Start's layer with the others.
+func attach_network(n: NetworkFlyout) -> void:
+	network = n
+
+
+## Every tray flyout but `keep` closes, so only one is ever up.
+func _close_flyouts(keep: Flyout) -> void:
+	for f in [quick, calendar, weather, network]:
+		if f and f != keep:
+			f.close()
+
+
+## Wi-Fi strength (or a cable) in the tray; opens the network flyout.
+func _network_button() -> Button:
+	_net = _tray_button(Vector2(36, 36), "Network")
+	_net.pressed.connect(func() -> void:
+		if network:
+			_close_flyouts(network)
+			network.toggle(_net)
+	)
+	_net_glyph = SignalGlyph.new(18)
+	_net_glyph.color = Color(1, 1, 1, 0.85)
+	_net_glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_net.add_child(_net_glyph)
+	_net_wired = Kit.icon_rect("ethernet", 18, Color(1, 1, 1, 0.85))
+	_net_wired.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_net_wired.visible = false
+	_net.add_child(_net_wired)
+	Network.changed.connect(_update_network)
+	_update_network()
+	return _net
+
+
+func _update_network() -> void:
+	var cur := Network.current()
+	var cables := Network.wired()
+	var online := Network.internet()
+	# A cable shows when Wi-Fi isn't connected, like Windows' own icon.
+	var wired := cur.is_empty() and not cables.is_empty()
+	_net_wired.visible = wired
+	_net_glyph.visible = not wired
+	_net_glyph.off = cur.is_empty() and not Network.status.is_empty()
+	_net_glyph.level = Network.bars(int(cur.get("signal", 0))) if not cur.is_empty() else 3
+	var tip := "Network"
+	if not cur.is_empty():
+		tip = "%s\n%s" % [cur.get("ssid", ""), "Internet access" if online else "No internet"]
+	elif wired:
+		tip = "Ethernet\n%s" % ("Internet access" if online else "No internet")
+	elif Network.has_wifi() and not Network.radio_on():
+		tip = "Wi-Fi is off"
+	elif not Network.status.is_empty():
+		tip = "Not connected"
+	_net.tooltip_text = tip
 
 
 func _on_volume(level: float, muted: bool) -> void:
