@@ -890,8 +890,9 @@ func _once(key: String, fn: Callable) -> Variant:
 	return v
 
 
+## v2: misses recorded before apps had web sources must not block them.
 func _miss_key(id: String, kind: StringName) -> String:
-	return "miss:%s:%s:%s" % [id, kind, norm_title(str(Library.get_entry(id).get("name", "")))]
+	return "miss2:%s:%s:%s" % [id, kind, norm_title(str(Library.get_entry(id).get("name", "")))]
 
 
 ## A remembered lookup, or null if unknown. Misses ("") expire so we retry.
