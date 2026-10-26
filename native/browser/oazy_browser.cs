@@ -2320,6 +2320,14 @@ namespace OazyBrowser
 				{
 					using (Graphics g = Graphics.FromImage(bmp)) g.CopyFromScreen(b.Location, Point.Empty, b.Size);
 					bmp.Save(Path.Combine(dir, name), System.Drawing.Imaging.ImageFormat.Png);
+					// A column of pixels down the empty part of the tab strip, for the log.
+					List<string> col = new List<string>();
+					for (int y = 0; y < Math.Min(80, b.Height); y += 4)
+					{
+						Color c = bmp.GetPixel(b.Width * 6 / 10, y);
+						col.Add(y + ":" + c.R + "," + c.G + "," + c.B);
+					}
+					Log(name + " column " + string.Join(" ", col.ToArray()));
 				}
 				Log("saved " + name);
 			}
