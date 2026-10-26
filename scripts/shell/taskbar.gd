@@ -500,6 +500,7 @@ func _on_context(btn: TaskbarButton, at: Vector2) -> void:
 	main.add_favorite_item(_menu, btn.ref, 5)
 	var pinned := Catalog.is_pinned(btn.ref)
 	_menu.add_icon_item(Icons.tex("unpin" if pinned else "pin", 18), "Unpin from taskbar" if pinned else "Pin to taskbar", 1)
+	main.add_library_item(_menu, btn.ref, 6)
 	if running:
 		_menu.add_separator()
 		_menu.add_icon_item(Icons.tex("close", 18, App.DANGER.lightened(0.2)), "Close all windows" if btn.window_count() > 1 else "Close window", 2)
@@ -531,6 +532,8 @@ func _on_menu(id: int) -> void:
 			main.focus_entry(btn.ref.substr(4))
 		5:
 			main.toggle_favorite(btn.ref)
+		6:
+			main.toggle_library(btn.ref)
 
 
 # --- Tray ----------------------------------------------------------------------------------

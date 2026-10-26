@@ -99,6 +99,23 @@ func _ready() -> void:
 		]})
 	await _wait(2.5)
 	await shot("01-desktop")
+	# Each wallpaper: on the desktop, then on its own.
+	for id in Wallpaper.STYLES:
+		Settings.set_value("wallpaper", id)
+		await _wait(1.3)
+		if id != "oasis":
+			await shot("01w-desktop-" + id)
+		var shown := []
+		for c in main.get_children():
+			if c is CanvasItem and c != main.wallpaper and (c as CanvasItem).visible:
+				(c as CanvasItem).visible = false
+				shown.append(c)
+		await _wait(0.2)
+		await shot("01x-wallpaper-" + id)
+		for c in shown:
+			(c as CanvasItem).visible = true
+	Settings.set_value("wallpaper", "oasis")
+	await _wait(1.3)
 	main.weather.open(main.taskbar._weather_btn)
 	await _wait(0.9)
 	await shot("01b-weather")
@@ -136,6 +153,13 @@ func _ready() -> void:
 		scroller.scroll_vertical = int(icons.global_position.y - scroller.global_position.y) - 160
 		await _wait(0.4)
 		await shot("06b-settings-icons")
+		scroller.scroll_vertical = 0
+	var walls := settings.find_child("Wallpapers", true, false) as Control
+	if walls and scroller:
+		var content := scroller.get_child(0) as Control
+		scroller.scroll_vertical = int((content.get_global_transform().affine_inverse() * walls.global_position).y) - 200
+		await _wait(0.4)
+		await shot("06d-settings-wallpapers")
 		scroller.scroll_vertical = 0
 	var pointers := settings.find_child("Pointers", true, false) as Control
 	if pointers:
@@ -192,6 +216,27 @@ func _ready() -> void:
 	await shot("08-add")
 	_close_modals()
 	await _wait(0.5)
+	main.find_apps()
+	await _wait(0.6)
+	var finder: FindAppsDialog = main.overlay_layer.get_children().filter(func(c: Node) -> bool: return c is FindAppsDialog)[0]
+	for r in finder._rows.slice(0, 3):
+		finder._toggle(r)
+	await _wait(0.5)
+	await shot("08b-find-apps")
+	finder._add_picked()
+	Catalog.add_to_library("app:Microsoft.WindowsNotepad_8wekyb3d8bbwe!App")
+	await _wait(0.5)
+	var lib_app: LibraryApp = lib.body.get_child(0)
+	main.focus_shell_window(lib)
+	lib_app.set_filter("apps")
+	await _wait(1.2)
+	await shot("08c-library-apps")
+	lib_app.set_filter("all")
+	main.show_ref_menu("app:Microsoft.Paint_8wekyb3d8bbwe!App", Vector2(900, 500))
+	await _wait(0.5)
+	await shot("08d-app-menu")
+	main._menu.hide()
+	await _wait(0.3)
 	Updater.apply_releases([
 		{"tag_name": "v2.0.0", "published_at": "2026-10-25T10:00:00Z", "body": "### Oazy is your desktop now\n- **A real taskbar** with everything that's open.\n- Glass windows you can snap, resize and minimise.\n- Start opens any app, game, folder or website.", "assets": [{"name": "OazyLauncher.exe", "size": 97000000, "browser_download_url": "https://x"}]},
 		{"tag_name": "v1.0.8", "published_at": "2026-10-20T10:00:00Z", "body": "### Controller support\n- Shoulder buttons switch pages.", "assets": [{"name": "OazyLauncher.exe", "size": 96000000, "browser_download_url": "https://x"}]},

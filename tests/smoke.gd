@@ -182,6 +182,20 @@ func _logic_tests() -> void:
 	check(Catalog.pins().slice(0, 3) == ["oazy:library", "oazy:browser", "app:Chrome"], "catalog: reset pins")
 	check(Catalog.item("oazy:library")["name"] == "Library", "catalog: Oazy apps")
 
+	# Installed apps joining the library take their pin and windows with them.
+	check(Catalog.can_add_to_library("app:Chrome"), "library apps: installed app can be added")
+	var before := FindAppsDialog.candidates().size()
+	var chrome := Catalog.add_to_library("app:Chrome")
+	check(chrome != "" and Library.get_entry(chrome)["kind"] == "app", "library apps: added as an app")
+	check(Catalog.add_to_library("app:Chrome") == chrome and not Catalog.can_add_to_library("app:Chrome"), "library apps: added once")
+	check(Catalog.is_pinned("lib:" + chrome) and not Catalog.is_pinned("app:Chrome"), "library apps: pin moves to the entry")
+	check(Catalog.ref_for_window({"exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "aumid": "Chrome"}) == "lib:" + chrome, "library apps: windows group with the entry")
+	check(FindAppsDialog.candidates().size() == before - 1, "library apps: Find apps skips what's in the library")
+	check(not Catalog.all_items().any(func(it: Dictionary) -> bool: return it["ref"] == "app:Chrome"), "library apps: no duplicate in All apps")
+	Catalog.forget_entry(chrome)
+	Library.remove_entry(chrome)
+	check(Catalog.is_pinned("app:Chrome") and Catalog.can_add_to_library("app:Chrome"), "library apps: pin goes back on removal")
+
 	# Oazy Browser: an Oazy app whose windows are real ones.
 	check(Catalog.item(Browser.REF)["name"] == "Browser" and Catalog.item(Browser.REF)["kind"] == "oazy", "browser: in the catalog")
 	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe"}) == Browser.REF, "browser: windows group under the browser")
@@ -225,6 +239,7 @@ func _logic_tests() -> void:
 		check(built_files.has("exe"), "files: compiles on Windows (%s)" % str(built_files.get("error", "ok")))
 	check(Wallpaper.palette_for("night", 12.0) == Wallpaper.PALETTES["night"], "wallpaper: fixed light")
 	check(Wallpaper.palette_for("auto", 3.0).size() == Wallpaper.PARAMS.size(), "wallpaper: auto light blends")
+	check(Wallpaper.style_index("tide") == 2 and Wallpaper.style_index("gone") == 0, "wallpaper: styles, unknown falls back to Oasis")
 	check(App.user_name() == "" or App.user_name().length() > 1, "app: user name")
 
 	# Start's quick answers: sums, addresses, paths and commands.
