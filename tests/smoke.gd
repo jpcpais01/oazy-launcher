@@ -205,6 +205,17 @@ func _logic_tests() -> void:
 	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe", "title": "Flow"}) == "oazy:flow", "flow: its window groups under Flow")
 	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe", "title": "Flow - Oazy Browser"}) == Browser.REF, "flow: a browser tab about Flow stays the browser's")
 	check(Catalog.search("flow").size() > 0 and Catalog.search("flow")[0]["ref"] == "oazy:flow", "flow: found from Start")
+	check(Art.brand_art("Flow", &"cover") != "" and Art.brand_art("Flow", &"hero") != "" and Art.brand_art("Flow", &"logo") != "", "flow: has its own art")
+	check(Catalog.can_add_to_library("oazy:flow"), "flow: can join the Library")
+	var flow_id := Catalog.add_to_library("oazy:flow")
+	check(flow_id != "" and Catalog.canonical("oazy:flow") == "lib:" + flow_id, "flow: is its library card everywhere")
+	check(Catalog.item("lib:" + flow_id)["oazy"] == "oazy:flow" and Catalog.item("lib:" + flow_id)["kind"] == "libapp", "flow: its card keeps Flow's icon")
+	check(Catalog.ref_for_window({"exe": "C:\\Users\\me\\AppData\\Roaming\\OazyLauncher\\browser\\app-1234abcd\\OazyBrowser.exe", "title": "Flow"}) == "lib:" + flow_id, "flow: its window groups under its card")
+	var oazy_claude := Catalog.add_to_library("oazy:claude")
+	check(Catalog.library_entry_named("Claude") != oazy_claude, "library apps: Oazy's Claude isn't taken for the Claude app")
+	Catalog.remove_from_library(oazy_claude)
+	Catalog.remove_from_library(flow_id)
+	check(Catalog.canonical("oazy:flow") == "oazy:flow", "flow: leaves the Library cleanly")
 	for f in Browser.FILES:
 		check(FileAccess.file_exists(Browser.SRC.path_join(f)), "browser: packaged " + f)
 

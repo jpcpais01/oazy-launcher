@@ -95,6 +95,7 @@ func make_entry(fields: Dictionary = {}) -> Dictionary:
 		"epic_app": "",
 		"epic_uri": "",
 		"app_id": "",
+		"oazy": "",
 		"cover": "",
 		"hero": "",
 		"logo": "",
@@ -305,6 +306,9 @@ func launch(id: String) -> bool:
 	# Apps added from Start open the way Start opens them.
 	if str(e.get("app_id", "")) != "":
 		ok = Catalog.launch_app(str(e["app_id"]))
+	elif str(e.get("oazy", "")) != "":
+		# One of Oazy's own apps (Flow, Claude) as a library card.
+		ok = Catalog.launch(str(e["oazy"]))
 	else:
 		ok = _launch_source(e)
 	if ok:
