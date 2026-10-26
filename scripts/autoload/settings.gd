@@ -27,6 +27,8 @@ const DEFAULTS := {
 	"user_name": "",
 	"pins": [],
 	"pins_initialized": false,
+	## The order the taskbar was dragged into (refs; missing ones keep their spot).
+	"taskbar_order": [],
 	"recent_apps": [],
 	"window_rect": [],
 	"last_seen_version": "",

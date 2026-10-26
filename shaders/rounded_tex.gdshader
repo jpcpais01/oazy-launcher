@@ -1,4 +1,4 @@
-// A picture with rounded corners (window pictures in the Alt+Tab switcher).
+// A picture with rounded, antialiased corners (Alt+Tab window pictures, app icons).
 shader_type canvas_item;
 
 uniform vec2 size = vec2(400.0, 250.0);

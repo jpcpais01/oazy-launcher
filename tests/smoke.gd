@@ -373,6 +373,19 @@ func _ui_tests() -> void:
 	check(chrome != null and chrome.window_count() == 2, "taskbar: groups windows under their pin")
 	check(chrome != null and chrome.active, "taskbar: foreground window is active")
 	check(main.taskbar.button_for("win:C:/Tools/mystery.exe") != null, "taskbar: unpinned windows get a button")
+	var mystery: TaskbarButton = main.taskbar.button_for("win:C:/Tools/mystery.exe")
+	if mystery:
+		var bar: Taskbar = main.taskbar
+		bar._on_drag_started(mystery)
+		mystery.position.x = bar._slot_x(0)
+		bar._order.erase(mystery)
+		bar._order.insert(bar._drag_slot(), mystery)
+		bar._on_drag_ended(mystery)
+		check(bar._order[0] == mystery and str(Settings.get_value("taskbar_order")[0]) == mystery.ref, "taskbar: dragging reorders and saves")
+		bar.rebuild()
+		check(bar._order[0] == mystery, "taskbar: dragged order survives a rebuild")
+		Settings.set_value("taskbar_order", [])
+		bar.rebuild()
 	if chrome:
 		main.preview.show_for(chrome)
 		await _wait(0.3)
@@ -424,6 +437,18 @@ func _ui_tests() -> void:
 	check(main.taskbar.button_for("oazy:settings") != null and main.taskbar.button_for("oazy:settings").window_count() == 1, "windows: shell windows on the taskbar")
 	_window_checks(main, lib, "library")
 	_window_checks(main, settings, "settings")
+	var st := settings.body.get_child(0) as SettingsApp
+	for spec in SettingsApp.PAGES:
+		st.open_page(spec[0])
+		check(st.page_visible(spec[0]) and st.visible_rows() > 0, "settings: %s page shows its settings" % spec[0])
+	st.open_page("desktop")
+	st.search("taskbar")
+	check(st.visible_rows() >= 2 and st.page_visible("desktop"), "settings: search finds taskbar settings")
+	st.search("zzqx")
+	check(st.visible_rows() == 0, "settings: search with no match shows nothing")
+	st.search("")
+	check(st.page_visible("desktop") and not st.page_visible("personalise"), "settings: clearing search goes back to the page")
+	st.open_page("personalise")
 	settings.toggle_maximize()
 	await _wait(0.5)
 	check(settings.maximized and main.layer.work_rect().grow(1.0).encloses(settings.get_rect()), "windows: maximise fills the work area")

@@ -8,7 +8,7 @@ extends Control
 
 const GRIP := 6.0
 const APP_TITLES := {&"library": "Library", &"settings": "Settings", &"cleaner": "Cleaner"}
-const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(940, 800), &"cleaner": Vector2(1180, 800)}
+const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(1120, 820), &"cleaner": Vector2(1180, 800)}
 
 ## The update version a toast already announced.
 var _announced_update := ""

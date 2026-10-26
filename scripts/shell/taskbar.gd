@@ -2,7 +2,8 @@ class_name Taskbar
 extends Control
 ## The glass taskbar. Left: the Start orb and search. Middle: pinned and
 ## running apps, real Windows windows and Oazy's own side by side, with a
-## liquid "lens" that glides to whichever one is active. Right: updates,
+## liquid "lens" that glides to whichever one is active. Drag an app to
+## reorder; its neighbours ease aside and the order is kept. Right: updates,
 ## the network (Wi-Fi and cable), sound (quick settings), the weather, the
 ## clock (calendar) and an invisible corner that shows the desktop.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
@@ -15,6 +16,7 @@ const HEIGHT := 48.0
 const MARGIN := 6.0
 ## The strip at the bottom of the screen the taskbar keeps for itself.
 const RESERVE := HEIGHT + MARGIN * 2.0
+const APP_GAP := 4.0
 
 var main: Node
 var layer: WindowLayer
@@ -25,8 +27,13 @@ var weather: WeatherFlyout
 var network: NetworkFlyout
 var orb: StartOrb
 var _glass: GlassPanel
-var _apps: HBoxContainer
+var _apps: Control
 var _buttons := {}
+## Buttons left to right, as laid out (removed ones fading out aren't here).
+var _order: Array[TaskbarButton] = []
+var _drag_btn: TaskbarButton
+var _drag_grab := 0.0
+var _reflowing := false
 var _clock: Label
 var _date: Label
 var _update_btn: FxButton
@@ -142,13 +149,13 @@ func _ready() -> void:
 	add_child(_lens)
 	App.accent_changed.connect(func(_c: Color) -> void: _lens.queue_redraw())
 
-	# Apps sit dead centre regardless of what's on either side.
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(center)
-	_apps = Kit.hbox(4)
-	center.add_child(_apps)
+	# Apps sit dead centre regardless of what's on either side. They're laid
+	# out by hand (see _step_apps) so every move eases, drags included.
+	_apps = Control.new()
+	_apps.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_apps.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_apps.resized.connect(_snap_apps)
+	add_child(_apps)
 
 	_hover_timer = _timer(0.45, _on_hover_timeout)
 	_leave_timer = _timer(0.28, func() -> void:
@@ -253,21 +260,24 @@ func queue_rebuild() -> void:
 
 func rebuild() -> void:
 	_rebuild_queued = false
-	var order: Array[String] = []
+	var natural: Array[String] = []
 	var groups := {}
 	for ref in Catalog.pins():
-		_group(groups, order, ref)
+		_group(groups, natural, ref)
 	for win in layer.windows():
 		if not win._closing:
-			_group(groups, order, win.app_ref)["shell"] = win
+			_group(groups, natural, win.app_ref)["shell"] = win
 	for w in Host.windows:
 		var ref := Catalog.ref_for_window(w)
-		var g := _group(groups, order, ref)
+		var g := _group(groups, natural, ref)
 		g["windows"].append(w)
 		if ref.begins_with("win:"):
 			g["item"]["name"] = Catalog.window_group_name(w)
+	var order := _saved_order(natural)
 	var active_shell := layer.active_window()
 	var keep := {}
+	var fresh: Array[TaskbarButton] = []
+	_order.clear()
 	var lit: TaskbarButton = null
 	for i in order.size():
 		var ref := order[i]
@@ -279,13 +289,17 @@ func rebuild() -> void:
 			btn.middle_clicked.connect(func(b: TaskbarButton) -> void: _launch(b))
 			btn.context.connect(_on_context)
 			btn.hover_changed.connect(_on_hover)
+			btn.drag_started.connect(_on_drag_started)
+			btn.drag_moved.connect(_on_drag_moved)
+			btn.drag_ended.connect(_on_drag_ended)
 			_apps.add_child(btn)
 			_buttons[ref] = btn
+			fresh.append(btn)
 			if _built_once:
 				btn.intro(0.0)
 		elif str(btn.item.get("name", "")) != str(g["item"]["name"]):
 			btn.set_item(g["item"])
-		_apps.move_child(btn, i)
+		_order.append(btn)
 		btn.windows.assign(g["windows"])
 		btn.shell_window = g["shell"]
 		var running: bool = btn.window_count() > 0
@@ -306,10 +320,19 @@ func rebuild() -> void:
 			_buttons.erase(ref)
 			if gone == _hover_btn:
 				preview.hide_preview()
+			gone.cancel_drag()
+			gone.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			var t := gone.create_tween().set_parallel(true)
 			t.tween_property(gone, "modulate:a", 0.0, 0.18)
 			t.tween_property(gone, "scale", Vector2.ONE * 0.6, 0.18)
 			t.chain().tween_callback(gone.queue_free)
+	if _drag_btn:
+		_order.erase(_drag_btn)
+		_order.insert(_drag_slot(), _drag_btn)
+	# New buttons start in their slot; everyone else eases over to make room.
+	for b in fresh:
+		b.position = Vector2(_slot_x(_order.find(b)), _app_y())
+	_reflow()
 	if not _built_once and _apps.get_child_count() > 0:
 		_built_once = true
 	_aim_lens(lit)
@@ -321,6 +344,125 @@ func _group(groups: Dictionary, order: Array[String], ref: String) -> Dictionary
 		groups[ref] = {"item": Catalog.item(ref), "windows": [], "shell": null}
 		order.append(ref)
 	return groups[ref]
+
+
+## Puts refs in the order the taskbar was dragged into. Refs never placed
+## by hand slot in after whatever comes before them naturally, so a new pin
+## lands after the other pins and a new window at the end.
+func _saved_order(natural: Array[String]) -> Array[String]:
+	var saved: Array = Settings.get_value("taskbar_order")
+	if saved.is_empty():
+		return natural
+	var present := {}
+	for r in natural:
+		present[r] = true
+	var out: Array[String] = []
+	for r in saved:
+		if present.has(str(r)) and not out.has(str(r)):
+			out.append(str(r))
+	var prev := ""
+	for r in natural:
+		if not out.has(r):
+			out.insert(out.find(prev) + 1 if prev != "" else 0, r)
+		prev = r
+	return out
+
+
+## Saves the order on screen. Apps that aren't showing right now keep their
+## place relative to the ones that are, for when they come back.
+func _save_order() -> void:
+	var out: Array[String] = []
+	for b in _order:
+		out.append(b.ref)
+	var prev := ""
+	for r in Settings.get_value("taskbar_order"):
+		var ref := str(r)
+		if not out.has(ref):
+			out.insert(out.find(prev) + 1 if prev != "" else 0, ref)
+		prev = ref
+	Settings.set_value("taskbar_order", out.slice(0, 96))
+
+
+# --- Layout and dragging -------------------------------------------------------------
+
+func _app_y() -> float:
+	return (_apps.size.y - TaskbarButton.SIZE) / 2.0
+
+
+func _slot_x(i: int) -> float:
+	var n := _order.size()
+	var step := TaskbarButton.SIZE + APP_GAP
+	var width := n * step - APP_GAP if n > 0 else 0.0
+	return roundf((_apps.size.x - width) / 2.0) + i * step
+
+
+## Where the dragged button would drop, from its centre.
+func _drag_slot() -> int:
+	var step := TaskbarButton.SIZE + APP_GAP
+	var left := _slot_x(0)
+	var at := roundf((_drag_btn.position.x - left) / step)
+	return clampi(int(at), 0, maxi(_order.size() - 1, 0))
+
+
+## Straight to the slots, no easing (the bar itself changed size).
+func _snap_apps() -> void:
+	for i in _order.size():
+		if _order[i] != _drag_btn:
+			_order[i].position = Vector2(_slot_x(i), _app_y())
+
+
+func _reflow() -> void:
+	_reflowing = true
+	set_process(true)
+
+
+## Eases every button towards its slot; returns true while any is moving.
+func _step_apps(delta: float) -> bool:
+	var busy := false
+	var k := 1.0 - exp(-delta * 16.0)
+	for i in _order.size():
+		var b := _order[i]
+		if b == _drag_btn:
+			continue
+		var goal := Vector2(_slot_x(i), _app_y())
+		if b.position.distance_to(goal) < 0.4:
+			b.position = goal
+		else:
+			b.position = b.position.lerp(goal, k)
+			busy = true
+	return busy or _drag_btn != null
+
+
+func _on_drag_started(btn: TaskbarButton) -> void:
+	_hover_timer.stop()
+	_leave_timer.stop()
+	preview.hide_preview()
+	_drag_btn = btn
+	_drag_grab = get_global_mouse_position().x - btn.global_position.x
+	btn.set_lifted(true)
+	_reflow()
+
+
+func _on_drag_moved(btn: TaskbarButton) -> void:
+	if btn != _drag_btn:
+		return
+	var x := get_global_mouse_position().x - _drag_grab - _apps.global_position.x
+	btn.position.x = clampf(x, _slot_x(0) - 12.0, _slot_x(_order.size() - 1) + 12.0)
+	var slot := _drag_slot()
+	if _order.find(btn) != slot:
+		_order.erase(btn)
+		_order.insert(slot, btn)
+		Sfx.play(&"move", 1.1)
+
+
+func _on_drag_ended(btn: TaskbarButton) -> void:
+	if btn != _drag_btn:
+		return
+	_drag_btn = null
+	btn.set_lifted(false)
+	if _order.has(btn):
+		_save_order()
+	_reflow()
 
 
 # --- Lens and dock -------------------------------------------------------------------
@@ -341,9 +483,19 @@ func _aim_lens(btn: TaskbarButton) -> void:
 
 
 func _process(delta: float) -> void:
+	if _drag_btn and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		# The release went somewhere else (another window took the pointer).
+		_drag_btn.cancel_drag()
+	if _reflowing:
+		_reflowing = _step_apps(delta)
+	var lens := _step_lens(delta)
+	set_process(_reflowing or lens)
+
+
+## Springs the lens after the active button; returns true while it moves.
+func _step_lens(delta: float) -> bool:
 	if _lens_btn == null or not is_instance_valid(_lens_btn):
-		set_process(_lens.modulate.a > 0.0)
-		return
+		return _lens.modulate.a > 0.0
 	var r := _lens_btn.get_global_rect()
 	r.position -= get_global_position()
 	var goal := r.get_center().x
@@ -361,9 +513,10 @@ func _process(delta: float) -> void:
 	_lens.position = Vector2(_lens_x - w / 2.0, r.get_center().y - h / 2.0)
 	_lens.size = Vector2(w, h)
 	_lens.queue_redraw()
-	if absf(goal - _lens_x) < 0.3 and absf(_lens_v) < 1.0:
+	if absf(goal - _lens_x) < 0.3 and absf(_lens_v) < 1.0 and not _reflowing:
 		_lens_x = goal
-		set_process(false)
+		return false
+	return true
 
 
 func _draw_lens() -> void:
@@ -626,6 +779,14 @@ func attach_weather(w: WeatherFlyout) -> void:
 ## The network flyout lives in Start's layer with the others.
 func attach_network(n: NetworkFlyout) -> void:
 	network = n
+
+
+## Opens the network flyout from its tray button (Settings' Choose a network).
+func open_network() -> void:
+	if network and _net:
+		_close_flyouts(network)
+		if not network.is_open:
+			network.toggle(_net)
 
 
 ## Every tray flyout but `keep` closes, so only one is ever up.
