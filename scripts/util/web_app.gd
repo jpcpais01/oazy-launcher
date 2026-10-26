@@ -13,6 +13,12 @@ const WEBVIEW2 := {
 	"WebView2Loader.dll": "res://native/browser/bin/WebView2Loader.dll",
 	"LICENSE.txt": "res://native/browser/bin/LICENSE.txt",
 }
+## Oazy's UI typeface, for every web app's page (shipped as .bin so Godot
+## packs it untouched instead of importing it).
+const FONTS := {
+	"ui/fonts/Geist-Variable.woff2": "res://native/fonts/Geist-Variable.woff2.bin",
+	"OFL-Geist.txt": "res://native/fonts/OFL-Geist.txt",
+}
 
 
 ## Returns {"exe": path} or {"error": text}. Safe to call from a worker thread.

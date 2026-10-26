@@ -1109,7 +1109,7 @@ func _build_about() -> void:
 	row.move_child(orb, 0)
 	text.add_child(Kit.label("Oazy", 26, 700, Color.WHITE, true))
 	text.add_child(Kit.label("Version %s" % App.version, 14, 500, App.TEXT_DIM))
-	var credits := Kit.label("Made with Godot  ·  Inter & Outfit typefaces (SIL OFL)", 13, 500, App.TEXT_MUTE)
+	var credits := Kit.label("Made with Godot  ·  Geist typeface (SIL OFL)", 13, 500, App.TEXT_MUTE)
 	credits.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.add_child(credits)
 

@@ -5,17 +5,17 @@ static var _fonts := {}
 
 
 static func font(weight: int = 500, display: bool = false) -> Font:
+	# One family everywhere: Geist, static weights 400-700 (800 asks map to 700).
+	weight = clampi(snappedi(weight, 100), 400, 700)
 	var key := ("D" if display else "I") + str(weight)
 	if _fonts.has(key):
 		return _fonts[key]
-	var family := "Outfit" if display else "Inter"
-	var path := "res://assets/fonts/%s-%d.woff2" % [family, weight]
-	var f: Font = load(path)
-	if display:
-		# Display type reads better slightly tighter.
+	var f: Font = load("res://assets/fonts/Geist-%d.woff2" % weight)
+	if display and weight >= 600:
+		# Big headlines read better a touch tighter.
 		var v := FontVariation.new()
 		v.base_font = f
-		v.spacing_glyph = -1 if weight >= 700 else 0
+		v.spacing_glyph = -1
 		f = v
 	_fonts[key] = f
 	return f
@@ -24,11 +24,9 @@ static func font(weight: int = 500, display: bool = false) -> Font:
 static func italic_font() -> Font:
 	if _fonts.has("italic"):
 		return _fonts["italic"]
-	var v := FontVariation.new()
-	v.base_font = font(400)
-	v.variation_transform = Transform2D(Vector2(1, 0), Vector2(0.18, 1), Vector2.ZERO)
-	_fonts["italic"] = v
-	return v
+	var f: Font = load("res://assets/fonts/Geist-Italic.woff2")
+	_fonts["italic"] = f
+	return f
 
 
 static func mono_font() -> Font:

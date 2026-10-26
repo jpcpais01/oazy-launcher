@@ -112,7 +112,7 @@ function docArt(cat, size, label) {
 		'<path d="M38 6.5v10a3 3 0 0 0 3 3h10z" fill="#c4d0da"/>' +
 		'<rect x="12" y="38" width="39" height="14" fill="' + c[1] + '" opacity="0.92"/>' +
 		'<rect x="12" y="38" width="39" height="7" fill="' + c[0] + '" opacity="0.6"/>' +
-		(label ? '<text x="31.5" y="48.6" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff" font-family="Segoe UI, sans-serif">' + esc(label.slice(0, 4).toUpperCase()) + '</text>' : '') +
+		(label ? '<text x="31.5" y="48.6" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff" font-family="Geist, Segoe UI, sans-serif">' + esc(label.slice(0, 4).toUpperCase()) + '</text>' : '') +
 		'</svg>';
 }
 

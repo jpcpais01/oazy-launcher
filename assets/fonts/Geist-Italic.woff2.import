@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://dakd8vyy1rl6r"
-path="res://.godot/imported/Inter-600.woff2-c2f1fc7a891de8118aee446083b03b65.fontdata"
+uid="uid://p4rh7e8p7gki"
+path="res://.godot/imported/Geist-Italic.woff2-e58f00f6489e0a73475172d687041521.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/Inter-600.woff2"
-dest_files=["res://.godot/imported/Inter-600.woff2-c2f1fc7a891de8118aee446083b03b65.fontdata"]
+source_file="res://assets/fonts/Geist-Italic.woff2"
+dest_files=["res://.godot/imported/Geist-Italic.woff2-e58f00f6489e0a73475172d687041521.fontdata"]
 
 [params]
 

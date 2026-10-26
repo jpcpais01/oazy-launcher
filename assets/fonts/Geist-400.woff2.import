@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://bqmidhsv8gywc"
-path="res://.godot/imported/Inter-400.woff2-fbd00b6897445abb82d34db42665f86f.fontdata"
+uid="uid://c6e5o7e5ntyt6"
+path="res://.godot/imported/Geist-400.woff2-3f06b6e91b624d14e5f4e67c6aa4fba8.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/Inter-400.woff2"
-dest_files=["res://.godot/imported/Inter-400.woff2-fbd00b6897445abb82d34db42665f86f.fontdata"]
+source_file="res://assets/fonts/Geist-400.woff2"
+dest_files=["res://.godot/imported/Geist-400.woff2-3f06b6e91b624d14e5f4e67c6aa4fba8.fontdata"]
 
 [params]
 

@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://xnbjs8crljh4"
-path="res://.godot/imported/Inter-500.woff2-ddba22c84327cba7f26964d7388aa5fa.fontdata"
+uid="uid://f3sb2ieaok35"
+path="res://.godot/imported/Geist-700.woff2-c77e7f6b9b95267fef72092ff8d90206.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/Inter-500.woff2"
-dest_files=["res://.godot/imported/Inter-500.woff2-ddba22c84327cba7f26964d7388aa5fa.fontdata"]
+source_file="res://assets/fonts/Geist-700.woff2"
+dest_files=["res://.godot/imported/Geist-700.woff2-c77e7f6b9b95267fef72092ff8d90206.fontdata"]
 
 [params]
 

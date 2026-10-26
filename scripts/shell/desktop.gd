@@ -151,14 +151,12 @@ func _ready() -> void:
 
 func _build_clock() -> void:
 	_greeting = Kit.label("", 21, 600, Color(1, 1, 1, 0.88))
-	_shadow(_greeting, 3)
 	_top.add_child(_greeting)
 	_time = Kit.label("", 128, 500, Color.WHITE, true)
 	var tv := FontVariation.new()
 	tv.base_font = Kit.font(500, true)
-	tv.spacing_glyph = -4
+	tv.spacing_glyph = -3
 	_time.add_theme_font_override("font", tv)
-	_shadow(_time, 3)
 	_clock_mat = ShaderMaterial.new()
 	_clock_mat.shader = CLOCK
 	_time.material = _clock_mat
@@ -168,7 +166,6 @@ func _build_clock() -> void:
 	_date_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_top.add_child(_date_row)
 	_date = Kit.label("", 22, 500, Color(1, 1, 1, 0.78))
-	_shadow(_date, 3)
 	_date_row.add_child(_date)
 	# The weather, quietly, after the date.
 	_weather_icon = TextureRect.new()
@@ -179,7 +176,6 @@ func _build_clock() -> void:
 	_date_row.add_child(Kit.spacer(4, 0))
 	_date_row.add_child(_weather_icon)
 	_weather_text = Kit.label("", 22, 500, Color(1, 1, 1, 0.78))
-	_shadow(_weather_text, 3)
 	_date_row.add_child(_weather_text)
 	Weather.changed.connect(_update_weather)
 	_update_weather()
@@ -207,12 +203,6 @@ func _sync_clock_fx() -> void:
 	tone.a = 0.94
 	_clock_mat.set_shader_parameter("tone", tone)
 	_clock_mat.set_shader_parameter("speed", 0.0 if Settings.get_value("effects") == "eco" else 1.0)
-
-
-func _shadow(l: Label, size_px: int) -> void:
-	l.add_theme_color_override("font_shadow_color", Color(0, 0.03, 0.06, 0.22))
-	l.add_theme_constant_override("shadow_offset_y", 2)
-	l.add_theme_constant_override("shadow_outline_size", size_px)
 
 
 func _tick() -> void:
@@ -284,8 +274,6 @@ func _build_hero() -> void:
 	_hero_title.custom_minimum_size.x = 440
 	_hero_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hero_title.max_lines_visible = 2
-	_hero_title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.35))
-	_hero_title.add_theme_constant_override("shadow_outline_size", 10)
 	_hero_box.add_child(_hero_title)
 	_hero_meta = Kit.label("", 15, 500, Color(1, 1, 1, 0.78))
 	_hero_box.add_child(_hero_meta)
@@ -327,7 +315,6 @@ func _build_hero() -> void:
 	row.add_child(add)
 
 	_recent_title = Kit.label("Recently played", 15, 700, Color(1, 1, 1, 0.82))
-	_shadow(_recent_title, 3)
 	_top.add_child(_recent_title)
 	_recent = Kit.hbox(14)
 	_top.add_child(_recent)
@@ -471,7 +458,6 @@ func _recent_tile(id: String) -> Control:
 
 func _build_favorites() -> void:
 	_favs_title = Kit.label("Favourites", 15, 700, Color(1, 1, 1, 0.82))
-	_shadow(_favs_title, 3)
 	_top.add_child(_favs_title)
 	_favs = GridContainer.new()
 	_favs.columns = FAV_COLS
@@ -540,7 +526,6 @@ func _fav_tile(it: Dictionary) -> Control:
 	l.custom_minimum_size.x = tile.x - 10.0
 	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shadow(l, 3)
 	c.add_child(l)
 	b.mouse_entered.connect(func() -> void:
 		var t := Kit.hover_tween(b).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)

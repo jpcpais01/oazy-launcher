@@ -50,8 +50,6 @@ func _init() -> void:
 	_letter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_letter.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_letter.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.25))
-	_letter.add_theme_constant_override("shadow_offset_y", 1)
 	add_child(_letter)
 
 

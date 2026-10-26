@@ -1209,11 +1209,27 @@ namespace OazyBrowser
 			try { return File.ReadAllText(Path.Combine(App.Ui, "apps", name), Encoding.UTF8); } catch { return ""; }
 		}
 
+		// Oazy's typeface for the injected look, inlined: the site's page can't
+		// fetch it from Oazy's own host. If its policy blocks data: fonts, the
+		// style sheet falls back to Segoe UI.
+		static string fontFace;
+		static string FontFace()
+		{
+			if (fontFace != null) return fontFace;
+			try
+			{
+				byte[] b = File.ReadAllBytes(Path.Combine(App.Ui, "fonts", "Geist-Variable.woff2"));
+				fontFace = "@font-face{font-family:\"Oazy Geist\";font-weight:100 900;font-style:normal;src:url(data:font/woff2;base64," + Convert.ToBase64String(b) + ") format(\"woff2\")}\n";
+			}
+			catch { fontFace = ""; }
+			return fontFace;
+		}
+
 		// The script that goes into every document: the app's script, handed its
 		// style sheet and settings, in a closure of its own.
 		public static string Bootstrap(WebAppDef a, bool on, string accent, bool test)
 		{
-			string config = Json.S.Serialize(Json.Obj("id", a.Id, "hosts", a.Hosts, "on", on, "accent", accent, "test", test, "css", Read(a.Style)));
+			string config = Json.S.Serialize(Json.Obj("id", a.Id, "hosts", a.Hosts, "on", on, "accent", accent, "test", test, "css", FontFace() + Read(a.Style)));
 			return "(function () {\n'use strict';\nconst OAZY = " + config + ";\n" + Read(a.Script) + "\n})();";
 		}
 

@@ -40,7 +40,11 @@ float wall_pool(vec2 p, vec2 c, float r) {
 
 vec3 wall_vignette(vec3 col, vec2 uv) {
 	vec2 vc = uv - vec2(0.5, 0.45);
-	return col * (1.0 - dot(vc, vc) * 0.45);
+	col *= 1.0 - dot(vc, vc) * 0.45;
+	// A soft, wide scrim behind the desktop's clock and left column keeps
+	// white type legible on bright skies without shadows under the text.
+	vec2 sc = (uv - vec2(0.1, 0.24)) / vec2(0.42, 0.36);
+	return col * (1.0 - 0.16 * exp(-dot(sc, sc)));
 }
 
 vec3 wall_oasis(vec2 uv, float ph) {
