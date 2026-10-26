@@ -69,7 +69,7 @@ func _build_notes() -> Control:
 	left.custom_minimum_size.x = 300
 	view.add_child(left)
 
-	# A little glass orb with the logo floating in it, already part full.
+	# A little glass orb with the mark floating in it, already part full.
 	var art := Control.new()
 	art.custom_minimum_size = Vector2(170, 170)
 	art.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -80,17 +80,12 @@ func _build_notes() -> Control:
 	orb.mat.set_shader_parameter("waves", 0.7)
 	orb.mat.set_shader_parameter("ripples", 0.6)
 	art.add_child(orb)
-	var logo := TextureRect.new()
-	logo.texture = load("res://assets/icon.png")
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.position = Vector2(55, 55)
-	logo.size = Vector2(60, 60)
-	logo.pivot_offset = Vector2(30, 30)
+	var logo := OazyMark.new(0.14)
+	logo.size = Vector2(170, 170)
 	art.add_child(logo)
 	var bob := logo.create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	bob.tween_property(logo, "position:y", 49.0, 1.8)
-	bob.tween_property(logo, "position:y", 55.0, 1.8)
+	bob.tween_property(logo, "position:y", -6.0, 1.8)
+	bob.tween_property(logo, "position:y", 0.0, 1.8)
 
 	left.add_child(Kit.spacer(0, 2))
 	left.add_child(Kit.label("UPDATE AVAILABLE", 13, 700, App.accent.lightened(0.35)))

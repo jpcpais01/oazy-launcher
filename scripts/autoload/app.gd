@@ -60,7 +60,9 @@ func _ready() -> void:
 		if a.begins_with("--screenshots="):
 			screenshot_dir = a.get_slice("=", 1)
 			smoke_test = true
-	if screenshot_dir != "":
+	if Array(args).any(func(a: String) -> bool: return a.begins_with("--render-icon=")):
+		add_child.call_deferred(load("res://tools/render_icon.gd").new())
+	elif screenshot_dir != "":
 		print("Oazy Launcher %s screenshot run -> %s" % [version, screenshot_dir])
 		var shooter: Node = load("res://tests/screenshots.gd").new()
 		shooter.name = "Screenshots"

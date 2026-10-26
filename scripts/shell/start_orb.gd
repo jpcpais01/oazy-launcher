@@ -1,16 +1,20 @@
 class_name StartOrb
 extends Control
-## The Start button: Oazy's own app icon, with a soft halo in the accent colour
-## that blooms on hover and while Start is open.
+## The Start button: Oazy's icon, live. The water in the orb turns slowly,
+## stirs faster on hover and while Start is open, and sends a ripple out when
+## pressed, with a soft halo in the accent colour behind it.
 
 signal pressed
 
 const SIZE := 40.0
-const ICON := preload("res://assets/icon.png")
+const CALM := {"swirl": -0.3, "waves": 0.4}
+const STIRRED := {"swirl": -1.0, "waves": 0.9}
 
 var open := false: set = set_open
 var _halo: Panel
-var _icon: TextureRect
+var _icon: Control
+var _orb: UpdateOrb
+var _look: Tween
 var _hot := false
 
 
@@ -26,15 +30,10 @@ func _ready() -> void:
 	_halo.size = Vector2(SIZE - 8.0, SIZE - 8.0)
 	_halo.modulate.a = 0.0
 	add_child(_halo)
-	_icon = TextureRect.new()
-	_icon.texture = ICON
-	_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_icon.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_icon.position = Vector2(3, 3)
-	_icon.size = Vector2(SIZE - 6.0, SIZE - 6.0)
+	_icon = OazyMark.icon(SIZE, 0.9, CALM["swirl"])
+	_icon.size = Vector2(SIZE, SIZE)
 	add_child(_icon)
+	_orb = _icon.get_meta("orb")
 	mouse_entered.connect(_set_hot.bind(true))
 	mouse_exited.connect(_set_hot.bind(false))
 	App.accent_changed.connect(func(_c: Color) -> void: _restyle())
@@ -66,6 +65,9 @@ func _set_hot(on: bool) -> void:
 func _fade_halo() -> void:
 	var t := create_tween()
 	t.tween_property(_halo, "modulate:a", 1.0 if (_hot or open) else 0.0, 0.25)
+	if _look:
+		_look.kill()
+	_look = _orb.set_look(STIRRED if (_hot or open) else CALM, 0.6)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -73,5 +75,6 @@ func _gui_input(event: InputEvent) -> void:
 		var t := create_tween()
 		t.tween_property(self, "scale", Vector2.ONE * 0.9, 0.06)
 		t.tween_property(self, "scale", Vector2.ONE * (1.07 if _hot else 1.0), 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_orb.shockwave(0.6)
 		pressed.emit()
 		accept_event()
