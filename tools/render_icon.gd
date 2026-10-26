@@ -1,5 +1,5 @@
 extends Node
-## Renders the Oazy icon (the water orb with the mark) to PNG, for
+## Renders the Oazy icon (the water orb) to PNG, for
 ## assets/icon.png and the Windows .ico. Needs a real renderer:
 ##   xvfb-run godot --path . --rendering-driver opengl3 -- --render-icon=out.png
 
@@ -15,7 +15,7 @@ func _ready() -> void:
 	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
-	var icon := OazyMark.icon(px, 0.94, -0.8)
+	var icon := UpdateOrb.icon(px, 0.94, -0.8)
 	icon.size = Vector2(px, px)
 	vp.add_child(icon)
 	for i in 30:
