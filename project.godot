@@ -35,6 +35,7 @@ Catalog="*res://scripts/autoload/catalog.gd"
 Weather="*res://scripts/autoload/weather.gd"
 Browser="*res://scripts/autoload/browser.gd"
 Terminal="*res://scripts/autoload/terminal.gd"
+Files="*res://scripts/autoload/files.gd"
 Cleaner="*res://scripts/autoload/cleaner.gd"
 Cursors="*res://scripts/autoload/cursors.gd"
 

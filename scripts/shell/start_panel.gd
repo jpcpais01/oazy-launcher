@@ -663,14 +663,7 @@ func _run(cb: Callable) -> void:
 
 
 func _open_folder(path: String) -> void:
-	if not App.is_windows():
-		if path != "":
-			OS.shell_open(path)
-		return
-	if path == "":
-		OS.create_process("explorer.exe", [])
-	else:
-		OS.create_process("explorer.exe", [path.replace("/", "\\")])
+	Files.open_folder(path)
 
 
 func _show_menu(ref: String, at: Vector2) -> void:

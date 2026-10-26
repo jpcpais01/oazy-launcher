@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Oazy Files</title>
+<link rel="stylesheet" href="files.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<linearGradient id="fold-back" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#e7a64a"/>
+			<stop offset="1" stop-color="#b56a22"/>
+		</linearGradient>
+		<linearGradient id="fold-front" x1="0" y1="0" x2="0.35" y2="1">
+			<stop offset="0" stop-color="#ffe3a0"/>
+			<stop offset="0.45" stop-color="#fcc566"/>
+			<stop offset="1" stop-color="#e99a3d"/>
+		</linearGradient>
+		<linearGradient id="fold-gloss" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#fff" stop-opacity="0.55"/>
+			<stop offset="0.5" stop-color="#fff" stop-opacity="0"/>
+		</linearGradient>
+		<linearGradient id="drive-body" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#d9e4ec"/>
+			<stop offset="1" stop-color="#8fa1b0"/>
+		</linearGradient>
+		<linearGradient id="drive-face" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#4c5d6c"/>
+			<stop offset="1" stop-color="#26323d"/>
+		</linearGradient>
+		<linearGradient id="doc-sheet" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#ffffff"/>
+			<stop offset="1" stop-color="#dfe7ee"/>
+		</linearGradient>
+	</defs>
+</svg>
+
+<div id="strip">
+	<div id="tabs" role="tablist"></div>
+	<button id="newtab" title="New tab (Ctrl+T)"></button>
+	<div id="drag"></div>
+	<button id="settings-btn" class="icon-btn" title="Settings (Ctrl+,)"></button>
+	<div id="wincontrols">
+		<button id="win-min" title="Minimise"></button>
+		<button id="win-max" title="Maximise"></button>
+		<button id="win-close" title="Close"></button>
+	</div>
+</div>
+
+<div id="bar">
+	<div class="nav">
+		<button id="back" class="icon-btn" title="Back (Alt+Left)"></button>
+		<button id="fwd" class="icon-btn" title="Forward (Alt+Right)"></button>
+		<button id="up" class="icon-btn" title="Up (Alt+Up)"></button>
+		<button id="reload" class="icon-btn" title="Refresh (F5)"></button>
+	</div>
+	<div id="address">
+		<div id="crumbs"></div>
+		<input id="addr-in" type="text" spellcheck="false" autocomplete="off">
+	</div>
+	<div id="searchbox">
+		<span class="glyph"></span>
+		<input id="search-in" type="text" spellcheck="false" autocomplete="off" placeholder="Search">
+		<span id="search-spin"></span>
+		<button id="search-x" class="icon-btn small" title="Clear (Esc)"></button>
+	</div>
+	<div class="tools">
+		<button id="new-btn" class="pill-btn" title="New folder or file"></button>
+		<button id="sort-btn" class="icon-btn" title="Sort"></button>
+		<div id="viewseg">
+			<button data-view="grid" title="Icons (Ctrl+Shift+1)"></button>
+			<button data-view="list" title="Details (Ctrl+Shift+2)"></button>
+		</div>
+		<button id="details-btn" class="icon-btn" title="Details pane (Alt+P)"></button>
+	</div>
+</div>
+
+<div id="body">
+	<nav id="side"></nav>
+	<div id="side-grip"></div>
+	<main id="content">
+		<div id="listhead"></div>
+		<div id="scroller" tabindex="-1">
+			<div id="canvas"></div>
+			<div id="marquee"></div>
+			<div id="home"></div>
+			<div id="empty"></div>
+		</div>
+		<div id="selbar"></div>
+	</main>
+	<aside id="details"></aside>
+</div>
+
+<div id="status">
+	<span id="st-count"></span>
+	<span id="st-sel"></span>
+	<span id="st-busy"></span>
+	<div class="grow"></div>
+	<span id="st-free"></span>
+	<div id="zoom-wrap" title="Icon size (Ctrl+mouse wheel)">
+		<span class="zg small"></span>
+		<input id="zoom" type="range" min="48" max="208" step="4">
+		<span class="zg big"></span>
+	</div>
+</div>
+
+<div id="veil"></div>
+<div id="menu" class="panel menu"></div>
+<div id="settings" class="panel"></div>
+<div id="confirm" class="panel">
+	<div class="confirm-title"></div>
+	<div class="confirm-text"></div>
+	<div class="confirm-buttons">
+		<button id="confirm-no" class="btn">Cancel</button>
+		<button id="confirm-yes" class="btn danger">Delete</button>
+	</div>
+</div>
+<div id="ghost"></div>
+<div id="dropnote"></div>
+<div id="toast"></div>
+
+<script src="icons.js"></script>
+<script src="files.js"></script>
+</body>
+</html>
