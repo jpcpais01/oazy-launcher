@@ -34,6 +34,10 @@ var _update_btn: FxButton
 var _cards: NotesCards
 var _veil: Control
 var _step_pulse := 0.0
+var _stack: Control
+var _shown_state: StringName = &""
+## The version the notes view was built for; a recheck may find a newer one.
+var _notes_version := ""
 
 
 func _init() -> void:
@@ -41,13 +45,13 @@ func _init() -> void:
 
 
 func _build() -> void:
-	var stack := Control.new()
-	stack.custom_minimum_size = Vector2(0, 580)
-	content.add_child(stack)
+	_stack = Control.new()
+	_stack.custom_minimum_size = Vector2(0, 580)
+	content.add_child(_stack)
 	_notes_view = _build_notes()
-	stack.add_child(_notes_view)
+	_stack.add_child(_notes_view)
 	_progress_view = _build_progress()
-	stack.add_child(_progress_view)
+	_stack.add_child(_progress_view)
 	Updater.state_changed.connect(_on_state)
 	Updater.progress.connect(_on_progress)
 	var tip_timer := Timer.new()
@@ -65,7 +69,21 @@ func _focus_first() -> void:
 		_update_btn.grab_focus()
 
 
+## A recheck found an even newer update while the notes were open.
+func _rebuild_notes() -> void:
+	var old := _notes_view
+	_notes_view = _build_notes()
+	_notes_view.visible = old.visible
+	_notes_view.modulate.a = old.modulate.a
+	_stack.add_child(_notes_view)
+	_stack.move_child(_notes_view, 0)
+	old.queue_free()
+	_cards.reveal(0.0)
+	_update_btn.grab_focus.call_deferred()
+
+
 func _build_notes() -> Control:
+	_notes_version = str(Updater.latest.get("version", ""))
 	var view := Kit.hbox(36)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var left := Kit.vbox(12)
@@ -292,9 +310,16 @@ func _show_progress_view() -> void:
 func _on_state(state: StringName) -> void:
 	if not is_inside_tree():
 		return
+	# A recheck runs quietly underneath; coming back to the same ready state
+	# shouldn't replay the ready animation.
+	if state == &"checking" or (state == &"ready" and _shown_state == &"ready"):
+		return
+	_shown_state = state
 	var v := str(Updater.latest.get("version", ""))
 	match state:
 		&"available":
+			if str(Updater.latest.get("version", "")) != _notes_version:
+				_rebuild_notes()
 			if _progress_view.visible:
 				card.custom_minimum_size.x = width
 				_notes_view.visible = true

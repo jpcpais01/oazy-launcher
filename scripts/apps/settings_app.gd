@@ -9,6 +9,7 @@ var _col: VBoxContainer
 var _update_status: Label
 var _update_btn: FxButton
 var _update_icon: TextureRect
+var _recheck_btn: FxButton
 var _scan_btn: FxButton
 var _swatches: Array[Button] = []
 var _effects := {}
@@ -151,6 +152,11 @@ func _build_updates() -> void:
 	notes.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	notes.pressed.connect(func() -> void: main.show_patch_notes())
 	row.add_child(notes)
+	# With an update found, you can still look for an even newer one.
+	_recheck_btn = FxButton.make("Check again", "refresh", FxButton.Style.GHOST, 46)
+	_recheck_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_recheck_btn.pressed.connect(func() -> void: Updater.check())
+	row.add_child(_recheck_btn)
 	_update_btn = FxButton.make("Check for updates", "refresh", FxButton.Style.PRIMARY, 46)
 	_update_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_update_btn.pressed.connect(_on_update_button)
@@ -493,6 +499,7 @@ func _sync_update() -> void:
 	_update_icon.texture = Icons.tex(icon, 16, color)
 	_update_btn.text = btn
 	_update_btn.disabled = Updater.state == &"checking"
+	_recheck_btn.visible = Updater.state in [&"available", &"ready"]
 
 
 func _on_update_button() -> void:
