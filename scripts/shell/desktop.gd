@@ -56,7 +56,8 @@ var _recent_title: Label
 var _recent: HBoxContainer
 var _system: GlassPanel
 var _favs_title: Label
-var _favs: GridContainer
+var _favs: ReorderGrid
+var _skip_fill := false
 var _date_row: HBoxContainer
 var _weather_icon: TextureRect
 var _weather_text: Label
@@ -459,26 +460,40 @@ func _recent_tile(id: String) -> Control:
 func _build_favorites() -> void:
 	_favs_title = Kit.label("Favourites", 15, 700, Color(1, 1, 1, 0.82))
 	_top.add_child(_favs_title)
-	_favs = GridContainer.new()
+	_favs = ReorderGrid.new()
 	_favs.columns = FAV_COLS
-	_favs.add_theme_constant_override("h_separation", 4)
-	_favs.add_theme_constant_override("v_separation", 4)
+	_favs.reordered.connect(_on_favs_reordered)
 	_top.add_child(_favs)
 
 
 func _fill_favorites() -> void:
 	if _favs == null:
 		return
-	for c in _favs.get_children():
-		_favs.remove_child(c)
-		c.queue_free()
+	if _skip_fill:
+		# Our own drag saved this order; the tiles are already there.
+		_skip_fill = false
+		return
+	var tiles: Array[Control] = []
 	var refs := Catalog.favorites().slice(0, FAV_MAX)
 	for ref in refs:
-		_favs.add_child(_fav_tile(Catalog.item(ref)))
+		tiles.append(_fav_tile(Catalog.item(ref)))
 	if refs.is_empty():
 		# Nothing yet: one quiet tile that says how, and opens Start.
-		_favs.add_child(_fav_tile({"ref": "", "name": "Add favourites"}))
+		var add := _fav_tile({"ref": "", "name": "Add favourites"})
+		add.set_meta("fixed", true)
+		tiles.append(add)
+	_favs.set_tiles(tiles, fav_spec()["tile"])
 	_layout()
+
+
+## Dragged into a new order: saved for Start's favourites too.
+func _on_favs_reordered(from: int, to: int) -> void:
+	var refs := Catalog.favorites()
+	if from < 0 or from >= refs.size():
+		return
+	_skip_fill = true
+	Catalog.move_favorite(refs[from], to)
+	_skip_fill = false
 
 
 static func fav_spec() -> Dictionary:
@@ -537,6 +552,8 @@ func _fav_tile(it: Dictionary) -> Control:
 		t.tween_property(b, "scale", Vector2.ONE, 0.3)
 	)
 	b.pressed.connect(func() -> void:
+		if _favs.consume_drag():
+			return
 		Sfx.play(&"select")
 		if ref == "":
 			main.start.open()

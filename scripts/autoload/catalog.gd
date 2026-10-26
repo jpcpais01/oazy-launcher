@@ -879,7 +879,20 @@ func toggle_favorite(ref: String) -> bool:
 	return on
 
 
-## Favourites in the order they were added (library favourites from before
+## Moves a favourite to `to_index` in favorites() order (what the desktop,
+## Start and the second desktop screen all show).
+func move_favorite(ref: String, to_index: int) -> void:
+	var list := favorites()
+	var at := list.find(canonical(ref))
+	if at < 0:
+		return
+	list.remove_at(at)
+	list.insert(clampi(to_index, 0, list.size()), canonical(ref))
+	Settings.set_value("favorites", Array(list))
+	favorites_changed.emit()
+
+
+## Favourites in the order they were added or dragged into (library favourites from before
 ## the list existed come last).
 func favorites() -> Array[String]:
 	var out: Array[String] = []
