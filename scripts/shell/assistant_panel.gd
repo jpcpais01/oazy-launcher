@@ -56,6 +56,9 @@ var _composer: PanelContainer
 var _prompt: TextEdit
 var _send: Button
 var _expand: Button
+## Ask first / Allow all, under the box.
+var _mode: Button
+var _foot_note: Label
 var _tween: Tween
 var _idle: Timer
 var _follow := true
@@ -118,9 +121,30 @@ func _ready() -> void:
 	)
 
 	col.add_child(_build_composer())
-	var foot := Kit.label("Claude can make mistakes. It asks before changing anything.", 11, 500, App.TEXT_MUTE)
-	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var foot := Kit.hbox(8)
 	col.add_child(foot)
+	_mode = Button.new()
+	_mode.focus_mode = Control.FOCUS_NONE
+	_mode.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_mode.add_theme_font_override("font", Kit.font(500))
+	_mode.add_theme_font_size_override("font_size", 12)
+	_mode.pressed.connect(func() -> void:
+		Settings.set_value("claude_auto_allow", not bool(Settings.get_value("claude_auto_allow")))
+		Sfx.play(&"toggle")
+	)
+	foot.add_child(_mode)
+	_foot_note = Kit.label("", 11, 500, App.TEXT_MUTE)
+	_foot_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_foot_note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_foot_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_foot_note.clip_text = true
+	_foot_note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	foot.add_child(_foot_note)
+	_sync_mode()
+	Settings.changed.connect(func(key: String, _v: Variant) -> void:
+		if key == "claude_auto_allow":
+			_sync_mode()
+	)
 	col.add_theme_constant_override("separation", 10)
 
 	_cli = ClaudeCli.new()
@@ -344,6 +368,30 @@ func _build_composer() -> Control:
 	_fit_input()
 	_sync_send()
 	return _composer
+
+
+## Ask before changes, or let everything through (setting "claude_auto_allow").
+func _sync_mode() -> void:
+	var auto := bool(Settings.get_value("claude_auto_allow"))
+	var tint := App.WARNING if auto else Color(1, 1, 1, 0.62)
+	_mode.text = "Allow all" if auto else "Ask first"
+	_mode.icon = Icons.tex("bolt" if auto else "shield", 13, Color.WHITE)
+	_mode.tooltip_text = "Claude edits files and runs commands without asking. Click to have it ask first." if auto else "Claude asks before it edits files or runs commands. Click to allow everything without asking."
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+		_mode.add_theme_color_override(c, tint)
+	for c in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_hover_pressed_color"]:
+		_mode.add_theme_color_override(c, tint)
+	var bg := Color(App.WARNING, 0.12) if auto else Color(1, 1, 1, 0.05)
+	var line := Color(App.WARNING, 0.28) if auto else Color(1, 1, 1, 0.07)
+	_mode.add_theme_stylebox_override("normal", Kit.box(bg, 999, line, 1, 10, 4))
+	_mode.add_theme_stylebox_override("hover", Kit.box(Color(bg, bg.a + 0.05), 999, line, 1, 10, 4))
+	_mode.add_theme_stylebox_override("pressed", Kit.box(Color(bg, bg.a + 0.08), 999, line, 1, 10, 4))
+	_mode.add_theme_stylebox_override("hover_pressed", Kit.box(Color(bg, bg.a + 0.08), 999, line, 1, 10, 4))
+	_foot_note.text = "Claude can make mistakes."
+	# Anything waiting for an answer goes through once you switch it on.
+	if auto:
+		for id in _asks.keys():
+			_answer(str(id), true)
 
 
 func _composer_box(focus: bool) -> StyleBoxFlat:
@@ -1091,6 +1139,11 @@ static func _rel(p: String) -> String:
 func _ask(id: String, req: Dictionary) -> void:
 	var tool_name := str(req.get("tool_name", ""))
 	var input: Dictionary = req.get("input", {}) if req.get("input") is Dictionary else {}
+	if bool(Settings.get_value("claude_auto_allow")):
+		# Allow all: no card, the step just carries on.
+		if not mock:
+			_cli.answer(id, true, input)
+		return
 	var title := "Allow Claude to use %s?" % tool_name
 	var detail := ""
 	match tool_name:

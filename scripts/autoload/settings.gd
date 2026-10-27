@@ -51,6 +51,8 @@ const DEFAULTS := {
 	"flow_pinned": false,
 	"flow_in_library": false,
 	"claude_app_pinned": false,
+	## The orb's Claude popup lets every edit and command through without asking.
+	"claude_auto_allow": false,
 	"files_oazy": true,
 	"cleaner_watch": true,
 	"pointer": "oazy",
