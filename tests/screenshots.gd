@@ -465,6 +465,10 @@ func _assistant(main: Node) -> void:
 	a.open()
 	await _wait(0.9)
 	await shot("02d-assistant")
+	Settings.set_value("claude_auto_allow", true)
+	await _wait(0.3)
+	await shot("02d2-assistant-allow-all")
+	Settings.set_value("claude_auto_allow", false)
 	if live:
 		a.submit("In two short sentences: what is in my home folder?")
 		var waited := 0.0
