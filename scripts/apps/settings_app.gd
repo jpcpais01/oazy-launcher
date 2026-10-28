@@ -836,6 +836,7 @@ func _build_desktop() -> void:
 	_button_row(keys, "Keyboard shortcuts", "Every key Oazy listens for, on one sheet.", "Show", "keyboard", func() -> void: main.show_shortcuts(), "hotkeys keys")
 
 	var desk := _group("desktop", "Desktop cards")
+	_toggle_row(desk, "Show system stats", "The slim CPU, GPU and memory strip under the date on the desktop.", "show_stats", Callable(), "cpu gpu memory ram usage pill performance")
 	_toggle_row(desk, "Show CPU temperature", "On the desktop's This PC card. Comes from HWiNFO or LibreHardwareMonitor while one is running, otherwise from your motherboard's sensor (less exact).", "cpu_temp", Callable(), "sensor heat hwinfo")
 	_chips_row(desk, "Weather units", "Auto picks what's usual where you are.", [["auto", "Auto"], ["c", "°C"], ["f", "°F"]], _units, func(v: String) -> void:
 		Settings.set_value("weather_unit", v)

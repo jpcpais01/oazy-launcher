@@ -13,6 +13,7 @@ const DEFAULTS := {
 	"theme_app_windows": true,
 	"alt_tab": true,
 	"cpu_temp": false,
+	"show_stats": true,
 	"favorites": [],
 	"fav_icon_size": "medium",
 	"custom_icons": ["explorer", "terminal", "claude", "whatsapp"],

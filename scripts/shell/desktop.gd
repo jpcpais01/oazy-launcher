@@ -141,6 +141,8 @@ func _ready() -> void:
 			_drift()
 		elif key == "fav_icon_size":
 			_fill_favorites()
+		elif key == "show_stats":
+			_sync_system()
 	)
 	App.accent_changed.connect(func(_c: Color) -> void: _sync_clock_fx())
 	resized.connect(_layout)
@@ -712,7 +714,7 @@ static func _short_gpu(full: String) -> String:
 
 
 func _sync_system() -> void:
-	_system.visible = Host.available or _system.has_meta("mock")
+	_system.visible = bool(Settings.get_value("show_stats")) and (Host.available or _system.has_meta("mock"))
 	_layout()
 
 
@@ -725,7 +727,7 @@ func show_mock_stats(cpu: float, mem: float, sensors: Dictionary = {}) -> void:
 
 
 func _poll_stats() -> void:
-	if not Host.available or not is_visible_in_tree() or not _top.visible or not (Host.self_foreground or (Shell.native and not Host.fullscreen_app)):
+	if not Host.available or not _system.visible or not is_visible_in_tree() or not _top.visible or not (Host.self_foreground or (Shell.native and not Host.fullscreen_app)):
 		return
 	Host.stats(func(d: Dictionary) -> void:
 		if not d.get("ok", false):
