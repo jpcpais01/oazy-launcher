@@ -1,0 +1,657 @@
+class_name Hyperliquid
+extends Node
+## Crypto prices, charts, the order book, trades and your own positions from
+## Hyperliquid's public API: free, keyless and read-only. All it ever knows
+## about you is your wallet address, which is public anyway.
+##
+## Prices (one WebSocket feed of every coin's mid) and your positions keep
+## ticking in the background. The order book, trades and live candles for the
+## coin on screen only stream while the trading page is in view (`set_focus`).
+## Placing orders would go through HlExchange, which is view-only for now.
+
+signal prices_changed
+## The focused coin's book, trades, candles or stats moved.
+signal market_changed
+signal account_changed
+signal status_changed
+
+const INFO := "https://api.hyperliquid.xyz/info"
+const WS_URL := "wss://api.hyperliquid.xyz/ws"
+const INTERVALS := {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+const CANDLES := 160
+const MAX_TRADES := 80
+## Seconds between REST polls: every coin's 24h stats, your account (in the
+## background and while you look), and the ticker's day lines.
+const CTX_EVERY := 60.0
+const ACCOUNT_EVERY := 15.0
+const ACCOUNT_EVERY_FOCUS := 4.0
+const SPARK_EVERY := 600.0
+const PING_EVERY := 30.0
+
+## coin -> mid price, straight from the feed (strings; read with price()).
+var mids := {}
+## coin -> {mark, prev, vol, oi, funding, oracle}
+var ctxs := {}
+## coin -> {sz: size decimals, lev: max leverage}
+var meta := {}
+## coin -> the last 24 hourly closes, for the ticker.
+var sparks := {}
+## The focused coin's candles, oldest first: [t (s), open, high, low, close, volume].
+var candles: Array = []
+## {bids: [[px, sz]], asks: [[px, sz]], time}, best price first on both sides.
+var book := {}
+## Newest first: {px, sz, side ("B" buy / "A" sell), time (ms), tid, seen (ticks ms)}.
+var trades: Array = []
+## parse_account() of your wallet, {} until it's known.
+var account := {}
+## True while the WebSocket feed is open.
+var live := false
+var focused := false
+var last_error := ""
+
+var _ws: WebSocketPeer
+var _was_open := false
+var _retry_in := 0.0
+var _backoff := 2.0
+var _ping_in := PING_EVERY
+var _ctx_in := 0.0
+var _acct_in := 0.0
+var _subs := {}
+var _mock := false
+var _started := false
+var _ctx_busy := false
+var _acct_busy := false
+var _spark_busy := false
+var _spark_at := 0
+var _candle_key := ""
+var _candle_at := 0
+
+
+func _ready() -> void:
+	set_process(false)
+	Settings.changed.connect(func(key: String, _v: Variant) -> void:
+		match key:
+			"hl_coin", "hl_interval":
+				candles = []
+				book = {}
+				trades = []
+				_candle_key = ""
+				market_changed.emit()
+				if focused:
+					_fetch_candles()
+				_sync_subs()
+			"hl_address":
+				account = {}
+				account_changed.emit()
+				_acct_in = 0.0
+			"hl_coins":
+				_sync_subs()
+				_spark_at = 0
+				if focused:
+					_fetch_sparks()
+	)
+
+
+## Starts the background feed. Nothing connects in tests unless forced.
+func start(force: bool = false) -> void:
+	if _started or _mock or (App.smoke_test and not force):
+		return
+	_started = true
+	set_process(true)
+	_connect()
+
+
+# --- Settings ----------------------------------------------------------------------------
+
+static func coins() -> PackedStringArray:
+	var out := PackedStringArray()
+	for c in Settings.get_value("hl_coins"):
+		var t := str(c).strip_edges()
+		if t != "" and not out.has(t):
+			out.append(t)
+	return out
+
+
+static func coin() -> String:
+	var c := str(Settings.get_value("hl_coin"))
+	return c if c != "" else "BTC"
+
+
+static func interval() -> String:
+	var i := str(Settings.get_value("hl_interval"))
+	return i if INTERVALS.has(i) else "1h"
+
+
+static func address() -> String:
+	var a := str(Settings.get_value("hl_address")).strip_edges()
+	return a.to_lower() if is_address(a) else ""
+
+
+## A wallet address: 0x and 40 hex digits. Never a private key (that's 64).
+static func is_address(text: String) -> bool:
+	var t := text.strip_edges()
+	if t.length() != 42 or not t.begins_with("0x"):
+		return false
+	return t.substr(2).is_valid_hex_number()
+
+
+## "btc, eth  kpepe" -> ["BTC", "ETH", "kPEPE"], spelt the way Hyperliquid does
+## when it knows the coin.
+func parse_coins(text: String) -> PackedStringArray:
+	var known := {}
+	for c in meta.keys():
+		known[str(c).to_upper()] = c
+	var out := PackedStringArray()
+	for part in text.replace(";", ",").replace(" ", ",").split(",", false):
+		var t := part.strip_edges().trim_suffix("-USD").trim_suffix("/USD")
+		if t == "":
+			continue
+		t = str(known.get(t.to_upper(), t.to_upper()))
+		if not out.has(t) and out.size() < 8:
+			out.append(t)
+	return out
+
+
+# --- Reading -------------------------------------------------------------------------------------
+
+## The latest price: the live mid, else the stats feed's mid, else its mark.
+func price(c: String) -> float:
+	if mids.has(c):
+		return float(mids[c])
+	var x: Dictionary = ctxs.get(c, {})
+	return float(x.get("mid", 0.0)) if float(x.get("mid", 0.0)) > 0.0 else float(x.get("mark", 0.0))
+
+
+## Yesterday's price at this time (for the 24h change), 0 when unknown.
+func prev(c: String) -> float:
+	return float((ctxs.get(c, {}) as Dictionary).get("prev", 0.0))
+
+
+func change_pct(c: String) -> float:
+	var p := prev(c)
+	return (price(c) - p) / p * 100.0 if p > 0.0 else 0.0
+
+
+func sz_decimals(c: String) -> int:
+	return int((meta.get(c, {}) as Dictionary).get("sz", 4))
+
+
+## Unrealised P&L of a position at the live price.
+func live_pnl(pos: Dictionary) -> float:
+	var m := price(str(pos["coin"]))
+	if m <= 0.0:
+		return float(pos["upnl"])
+	return float(pos["szi"]) * (m - float(pos["entry"]))
+
+
+## Account value with every position marked at the live price.
+func live_value() -> float:
+	if account.is_empty():
+		return 0.0
+	var v := float(account["value"])
+	for p in account["positions"]:
+		v += live_pnl(p) - float(p["upnl"])
+	return v
+
+
+## The best bid and ask: [bid, ask], or [] when there's no book yet.
+func top_of_book() -> Array:
+	if book.is_empty() or (book["bids"] as Array).is_empty() or (book["asks"] as Array).is_empty():
+		return []
+	return [float(book["bids"][0][0]), float(book["asks"][0][0])]
+
+
+# --- Focus: what streams while the page is in view ---------------------------------------------
+
+func set_focus(on: bool) -> void:
+	if on == focused:
+		return
+	focused = on
+	if _mock:
+		return
+	if on:
+		start()
+		_acct_in = 0.0
+		if candles.is_empty() or _candle_key != coin() + "|" + interval() or _now() - _candle_at > 60:
+			_fetch_candles()
+		if _now() - _spark_at > SPARK_EVERY:
+			_fetch_sparks()
+	else:
+		# Old book and trades would be wrong next time; start clean.
+		book = {}
+		trades = []
+	_sync_subs()
+
+
+func _wanted() -> Dictionary:
+	var out := {"mids": {"type": "allMids"}}
+	# Every coin you follow or hold also gets its own small stats feed (mid,
+	# mark, 24h change), so the ticker and your P&L tick even without allMids.
+	var held := []
+	for p in account.get("positions", []):
+		held.append(str(p["coin"]))
+	for c in Array(coins()) + held:
+		out["ctx:" + c] = {"type": "activeAssetCtx", "coin": c}
+	if focused:
+		var c := coin()
+		out["book:" + c] = {"type": "l2Book", "coin": c}
+		out["trades:" + c] = {"type": "trades", "coin": c}
+		out["candle:" + c + ":" + interval()] = {"type": "candle", "coin": c, "interval": interval()}
+	return out
+
+
+func _sync_subs() -> void:
+	if not live:
+		return
+	var want := _wanted()
+	for key in _subs.keys():
+		if not want.has(key):
+			_send({"method": "unsubscribe", "subscription": _subs[key]})
+			_subs.erase(key)
+	for key in want:
+		if not _subs.has(key):
+			_send({"method": "subscribe", "subscription": want[key]})
+			_subs[key] = want[key]
+
+
+# --- WebSocket -------------------------------------------------------------------------------------
+
+func _connect() -> void:
+	_ws = WebSocketPeer.new()
+	# Every coin's mid in one message: give it room.
+	_ws.inbound_buffer_size = 4 << 20
+	_ws.max_queued_packets = 8192
+	_was_open = false
+	if _ws.connect_to_url(WS_URL) != OK:
+		_ws = null
+		_retry_in = _backoff
+		_backoff = minf(_backoff * 2.0, 60.0)
+
+
+func _send(msg: Dictionary) -> void:
+	if _ws and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN:
+		_ws.send_text(JSON.stringify(msg))
+
+
+func _process(delta: float) -> void:
+	_poll_ws(delta)
+	_ctx_in -= delta
+	if _ctx_in <= 0.0:
+		_ctx_in = CTX_EVERY
+		_fetch_ctxs()
+	_acct_in -= delta
+	if _acct_in <= 0.0:
+		_acct_in = ACCOUNT_EVERY_FOCUS if focused else ACCOUNT_EVERY
+		_fetch_account()
+
+
+func _poll_ws(delta: float) -> void:
+	if _ws == null:
+		_retry_in -= delta
+		if _retry_in <= 0.0:
+			_connect()
+		return
+	_ws.poll()
+	var st := _ws.get_ready_state()
+	if st == WebSocketPeer.STATE_OPEN:
+		if not _was_open:
+			_was_open = true
+			_backoff = 2.0
+			_ping_in = PING_EVERY
+			live = true
+			_subs.clear()
+			_sync_subs()
+			status_changed.emit()
+		var mids_moved := false
+		var market_moved := false
+		while _ws.get_available_packet_count() > 0:
+			var j: Variant = JSON.parse_string(_ws.get_packet().get_string_from_utf8())
+			if not (j is Dictionary):
+				continue
+			match _on_message(j):
+				1:
+					mids_moved = true
+				2:
+					market_moved = true
+		if mids_moved:
+			prices_changed.emit()
+		if market_moved:
+			market_changed.emit()
+		_ping_in -= delta
+		if _ping_in <= 0.0:
+			_ping_in = PING_EVERY
+			_send({"method": "ping"})
+	elif st == WebSocketPeer.STATE_CLOSED:
+		last_error = "feed closed (%d %s)" % [_ws.get_close_code(), _ws.get_close_reason()]
+		_ws = null
+		_subs.clear()
+		_retry_in = _backoff
+		_backoff = minf(_backoff * 2.0, 60.0)
+		if live or _was_open:
+			live = false
+			status_changed.emit()
+
+
+## One feed message. 1 = prices moved, 2 = the focused market moved, 0 = nothing.
+func _on_message(j: Dictionary) -> int:
+	var data: Variant = j.get("data")
+	match str(j.get("channel", "")):
+		"allMids":
+			if data is Dictionary and data.get("mids") is Dictionary:
+				mids = data["mids"]
+				return 1
+		"l2Book":
+			if data is Dictionary and str(data.get("coin", "")) == coin():
+				var b := parse_book(data)
+				if not b.is_empty():
+					book = b
+					return 2
+		"trades":
+			if data is Array and focused:
+				return 2 if add_trades(data) else 0
+		"candle":
+			if data is Dictionary and str(data.get("s", "")) == coin() and str(data.get("i", "")) == interval():
+				_merge_candle(data)
+				return 2
+		"activeAssetCtx":
+			if data is Dictionary and data.get("ctx") is Dictionary:
+				var c := str(data.get("coin", ""))
+				ctxs[c] = parse_ctx(data["ctx"])
+				return 2 if focused and c == coin() else 1
+		"error":
+			last_error = str(data)
+	return 0
+
+
+func add_trades(list: Array) -> bool:
+	var c := coin()
+	var seen := {}
+	for t in trades:
+		seen[t["tid"]] = true
+	var now := Time.get_ticks_msec()
+	var fresh: Array = []
+	for d in list:
+		if not (d is Dictionary) or str(d.get("coin", "")) != c:
+			continue
+		var tid: Variant = d.get("tid", str(d.get("hash", "")) + str(d.get("time", "")))
+		if seen.has(tid):
+			continue
+		seen[tid] = true
+		# The first batch is history, so it doesn't flash.
+		fresh.append({"px": float(d.get("px", 0)), "sz": float(d.get("sz", 0)), "side": str(d.get("side", "B")),
+			"time": int(d.get("time", 0)), "tid": tid, "seen": now if not trades.is_empty() else 0})
+	if fresh.is_empty():
+		return false
+	trades.append_array(fresh)
+	trades.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["time"]) > int(b["time"]))
+	if trades.size() > MAX_TRADES:
+		trades.resize(MAX_TRADES)
+	return true
+
+
+func _merge_candle(d: Dictionary) -> void:
+	var row := [int(d.get("t", 0)) / 1000, float(d.get("o", 0)), float(d.get("h", 0)), float(d.get("l", 0)), float(d.get("c", 0)), float(d.get("v", 0))]
+	if candles.is_empty():
+		return
+	var last: Array = candles[candles.size() - 1]
+	if int(row[0]) == int(last[0]):
+		candles[candles.size() - 1] = row
+	elif int(row[0]) > int(last[0]):
+		candles.append(row)
+		if candles.size() > CANDLES + 40:
+			candles = candles.slice(candles.size() - CANDLES)
+
+
+# --- REST ----------------------------------------------------------------------------------------
+
+func _now() -> int:
+	return int(Time.get_unix_time_from_system())
+
+
+func _post(body: Dictionary) -> Variant:
+	var http := HTTPRequest.new()
+	http.timeout = 12.0
+	http.use_threads = true
+	add_child(http)
+	var out: Variant = null
+	if http.request(INFO, ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify(body)) == OK:
+		var res: Array = await http.request_completed
+		if int(res[0]) == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200:
+			out = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+		else:
+			last_error = "%s: result %d, HTTP %d" % [str(body.get("type")), int(res[0]), int(res[1])]
+	http.queue_free()
+	return out
+
+
+func _fetch_ctxs() -> void:
+	if _ctx_busy or _mock:
+		return
+	_ctx_busy = true
+	var j: Variant = await _post({"type": "metaAndAssetCtxs"})
+	_ctx_busy = false
+	if parse_meta_and_ctxs(j, meta, ctxs):
+		prices_changed.emit()
+
+
+func _fetch_account() -> void:
+	var addr := address()
+	if _acct_busy or _mock or addr == "":
+		return
+	_acct_busy = true
+	var j: Variant = await _post({"type": "clearinghouseState", "user": addr})
+	_acct_busy = false
+	if addr != address():
+		return
+	var a := parse_account(j)
+	if not a.is_empty():
+		account = a
+		account_changed.emit()
+		_sync_subs()
+
+
+func _fetch_candles() -> void:
+	if _mock:
+		return
+	var c := coin()
+	var iv := interval()
+	var key := c + "|" + iv
+	var end := _now() * 1000
+	var j: Variant = await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": iv, "startTime": end - int(INTERVALS[iv]) * 1000 * CANDLES, "endTime": end}})
+	if key != coin() + "|" + interval():
+		return
+	var rows := parse_candles(j)
+	if not rows.is_empty():
+		candles = rows
+		_candle_key = key
+		_candle_at = _now()
+		market_changed.emit()
+
+
+func _fetch_sparks() -> void:
+	if _spark_busy or _mock:
+		return
+	_spark_busy = true
+	_spark_at = _now()
+	var end := _now() * 1000
+	for c in coins():
+		var rows := parse_candles(await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": "1h", "startTime": end - 24 * 3600 * 1000, "endTime": end}}))
+		if not rows.is_empty():
+			var closes := []
+			for r in rows:
+				closes.append(r[4])
+			sparks[c] = closes
+			prices_changed.emit()
+	_spark_busy = false
+
+
+# --- Parsing (static, so tests can feed it answers) --------------------------------------------------
+
+## metaAndAssetCtxs -> fills `meta_out` and `ctx_out`. False if it wasn't one.
+static func parse_meta_and_ctxs(j: Variant, meta_out: Dictionary, ctx_out: Dictionary) -> bool:
+	if not (j is Array) or j.size() < 2 or not (j[0] is Dictionary) or not (j[1] is Array):
+		return false
+	var uni: Variant = j[0].get("universe")
+	if not (uni is Array):
+		return false
+	for i in mini(uni.size(), j[1].size()):
+		var u: Variant = uni[i]
+		var x: Variant = j[1][i]
+		if not (u is Dictionary) or not (x is Dictionary):
+			continue
+		var name := str(u.get("name", ""))
+		meta_out[name] = {"sz": int(u.get("szDecimals", 4)), "lev": int(u.get("maxLeverage", 1))}
+		ctx_out[name] = parse_ctx(x)
+	return true
+
+
+static func parse_ctx(x: Dictionary) -> Dictionary:
+	return {
+		"mark": _f(x.get("markPx")), "mid": _f(x.get("midPx")), "prev": _f(x.get("prevDayPx")), "vol": _f(x.get("dayNtlVlm")),
+		"oi": _f(x.get("openInterest")), "funding": _f(x.get("funding")), "oracle": _f(x.get("oraclePx")),
+	}
+
+
+static func _f(v: Variant) -> float:
+	return float(v) if v != null else 0.0
+
+
+## l2Book -> {bids, asks, time}, {} if it isn't one.
+static func parse_book(d: Dictionary) -> Dictionary:
+	var levels: Variant = d.get("levels")
+	if not (levels is Array) or levels.size() < 2:
+		return {}
+	var sides := []
+	for side in [levels[0], levels[1]]:
+		var rows := []
+		if side is Array:
+			for l in side:
+				if l is Dictionary:
+					rows.append([float(l.get("px", 0)), float(l.get("sz", 0))])
+		sides.append(rows)
+	return {"bids": sides[0], "asks": sides[1], "time": int(d.get("time", 0))}
+
+
+## candleSnapshot -> [[t (s), o, h, l, c, v]], oldest first.
+static func parse_candles(j: Variant) -> Array:
+	var out := []
+	if not (j is Array):
+		return out
+	for d in j:
+		if d is Dictionary and d.has("t") and d.has("c"):
+			out.append([int(d["t"]) / 1000, float(d.get("o", 0)), float(d.get("h", 0)), float(d.get("l", 0)), float(d["c"]), float(d.get("v", 0))])
+	out.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) < int(b[0]))
+	return out
+
+
+## clearinghouseState -> {value, ntl, margin, withdrawable, positions: [...]}.
+static func parse_account(j: Variant) -> Dictionary:
+	if not (j is Dictionary) or not (j.get("marginSummary") is Dictionary):
+		return {}
+	var ms: Dictionary = j["marginSummary"]
+	var positions := []
+	var list: Variant = j.get("assetPositions", [])
+	if list is Array:
+		for ap in list:
+			if not (ap is Dictionary) or not (ap.get("position") is Dictionary):
+				continue
+			var p: Dictionary = ap["position"]
+			var szi := _f(p.get("szi"))
+			if szi == 0.0:
+				continue
+			var lev: Variant = p.get("leverage", {})
+			positions.append({
+				"coin": str(p.get("coin", "")), "szi": szi, "entry": _f(p.get("entryPx")),
+				"value": _f(p.get("positionValue")), "upnl": _f(p.get("unrealizedPnl")),
+				"roe": _f(p.get("returnOnEquity")), "liq": _f(p.get("liquidationPx")),
+				"margin": _f(p.get("marginUsed")),
+				"lev": int((lev as Dictionary).get("value", 1)) if lev is Dictionary else 1,
+				"cross": str((lev as Dictionary).get("type", "cross")) == "cross" if lev is Dictionary else true,
+			})
+	# Biggest first.
+	positions.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return absf(float(a["value"])) > absf(float(b["value"])))
+	return {
+		"value": _f(ms.get("accountValue")), "ntl": _f(ms.get("totalNtlPos")),
+		"margin": _f(ms.get("totalMarginUsed")), "withdrawable": _f(j.get("withdrawable")),
+		"positions": positions, "at": int(Time.get_unix_time_from_system()),
+	}
+
+
+# --- Formatting --------------------------------------------------------------------------------------
+
+## A price the way Hyperliquid shows it: five significant figures, grouped.
+static func fmt_px(v: float) -> String:
+	return group(v, px_digits(v)) if v != 0.0 else "0"
+
+
+## Decimals a price of this size gets (five significant figures).
+static func px_digits(v: float) -> int:
+	if v == 0.0:
+		return 0
+	return clampi(4 - floori(log(absf(v)) / log(10.0)), 0, 8)
+
+
+## A size in coins, to the coin's own precision.
+static func fmt_sz(v: float, decimals: int) -> String:
+	return group(v, clampi(decimals, 0, 8))
+
+
+## $1.23B, $845.2M, $12.4K, $950.00
+static func fmt_usd_short(v: float) -> String:
+	var a := absf(v)
+	var s := "-" if v < 0.0 else ""
+	if a >= 1e9:
+		return s + "$%.2fB" % (a / 1e9)
+	if a >= 1e6:
+		return s + "$%.1fM" % (a / 1e6)
+	if a >= 1e4:
+		return s + "$%.1fK" % (a / 1e3)
+	return s + "$" + group(a, 2)
+
+
+## $1,234.56, with a sign when asked (for P&L).
+static func fmt_usd(v: float, signed: bool = false) -> String:
+	var sign := ""
+	if v < 0.0:
+		sign = "−"
+	elif signed:
+		sign = "+"
+	return sign + "$" + group(absf(v), 2)
+
+
+static func group(v: float, digits: int) -> String:
+	var a := snappedf(absf(v), pow(10.0, -digits))
+	var whole := int(floor(a + 0.0000001))
+	var s := str(whole)
+	var groups := PackedStringArray()
+	while s.length() > 3:
+		groups.insert(0, s.substr(s.length() - 3))
+		s = s.substr(0, s.length() - 3)
+	groups.insert(0, s)
+	var out := ",".join(groups)
+	if digits > 0:
+		out += (("%." + str(digits) + "f") % maxf(0.0, a - whole)).substr(1)
+	return ("-" if v < 0.0 and a > 0.0 else "") + out
+
+
+static func short_address(a: String) -> String:
+	return a.substr(0, 6) + "…" + a.substr(a.length() - 4) if a.length() > 12 else a
+
+
+# --- Screenshots and tests ------------------------------------------------------------------------
+
+## Uses this data instead of the network: any of mids, ctxs, meta, sparks,
+## candles, book, trades, account.
+func set_mock(d: Dictionary) -> void:
+	_mock = true
+	set_process(false)
+	if _ws:
+		_ws.close()
+		_ws = null
+	for k in d:
+		set(k, d[k])
+	live = true
+	status_changed.emit()
+	prices_changed.emit()
+	market_changed.emit()
+	account_changed.emit()

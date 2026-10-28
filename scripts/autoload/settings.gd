@@ -53,6 +53,13 @@ const DEFAULTS := {
 	## Yahoo Finance symbols on the desktop's second screen.
 	"market_symbols": ["^GSPC", "^IXIC", "NVDA", "AAPL", "MSFT", "BTC-USD"],
 	"news_topic": "top",
+	## The desktop's trading desk (Hyperliquid): the coins along the top, the
+	## one on the chart, its candle size, and the wallet whose positions show.
+	## Only ever a public address; never a key.
+	"hl_coins": ["BTC", "ETH", "SOL", "HYPE"],
+	"hl_coin": "BTC",
+	"hl_interval": "1h",
+	"hl_address": "",
 	"browser_links": true,
 	"browser_pinned": false,
 	"terminal_oazy": true,

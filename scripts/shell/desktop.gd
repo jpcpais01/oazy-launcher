@@ -4,8 +4,9 @@ extends Control
 ## weather with a slim system glance under them, your favourites, a "Continue
 ## playing" card with the last game's artwork and recently played covers.
 ## One scroll down there's a second screen (DesktopBelow): ten covers,
-## markets, news, the forecast and the month. The wheel glides between the
-## two on a soft spring, and whichever screen is out of sight is parked.
+## markets, news, the forecast and the month. One more and there's a trading
+## desk (DesktopTrade). The wheel glides between them on a soft spring, and
+## whichever screen is out of sight is parked.
 
 const LEFT := 64.0
 const TOP := 52.0
@@ -33,9 +34,11 @@ const SHADE := preload("res://shaders/hero_shade.gdshader")
 signal scrolled(px: float, top_alpha: float)
 
 var main: Node
-## The first screen (everything above) and the second one, below it.
+## The first screen (everything above), the second one below it, and the
+## trading desk below that.
 var _top: Control
 var below: DesktopBelow
+var trade: DesktopTrade
 var _scrim: ColorRect
 var _hint: Button
 var _scroll := 0.0
@@ -96,6 +99,10 @@ func _ready() -> void:
 	below.main = main
 	below.visible = false
 	add_child(below)
+	trade = DesktopTrade.new()
+	trade.main = main
+	trade.visible = false
+	add_child(trade)
 	_pan_timer = Timer.new()
 	_pan_timer.one_shot = true
 	_pan_timer.wait_time = 0.16
@@ -750,6 +757,8 @@ func _layout() -> void:
 	_top.size = size
 	below.size = size
 	below.layout_for(size.x, size.y - Taskbar.RESERVE, LEFT)
+	trade.size = size
+	trade.layout_for(size.x, size.y - Taskbar.RESERVE, LEFT)
 	_hint.position = Vector2(roundf((size.x - _hint.size.x) * 0.5), size.y - Taskbar.RESERVE - _hint.size.y - 10.0)
 	_goal = clampf(_goal, 0.0, max_scroll())
 	_scroll = clampf(_scroll, 0.0, max_scroll())
@@ -820,15 +829,39 @@ func _build_hint() -> void:
 	Music.toggled.connect(func(on: bool) -> void: _hint.visible = not on)
 
 
-## The furthest the desktop scrolls: the second screen, or past it when the
-## second screen is taller than one (a small window).
+## Where each screen starts and the furthest it scrolls while still on it
+## (past its start when it's taller than one screen, in a small window).
+func _pages() -> Array:
+	var p := maxf(size.y, 1.0)
+	var below_span := maxf(p, below.wanted_height + Taskbar.RESERVE)
+	var trade_at := p + below_span
+	return [[0.0, 0.0], [p, p + below_span - p], [trade_at, trade_at + maxf(p, trade.wanted_height + Taskbar.RESERVE) - p]]
+
+
+## The furthest the desktop scrolls: the bottom of the trading desk.
 func max_scroll() -> float:
-	return maxf(size.y, below.wanted_height + Taskbar.RESERVE)
+	var pages := _pages()
+	return float(pages[pages.size() - 1][1])
 
 
-## 1 = the second screen, -1 = back to the first.
+## The screen `y` is on (or heading past): the last one starting at or above it.
+func _page_at(y: float) -> int:
+	var pages := _pages()
+	var i := 0
+	for j in pages.size():
+		if y >= float(pages[j][0]) - 1.0:
+			i = j
+	return i
+
+
+## 1 = the next screen down, -1 = the one above.
 func page(dir: int) -> void:
-	scroll_to(size.y if dir > 0 else 0.0)
+	var pages := _pages()
+	var i := _page_at(_goal)
+	if dir < 0 and _goal > float(pages[i][0]) + 1.0:
+		scroll_to(float(pages[i][0]))
+	else:
+		scroll_to(float(pages[clampi(i + signi(dir), 0, pages.size() - 1)][0]))
 
 
 func scroll_to(y: float) -> void:
@@ -871,23 +904,41 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+## A notch pages a whole screen, except inside one that's taller than the
+## window, where it scrolls by STEP until that screen's end.
 func _wheel(dir: float, factor: float) -> void:
-	var p := size.y
+	var pages := _pages()
+	var i := _page_at(_goal)
+	var start := float(pages[i][0])
+	var last := float(pages[i][1])
 	if dir > 0.0:
-		_goal = p if _goal < p - 1.0 else minf(_goal + STEP * factor, max_scroll())
+		if _goal >= start - 1.0 and _goal < last - 1.0:
+			_goal = minf(_goal + STEP * factor, last)
+		elif i + 1 < pages.size():
+			_goal = float(pages[i + 1][0])
 	else:
-		_goal = 0.0 if _goal <= p + 1.0 else maxf(_goal - STEP * factor, p)
+		if _goal > last + 1.0:
+			_goal = last
+		elif _goal > start + 1.0:
+			_goal = maxf(_goal - STEP * factor, start)
+		elif i > 0:
+			_goal = float(pages[i - 1][1])
+		else:
+			_goal = 0.0
 	_sync_active()
 	set_process(true)
 
 
-## A touchpad let go between the screens: finish the trip it started.
+## A touchpad let go between two screens: finish the trip it started.
 func _settle() -> void:
-	var p := size.y
-	if _goal <= 0.0 or _goal >= p:
+	var pages := _pages()
+	var i := _page_at(_goal)
+	var last := float(pages[i][1])
+	if i + 1 >= pages.size() or _goal <= last:
 		return
-	var k := _goal / p
-	scroll_to(p if (k > 0.18 if _pan_dir > 0.0 else k > 0.82) else 0.0)
+	var next := float(pages[i + 1][0])
+	var k := (_goal - last) / maxf(next - last, 1.0)
+	scroll_to(next if (k > 0.18 if _pan_dir > 0.0 else k > 0.82) else last)
 
 
 func _process(delta: float) -> void:
@@ -907,26 +958,42 @@ func _process(delta: float) -> void:
 		_sync_active()
 
 
-## The second screen wakes as soon as a trip down starts (so its data is on
-## the way while it glides in) and sleeps once the first is fully back.
+## A screen wakes as soon as a trip towards it starts (so its data is on the
+## way while it glides in) and sleeps once it's fully out of sight.
 func _sync_active() -> void:
-	below.set_active(_goal > 0.0 or _scroll > 0.5)
+	var pages := _pages()
+	var trade_at := float(pages[2][0])
+	var below_end := float(pages[1][1])
+	var lo := minf(_goal, _scroll)
+	var hi := maxf(_goal, _scroll)
+	below.set_active(hi > 0.5 and lo < trade_at - 0.5)
+	trade.set_active(hi > below_end + 0.5)
 
 
 func _apply_scroll() -> void:
+	var pages := _pages()
 	var p := maxf(size.y, 1.0)
+	var below_at := float(pages[1][0])
+	var below_end := float(pages[1][1])
+	var trade_at := float(pages[2][0])
 	var k := clampf(_scroll / p, 0.0, 1.0)
+	# How far along the trip from the second screen's end to the desk.
+	var k2 := clampf((_scroll - below_end) / maxf(trade_at - below_end, 1.0), 0.0, 1.0)
 	_top.position.y = -roundf(_scroll)
-	below.position.y = roundf(p - _scroll)
+	below.position.y = roundf(below_at - _scroll)
+	trade.position.y = roundf(trade_at - _scroll)
 	var top_a := 1.0 - smoothstep(0.2, 0.95, k)
-	var below_a := smoothstep(0.08, 0.8, k)
+	var below_a := smoothstep(0.08, 0.8, k) * (1.0 - smoothstep(0.2, 0.95, k2))
+	var trade_a := smoothstep(0.08, 0.8, k2)
 	_top.modulate.a = top_a
 	below.modulate.a = below_a
+	trade.modulate.a = trade_a
 	scrolled.emit(_scroll, top_a)
 	_top.visible = k < 0.999
-	below.visible = k > 0.001
+	below.visible = k > 0.001 and k2 < 0.999
+	trade.visible = k2 > 0.001
 	_scrim.visible = k > 0.001
-	_scrim.color.a = 0.14 * k
+	_scrim.color.a = 0.14 * k + 0.04 * k2
 	_hint.modulate.a = 1.0 - smoothstep(0.0, 0.12, k)
 	_sync_shadows()
 	# Nothing on the first screen needs to move while it's out of sight.
@@ -947,6 +1014,10 @@ func _sync_shadows() -> void:
 	for c in below.parts():
 		if c is GlassPanel:
 			(c as GlassPanel).set_shadow_fade(b * b * b)
+	var t := trade.modulate.a * shown
+	for c in trade.parts():
+		if c is GlassPanel:
+			(c as GlassPanel).set_shadow_fade(t * t * t)
 
 
 func intro() -> void:
