@@ -25,6 +25,8 @@ var _shown := 0.0
 var _want := false
 var _dim := 0.0
 var _clean := false
+var _scroll := 0.0
+var _top_a := 1.0
 var _fade: Tween
 
 
@@ -110,6 +112,14 @@ func dim(on: bool) -> void:
 	_apply()
 
 
+## It belongs to the desktop's first screen: it scrolls away with it,
+## fading out the same way, so it never sits over the second screen.
+func follow_scroll(px: float, top_alpha: float) -> void:
+	_scroll = px
+	_top_a = top_alpha
+	_apply()
+
+
 ## The clean view (see Desktop.set_clean): off with everything else.
 func set_clean(on: bool) -> void:
 	_clean = on
@@ -134,8 +144,8 @@ func _set_shown(on: bool) -> void:
 
 
 func _apply() -> void:
-	modulate.a = _shown * (1.0 - _dim)
-	position.y = (1.0 - _shown) * 10.0
+	modulate.a = _shown * (1.0 - _dim) * _top_a
+	position.y = (1.0 - _shown) * 10.0 - roundf(_scroll)
 
 
 func _process(_delta: float) -> void:
