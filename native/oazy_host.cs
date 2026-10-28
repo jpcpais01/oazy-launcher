@@ -2328,7 +2328,7 @@ namespace Oazy
 					// else whichever other window has gone longest without one.
 					IntPtr pick = IntPtr.Zero;
 					if (alive.Contains(fg.ToInt64()) && !Native.IsIconic(fg) && (now - fgSince).TotalMilliseconds >= 500
-						&& Age(fg, now) >= ((now - fgSince).TotalSeconds < 2 ? 1.0 : 3.0))
+						&& Age(fg, now) >= ((now - fgSince).TotalSeconds < 2 ? 1.0 : 2.0))
 						pick = fg;
 					if (pick == IntPtr.Zero)
 					{

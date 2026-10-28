@@ -32,6 +32,8 @@ var _rect_from := Rect2()
 var _resize_edge := -1
 var _snap := ""
 var _closing := false
+## The last picture of this window (see snapshot), kept while it's minimised.
+var _pic: Texture2D
 
 
 func setup(ref: String, window_title: String) -> ShellWindow:
@@ -158,6 +160,8 @@ func close() -> void:
 func minimize() -> void:
 	if minimized or _closing:
 		return
+	# A picture first, so Alt+Tab still shows what's in it while it's away.
+	snapshot()
 	minimized = true
 	Sfx.play(&"back", 1.1)
 	var target := layer.minimize_target(app_ref) if layer else Vector2(size.x / 2.0, 2000.0)
@@ -189,6 +193,28 @@ func unminimize() -> void:
 	_anim.tween_property(self, "modulate:a", 1.0, 0.2)
 	Sfx.play(&"open", 1.1)
 	state_changed.emit(self)
+
+
+## A picture of the window as it is on screen now, cropped from its layer
+## (`img`, when given, is that layer's frame, read back once for several
+## windows). Minimised or hidden windows keep their last one. Null if none.
+func snapshot(img: Image = null) -> Texture2D:
+	if minimized or not visible or not is_visible_in_tree() or modulate.a < 0.9 or DisplayServer.get_name() == "headless":
+		return _pic
+	var vp := get_viewport()
+	if img == null:
+		img = vp.get_texture().get_image()
+	if img == null or img.is_empty():
+		return _pic
+	var k := Vector2(img.get_size()) / vp.get_visible_rect().size
+	var r := get_global_transform_with_canvas() * Rect2(Vector2.ZERO, size)
+	var px := Rect2i(Rect2(r.position * k, r.size * k)).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
+	if px.size.x < 8 or px.size.y < 8:
+		return _pic
+	var part := img.get_region(px)
+	part.generate_mipmaps()
+	_pic = ImageTexture.create_from_image(part)
+	return _pic
 
 
 func _kill_anim() -> void:
