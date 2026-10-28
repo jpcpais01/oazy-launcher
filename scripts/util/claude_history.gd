@@ -3,6 +3,9 @@ class_name ClaudeHistory
 ## the way Oazy Claude reads it (native/claude Transcripts), for the Start
 ## orb's past chats. Plain file reads: call these off the main thread.
 
+## Wraps context sent with a message that isn't shown as part of it.
+const CONTEXT_TAG := "<oazy-context>"
+
 
 static func config_dir() -> String:
 	var d := OS.get_environment("CLAUDE_CONFIG_DIR")
@@ -117,6 +120,10 @@ static func user_text(u: Dictionary) -> String:
 			if b is Dictionary and str(b.get("type", "")) == "text":
 				text = str(b.get("text", ""))
 				break
+	# Context Oazy sent along that you never saw (an idea's notes).
+	var hidden := text.find(CONTEXT_TAG)
+	if hidden > 0:
+		text = text.left(hidden)
 	text = text.strip_edges()
 	if text.begins_with("<") or text.begins_with("Caveat:") or text.begins_with("[Request interrupted"):
 		return ""

@@ -535,6 +535,17 @@ func _assistant(main: Node) -> void:
 	await _wait(0.3)
 	await shot("02d2-assistant-allow-all")
 	Settings.set_value("claude_auto_allow", false)
+	a.say_idea({"idea": "Let Start search find open windows and past Claude chats", "why": "Mock.", "repo": "jpcpais01/oazy-launcher", "path": "", "at": 0})
+	await _wait(1.4)
+	await shot("02d3-assistant-idea")
+	a.say_idea({})
+	await _wait(0.4)
+	Settings.set_value("claude_projects_skip", ["jpcpais01/portfolio"])
+	a._show_settings(true)
+	await _wait(0.6)
+	await shot("02d4-assistant-settings")
+	a._show_settings(false)
+	Settings.set_value("claude_projects_skip", [])
 	if live:
 		a.submit("In two short sentences: what is in my home folder?")
 		var waited := 0.0

@@ -898,6 +898,9 @@ func _build_browser() -> void:
 	_toggle_row(term, "Open terminals in Oazy Terminal", "Terminal, Command Prompt, PowerShell and Claude Code open in Oazy's own terminal, with tabs and split panes.", "terminal_oazy", Callable(), "cmd powershell shell console claude code")
 	_button_row(term, "Open Oazy Terminal", "A new terminal window.", "Open", "terminal", func() -> void: Terminal.open(), "cmd powershell shell console", App.is_windows())
 
+	var claude := _group("browser", "Claude")
+	_toggle_row(claude, "Ideas from Claude", "Every 5 to 20 minutes Claude reads one of your GitHub projects in the background and suggests one idea from the orb popup. It waits until you've seen the last one.", "claude_ideas", Callable(), "claude orb avatar suggestions github projects")
+
 	var files := _group("browser", "Oazy Files")
 	_toggle_row(files, "Open folders in Oazy Files", "File Explorer, Start's folders and folders you find open in Oazy's own file explorer, with tabs, previews and search. Off brings back Windows Explorer.", "files_oazy", Callable(), "explorer folder file manager")
 

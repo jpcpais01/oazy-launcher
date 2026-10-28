@@ -1,7 +1,7 @@
 class_name ClaudeBlob
 extends Control
-## Claude, as a small jelly of Oazy's water living along the top of the orb
-## popup. It walks the whole width in little hops, breathes, blinks and looks
+## Claude, as a small jelly of Oazy's water living on the roof of the orb
+## popup, outside it. It walks the whole width in little hops, breathes, blinks and looks
 ## around, and everything it does follows the conversation:
 ##
 ## - What Claude is doing comes from the stream itself, so it's always true:
@@ -13,6 +13,8 @@ extends Control
 ##   start of each reply (ClaudeMood), shown the moment it arrives.
 ## - What you do gets noticed: it watches you type, follows the pointer, reacts
 ##   to what you send before Claude has answered, and giggles when poked.
+## - Now and then it has an idea of its own (ClaudeIdeas): it hops home and
+##   turns to the bubble it says it in.
 ##
 ## The shape is one shader (claude_blob.gdshader); this script only eases the
 ## numbers it draws with. Nothing runs while the popup is closed.
@@ -20,8 +22,8 @@ extends Control
 const BOX := Vector2(104, 92)
 const GROUND := 9.0
 const R := 23.0
-## The floor line sits this far above the bottom of the strip.
-const FLOOR := 3.0
+## The floor sits this far above the bottom of the strip.
+const FLOOR := 1.0
 const GRAVITY := 1500.0
 const HOP := 170.0
 ## Furthest one hop goes.
@@ -47,8 +49,10 @@ const FACES := {
 	"sleepy": [0.0, 0.25, 0.68, 0.0, 0.92, 0.0, 0.0, 0.6],
 }
 
-## Room kept free on the right for the header's buttons.
+## Room kept free on the right.
 var reserve_right := 0.0
+## Kept clear of at both ends (the popup's rounded corners).
+var inset := 0.0
 ## The popup it lives in: the pointer is followed while it's over it.
 var area: Control
 
@@ -98,11 +102,12 @@ var _busy_since := 0.0
 var _quiet_since := 0.0
 var _pokes: Array[float] = []
 var _beat := 0.0
+## Saying an idea: stays home, turned to its bubble.
+var _presenting := false
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	custom_minimum_size.y = 78
 	_body = ColorRect.new()
 	_body.size = BOX
 	_body.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -136,14 +141,6 @@ func _sync_colors() -> void:
 	_mat.set_shader_parameter("color_b", App.accent_pair(App.accent))
 
 
-func _draw() -> void:
-	# The floor it sits on: one hairline fading out at both ends.
-	var y := size.y - FLOOR
-	var clear := Color(1, 1, 1, 0)
-	draw_polyline_colors(PackedVector2Array([Vector2(0, y), Vector2(size.x * 0.5, y), Vector2(size.x, y)]),
-		PackedColorArray([clear, Color(1, 1, 1, 0.07), clear]), 1.0)
-
-
 # --- What the popup tells it -------------------------------------------------------------------
 
 ## Shown or hidden with the popup; nothing runs while it's closed.
@@ -160,6 +157,34 @@ func set_active(on: bool) -> void:
 		_jump(150.0)
 		if long:
 			_reaction("happy", 0.9)
+
+
+## It just had an idea: a little jump of surprise, then home to say it,
+## looking over at its bubble. Off again when the bubble goes.
+func present(on: bool) -> void:
+	if on == _presenting:
+		return
+	_presenting = on
+	if on:
+		_quiet_since = _t
+		_goal = _home_x()
+		_reaction("surprised", 0.55)
+		_mood = "excited"
+		_mood_until = _t + 6.0
+		_beat = _t + 0.5
+		_jump(230.0)
+	else:
+		_goal = clampf(_x, _min_x(), _max_x())
+
+
+## Where its body is on screen (pokes land there, not on the popup behind).
+func get_body_rect() -> Rect2:
+	return _body.get_global_rect() if _body else Rect2()
+
+
+## How much room it needs on the left to say an idea from home.
+func home_room() -> float:
+	return _home_x() + R + 14.0
 
 
 ## A fresh conversation: back home, calm.
@@ -325,11 +350,13 @@ func _on_body_input(e: InputEvent) -> void:
 # --- Moving ------------------------------------------------------------------------------------
 
 func _min_x() -> float:
-	return R + 8.0
+	return inset + R + 8.0
 
 
 func _max_x() -> float:
-	return maxf(_min_x(), size.x - reserve_right - R - 8.0)
+	if _presenting:
+		return _home_x()
+	return maxf(_min_x(), size.x - reserve_right - inset - R - 8.0)
 
 
 func _home_x() -> float:
@@ -386,7 +413,9 @@ func _think(_dt: float) -> void:
 
 	match _doing:
 		"idle":
-			if _t > _next_idle:
+			if _presenting:
+				_goal = _home_x()
+			elif _t > _next_idle:
 				_next_idle = _t + randf_range(2.6, 6.0)
 				var r := randf()
 				if r < 0.42:
@@ -496,6 +525,9 @@ func _eyes(dt: float) -> void:
 				to = Vector2(sin(_t * 0.7) * 0.15, -0.2)
 			_:
 				to = Vector2(0.0, -0.1)
+		if _presenting and _doing == "idle":
+			# Over at its idea, with a glance back at you now and then.
+			to = Vector2(0.85, 0.25) if fmod(_t, 5.0) < 3.8 else Vector2(0.1, -0.15)
 		# The pointer, when it's moving over the popup.
 		if (_doing == "idle" or _doing == "writing") and _t - _mouse_at < 2.2 and _over_area(_mouse):
 			var face := global_position + Vector2(_x, size.y - FLOOR - R * 1.1 - _y)
@@ -545,7 +577,7 @@ func _face_name() -> String:
 
 
 func _sleepy() -> bool:
-	return _doing == "idle" and _t - _quiet_since > 45.0 and _t - _mouse_at > 20.0
+	return not _presenting and _doing == "idle" and _t - _quiet_since > 45.0 and _t - _mouse_at > 20.0
 
 
 func _over_area(p: Vector2) -> bool:
