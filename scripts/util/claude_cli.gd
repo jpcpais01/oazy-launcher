@@ -22,6 +22,9 @@ const SYSTEM := "You are Claude, opened from the Start orb of Oazy, the desktop 
 var cwd := ""
 ## Claude Code's session id, once it has one: the next start resumes it.
 var session := ""
+## Until this unix time claude keeps your ANTHROPIC_API_KEY even when
+## drop_api_key() says no: set once your Claude plan is out of usage.
+var key_until := 0.0
 
 var _pipe: FileAccess
 var _pid := 0
@@ -58,7 +61,7 @@ func start() -> String:
 	if session != "":
 		args.append_array(["--resume", session])
 	var dir := cwd if cwd != "" and DirAccess.dir_exists_absolute(cwd) else home()
-	var drop_key := drop_api_key()
+	var drop_key := drop_api_key() and Time.get_unix_time_from_system() >= key_until
 	var info: Dictionary
 	if App.is_windows():
 		# Godot can't start a process in another folder, so cmd does: Godot
@@ -221,6 +224,12 @@ func _on_end(gen: int) -> void:
 	var tail := _err_tail
 	_mutex.unlock()
 	exited.emit(code, tail.strip_edges())
+
+
+## True when your Claude plan is in use but an API key is there to carry on
+## with once the plan's usage runs out.
+func can_use_key() -> bool:
+	return Time.get_unix_time_from_system() >= key_until and drop_api_key()
 
 
 ## True when an ANTHROPIC_API_KEY in the environment should be kept from
