@@ -17,6 +17,8 @@ extends Node
 signal toggled(on: bool)
 ## "chrome", "all", or "" while nothing is being heard.
 signal source_changed(src: String)
+## The song Windows' media controls report changed (see media).
+signal media_changed
 
 const BANDS := 16
 ## Bands climb fast and fall slower, so hits read and nothing flickers.
@@ -45,11 +47,16 @@ var presence := 0.0
 var bpm := 0.0
 var beat_phase := 0.0
 ## The vibe: valence -1 (dark) .. 1 (bright), arousal 0 (calm) .. 1 (intense).
-var valence := 0.2
-var arousal := 0.25
+var valence := -0.1
+var arousal := 0.3
 var key := 0
 var major := 0.0
 
+## What's playing, from Windows' media controls: {has, app, title, artist,
+## album, playing, can_seek, can_next, can_prev, dur, pos}.
+var media := {}
+
+var _media_at := 0
 var _target := PackedFloat32Array()
 var _frame := {}
 var _frame_age := 10.0
@@ -80,6 +87,7 @@ func _ready() -> void:
 		if ok and on:
 			_listen()
 	)
+	Host.media_changed.connect(_on_media)
 	Host.fullscreen_changed.connect(func(fs: bool) -> void:
 		# Nobody sees the desktop under a fullscreen game: stop listening.
 		_paused = fs
@@ -125,9 +133,51 @@ func toggle() -> void:
 
 
 func _listen() -> void:
+	var src := str(Settings.get_value("music_source"))
+	Host.media_command("prefer", src)
 	if _paused:
 		return
-	Host.listen(str(Settings.get_value("music_source")))
+	Host.listen(src)
+
+
+func _on_media(d: Dictionary) -> void:
+	if _mocked:
+		return
+	media = d
+	_media_at = Time.get_ticks_msec()
+	media_changed.emit()
+
+
+## Where the song is now, in seconds, carried forward while it plays.
+func media_position() -> float:
+	var pos := float(media.get("pos", 0.0))
+	if media.get("playing", false):
+		pos += float(Time.get_ticks_msec() - _media_at) / 1000.0
+	var dur := float(media.get("dur", 0.0))
+	return clampf(pos, 0.0, dur) if dur > 0.0 else maxf(pos, 0.0)
+
+
+## Play/pause, next, previous, or a jump to `seconds`; the shown state moves
+## at once and Windows' answer follows.
+func media_do(cmd: String, seconds: float = 0.0) -> void:
+	if cmd == "seek":
+		media["pos"] = seconds
+		_media_at = Time.get_ticks_msec()
+		Host.media_command("seek", str(seconds))
+	else:
+		if cmd == "toggle":
+			media["pos"] = media_position()
+			_media_at = Time.get_ticks_msec()
+			media["playing"] = not media.get("playing", false)
+		Host.media_command(cmd)
+	media_changed.emit()
+
+
+## A fixed song for screenshots and tests.
+func set_mock_media(d: Dictionary) -> void:
+	media = d
+	_media_at = Time.get_ticks_msec()
+	media_changed.emit()
 
 
 ## Feeds a fixed frame (screenshots, tests) and settles everything on it;
@@ -242,9 +292,9 @@ func _derive() -> void:
 func _update_vibe(delta: float) -> void:
 	var f := _frame
 	if f.is_empty() or presence < 0.05:
-		# Silence drifts back to calm.
-		valence += (0.2 - valence) * (1.0 - exp(-delta / 6.0))
-		arousal += (0.25 - arousal) * (1.0 - exp(-delta / 6.0))
+		# Silence drifts back to a calm blue.
+		valence += (-0.1 - valence) * (1.0 - exp(-delta / 6.0))
+		arousal += (0.3 - arousal) * (1.0 - exp(-delta / 6.0))
 	else:
 		var conf := clampf(float(f.get("bc", 0.0)) * 1.5, 0.0, 1.0)
 		var tempo := clampf((bpm - 70.0) / 90.0, 0.0, 1.0) * conf + 0.4 * (1.0 - conf)
@@ -264,8 +314,8 @@ func _update_vibe(delta: float) -> void:
 		_palette[i] = (_palette[i] as Color).lerp(want[i], drift)
 
 
-## base, a, b, c, glow for the current vibe, leaning toward the wallpaper's
-## own light while nothing plays.
+## base (the sky), a, b, c (the lights behind the glass) and glow for the
+## current vibe.
 func _vibe_palette() -> Array:
 	var wv := (valence + 1.0) * 0.5
 	var corner := [wv * arousal, wv * (1.0 - arousal), (1.0 - wv) * arousal, (1.0 - wv) * (1.0 - arousal)]
@@ -277,25 +327,30 @@ func _vibe_palette() -> Array:
 	# The key turns the hue a little around the circle of fifths.
 	var fifths := float((key * 7) % 12) / 12.0
 	h += 0.04 * absf(major) * sin(TAU * fifths)
-	var sat := 0.55 + 0.35 * arousal
-	# Warm hues go muddy when dark: keep them lifted.
-	var warm := clampf(1.0 - absf(wrapf(h - 0.06, -0.5, 0.5)) * 6.0, 0.0, 1.0)
+	# A celestial sky, its hue pulled toward the violet of night, and three
+	# lights behind the glass: the mood's own, a neighbour, and a soft
+	# counter-light from across the wheel.
+	var sky_h := lerp_angle(TAU * h, TAU * 0.7, 0.55) / TAU
 	var bright := float(_frame.get("c", 0.5)) if not _frame.is_empty() else 0.5
-	var glow := Color.from_hsv(fposmod(h + 0.04, 1.0), 0.16, 1.0)
-	glow = glow.lerp(Color(1.0, 0.86, 0.72), 0.3 * (1.0 - bright)).lerp(Color(0.82, 0.92, 1.0), 0.3 * bright)
+	var glow := Color.from_hsv(fposmod(h + 0.03, 1.0), 0.1, 1.0)
+	glow = glow.lerp(Color(1.0, 0.9, 0.8), 0.25 * (1.0 - bright)).lerp(Color(0.88, 0.94, 1.0), 0.25 * bright)
 	var vibe := [
-		Color.from_hsv(fposmod(h - 0.03, 1.0), 0.8, 0.06 + 0.03 * arousal),
-		Color.from_hsv(fposmod(h, 1.0), sat, 0.42 + 0.18 * arousal + 0.15 * warm),
-		Color.from_hsv(fposmod(h - 0.075, 1.0), sat * 0.95, 0.34 + 0.14 * arousal + 0.1 * warm),
-		Color.from_hsv(fposmod(h + 0.06, 1.0), sat * 0.7, 0.55).lerp(App.accent, 0.12),
+		Color.from_hsv(fposmod(sky_h, 1.0), 0.55, 0.26 + 0.05 * arousal),
+		Color.from_hsv(_tidy(h), 0.42 + 0.25 * arousal, 1.0),
+		Color.from_hsv(_tidy(h - 0.17), 0.48 + 0.2 * arousal, 0.95),
+		Color.from_hsv(_tidy(h + 0.33), 0.45, 0.97).lerp(App.accent.lightened(0.4), 0.08),
 		glow,
 	]
-	var t := Time.get_time_dict_from_system()
-	var wall := Wallpaper.palette_for(str(Settings.get_value("wallpaper_light")), float(t["hour"]) + float(t["minute"]) / 60.0)
-	var k := 0.35 + 0.65 * presence
-	for i in vibe.size():
-		vibe[i] = (wall[i] as Color).darkened(0.35).lerp(vibe[i], k)
 	return vibe
+
+
+## Keeps a light's hue out of the yellow-greens, which turn sickly behind
+## glass: they slide to gold or cyan, whichever is nearer.
+static func _tidy(h: float) -> float:
+	h = fposmod(h, 1.0)
+	if h > 0.15 and h < 0.46:
+		return 0.13 if h < 0.3 else 0.48
+	return h
 
 
 func _publish() -> void:

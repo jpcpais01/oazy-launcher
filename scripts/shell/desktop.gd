@@ -71,6 +71,9 @@ var _last_minute := -1
 var _stats_timer: Timer
 var _dim_tween: Tween
 var _dim := 0.0
+## The music wallpaper's clean view: 1 hides the whole desktop (see set_clean).
+var _clean := 0.0
+var _clean_tween: Tween
 
 
 func _ready() -> void:
@@ -807,6 +810,9 @@ func _build_hint() -> void:
 	_hint.add_theme_color_override("icon_pressed_color", Color(1, 1, 1, 0.95))
 	_hint.pressed.connect(func() -> void: page(1))
 	_top.add_child(_hint)
+	# The music wallpaper's player sits where the hint does.
+	_hint.visible = not Music.on
+	Music.toggled.connect(func(on: bool) -> void: _hint.visible = not on)
 
 
 ## The furthest the desktop scrolls: the second screen, or past it when the
@@ -928,7 +934,7 @@ func _apply_scroll() -> void:
 ## Modulate isn't group opacity: a fading card's shadow would show through it
 ## as a dark smudge, so shadows fade faster than what casts them.
 func _sync_shadows() -> void:
-	var shown := 1.0 - _dim
+	var shown := (1.0 - _dim) * (1.0 - _clean)
 	var a := _top.modulate.a * shown
 	_hero_glass.set_shadow_fade(a * a * a)
 	var b := below.modulate.a * shown
@@ -968,9 +974,38 @@ func dim(on: bool) -> void:
 
 func _set_dim(v: float) -> void:
 	_dim = v
-	var shown := 1.0 - v
+	_apply_fade()
+
+
+## Clears the desktop away so only the music wallpaper shows (clicking the
+## bare desktop while it plays), or brings it back.
+func set_clean(on: bool) -> void:
+	if _clean_tween and _clean_tween.is_valid():
+		_clean_tween.kill()
+	pivot_offset = size * 0.5
+	if not on:
+		visible = true
+	_clean_tween = create_tween()
+	if on:
+		_clean_tween.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		_clean_tween.tween_method(func(v: float) -> void:
+			_clean = v
+			_apply_fade()
+		, _clean, 1.0, 0.5)
+		# Hidden for real once it's gone, so clicks reach the wallpaper.
+		_clean_tween.tween_callback(func() -> void: visible = false)
+	else:
+		_clean_tween.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+		_clean_tween.tween_method(func(v: float) -> void:
+			_clean = v
+			_apply_fade()
+		, _clean, 0.0, 0.6)
+
+
+func _apply_fade() -> void:
+	var shown := (1.0 - _dim) * (1.0 - _clean)
 	modulate.a = shown
-	scale = Vector2.ONE * lerpf(1.0, DIM_SCALE, v)
+	scale = Vector2.ONE * lerpf(1.0, DIM_SCALE, maxf(_dim, _clean))
 	# Each layer of the card fades on its own, so the shadow under the art goes
 	# first; otherwise it darkens the half-faded card on the way out.
 	_sync_shadows()

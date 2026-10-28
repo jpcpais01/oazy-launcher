@@ -892,7 +892,26 @@ func _host_tests() -> void:
 	check(got.has("wifi") and got["wifi"].get("ok", false) and got["wifi"].has("ethernet"), "host: network status (%s)" % str(got.get("wifi", {})))
 	await _capture_test()
 	await _procs_test()
+	await _media_test()
 	check(Host.available, "host: still running after the checks")
+
+
+## The now-playing library compiles against this Windows' WinRT metadata and
+## loads into the companion. (A CI machine may have no media sessions at all,
+## so what it reports is only logged.)
+func _media_test() -> void:
+	check(Host.media_lib != "", "host: builds the now-playing library (%s)" % Host.media_error)
+	if Host.media_lib == "":
+		return
+	await _wait(2.0)
+	var got := {}
+	Host.media_command("refresh", "", func(d: Dictionary) -> void: got["r"] = d)
+	var waited := 0.0
+	while got.is_empty() and waited < 10.0:
+		await _wait(0.2)
+		waited += 0.2
+	check(not got.is_empty(), "host: answers now-playing commands")
+	print("SMOKE: now playing: ", got.get("r", {}), " last: ", Music.media)
 
 
 ## The task manager's process list (NtQuerySystemInformation read by offset)

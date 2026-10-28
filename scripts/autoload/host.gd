@@ -24,8 +24,11 @@ signal fullscreen_changed(on: bool)
 signal audio_frame(d: Dictionary)
 ## What music is being listened to now: "chrome", "all" or "" (nothing).
 signal audio_source(src: String)
+## What Windows' media controls say is playing (see NowPlaying).
+signal media_changed(d: Dictionary)
 
 const SOURCE := "res://native/oazy_host.cs"
+const MEDIA_SOURCE := "res://native/oazy_media.cs"
 const CSC := [
 	"C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe",
 	"C:/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe",
@@ -35,6 +38,9 @@ var available := false
 var failed := false
 var fail_reason := ""
 var hotkey_ok := false
+## The now-playing library: its path once built, or why it couldn't be.
+var media_lib := ""
+var media_error := ""
 ## Real application windows, Alt+Tab order: {hwnd, title, pid, exe, name, aumid, class, min, max}.
 var windows: Array[Dictionary] = []
 var foreground := 0
@@ -73,7 +79,57 @@ func start() -> void:
 
 func _prepare_worker() -> void:
 	var result := build()
+	if result.has("exe"):
+		var media := build_media()
+		result["media"] = media.get("dll", "")
+		result["media_error"] = media.get("error", "")
 	_launch.call_deferred(result)
+
+
+## Compiles the now-playing library (native/oazy_media.cs) against Windows'
+## WinRT metadata, if this version isn't cached yet. Returns {"dll": path} or
+## {"error": text}; the companion runs fine without it.
+static func build_media() -> Dictionary:
+	var src := FileAccess.get_file_as_string(MEDIA_SOURCE)
+	if src.is_empty():
+		return {"error": "Media source missing from the package"}
+	var dir := ProjectSettings.globalize_path("user://host")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var dll := dir.path_join("OazyMedia-%s.dll" % src.md5_text().substr(0, 10))
+	if FileAccess.file_exists(dll):
+		return {"dll": dll}
+	var meta := "C:/Windows/System32/WinMetadata"
+	if not DirAccess.dir_exists_absolute(meta):
+		return {"error": "This Windows has no WinRT metadata"}
+	var cs := dir.path_join("oazy_media.cs")
+	var f := FileAccess.open(cs, FileAccess.WRITE)
+	if f == null:
+		return {"error": "Can't write to %s" % dir}
+	f.store_string(src)
+	f.close()
+	var log := ""
+	for csc in CSC:
+		if not FileAccess.file_exists(csc):
+			continue
+		var fw: String = csc.get_base_dir()
+		var args := ["/nologo", "/optimize+", "/target:library"]
+		for facade in ["System.Runtime.dll", "System.Runtime.WindowsRuntime.dll", "System.Threading.Tasks.dll"]:
+			if FileAccess.file_exists(fw.path_join(facade)):
+				args.append("/r:" + fw.path_join(facade).replace("/", "\\"))
+		for md in DirAccess.get_files_at(meta):
+			if md.ends_with(".winmd"):
+				args.append("/r:" + meta.path_join(md).replace("/", "\\"))
+		args.append("/out:" + dll.replace("/", "\\"))
+		args.append(cs.replace("/", "\\"))
+		var out := []
+		var code := OS.execute(csc, args, out, true)
+		if code == 0 and FileAccess.file_exists(dll):
+			for old in DirAccess.get_files_at(dir):
+				if old.begins_with("OazyMedia-") and old.ends_with(".dll") and dir.path_join(old) != dll:
+					DirAccess.remove_absolute(dir.path_join(old))
+			return {"dll": dll}
+		log = "\n".join(out).strip_edges().substr(0, 600)
+	return {"error": "Couldn't build the media library: " + log if log != "" else "The .NET Framework C# compiler wasn't found"}
 
 
 ## Compiles the companion if this version of it isn't cached yet. Returns
@@ -127,6 +183,16 @@ func _launch(result: Dictionary) -> void:
 	available = true
 	failed = false
 	request(["hello", str(self_hwnd)])
+	media_lib = str(result.get("media", ""))
+	media_error = str(result.get("media_error", ""))
+	if media_lib != "":
+		request(["media_load", media_lib.replace("/", "\\")], func(d: Dictionary) -> void:
+			if not d.get("ok", false):
+				media_error = str(d.get("error", "couldn't load"))
+				push_warning("Now playing unavailable: " + media_error)
+		)
+	elif media_error != "":
+		push_warning("Now playing unavailable: " + media_error)
 	refresh()
 	status_changed.emit(true)
 
@@ -203,6 +269,8 @@ func _on_line(line: String) -> void:
 				audio_frame.emit(d)
 			"audio_src":
 				audio_source.emit(str(d.get("src", "")))
+			"media":
+				media_changed.emit(d)
 			"picture":
 				# A newer kept picture: loaded when something asks for it.
 				var hw := int(d.get("hwnd", 0))
@@ -522,6 +590,12 @@ func listen(source: String) -> void:
 
 func stop_listening() -> void:
 	request(["audio_stop"])
+
+
+## Controls the playing media session: "toggle", "play", "pause", "next",
+## "prev", "seek" (arg: seconds), "prefer" (arg: app to favour, or "all").
+func media_command(cmd: String, arg: String = "", done: Callable = Callable()) -> void:
+	request(["now_playing", cmd, arg], done)
 
 
 func lock_pc() -> void:

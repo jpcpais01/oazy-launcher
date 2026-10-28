@@ -461,6 +461,7 @@ namespace Oazy
 			Out.NewLine = "\n";
 			Wifi.Emit = Write;
 			Audio.Emit = Write;
+			MediaBridge.Emit = Write;
 			StreamReader input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
 
 			Thread loop = new Thread(MessageLoop);
@@ -667,6 +668,10 @@ namespace Oazy
 					return Audio.Start(Arg(p, 2));
 				case "audio_stop":
 					return Audio.Stop();
+				case "media_load":
+					return MediaBridge.Load(Arg(p, 2));
+				case "now_playing":
+					return MediaBridge.Command(Arg(p, 2), Arg(p, 3));
 				case "webview2":
 					return "\"ok\":true,\"version\":" + Json.Str(WebView2Version());
 			}
@@ -3613,6 +3618,54 @@ namespace Oazy
 				if (what != "" && Emit != null) Emit("{\"ev\":\"wifi\",\"what\":\"" + what + "\"" + extra + "}");
 			}
 			catch (Exception) { }
+		}
+	}
+
+	// The now-playing library (native/oazy_media.cs), built separately because
+	// it needs WinRT metadata; loaded here when Oazy says where it is.
+	static class MediaBridge
+	{
+		public static Action<string> Emit;
+		static MethodInfo Cmd;
+		static volatile string Error = "";
+
+		public static string Load(string path)
+		{
+			if (Cmd != null) return "\"ok\":true";
+			try
+			{
+				Type t = Assembly.LoadFrom(path).GetType("OazyMedia.Media", true);
+				MethodInfo start = t.GetMethod("Start");
+				Cmd = t.GetMethod("Command");
+				// Asking Windows for its media sessions can take a moment.
+				Thread th = new Thread(delegate()
+				{
+					try { start.Invoke(null, new object[] { Emit }); }
+					catch (Exception ex)
+					{
+						Cmd = null;
+						Error = (ex.InnerException ?? ex).Message;
+						if (Emit != null) Emit("{\"ev\":\"media\",\"has\":false,\"error\":" + Json.Str(Error) + "}");
+					}
+				});
+				th.IsBackground = true;
+				th.SetApartmentState(ApartmentState.MTA);
+				th.Start();
+				return "\"ok\":true";
+			}
+			catch (Exception ex)
+			{
+				Error = ex.Message;
+				return "\"ok\":false,\"error\":" + Json.Str(Error);
+			}
+		}
+
+		public static string Command(string cmd, string arg)
+		{
+			MethodInfo c = Cmd;
+			if (c == null) return "\"ok\":false,\"error\":" + Json.Str(Error == "" ? "not loaded" : Error);
+			try { return (string)c.Invoke(null, new object[] { cmd, arg }); }
+			catch (Exception ex) { return "\"ok\":false,\"error\":" + Json.Str((ex.InnerException ?? ex).Message); }
 		}
 	}
 
