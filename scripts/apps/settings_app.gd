@@ -586,6 +586,8 @@ func _build_personalise() -> void:
 		[["chrome", "Chrome"], ["all", "All sound"]], _music_sources,
 		func(v: String) -> void: Settings.set_value("music_source", v), "visualiser visualizer audio youtube chrome sound")
 	_select(_music_sources, str(Settings.get_value("music_source")))
+	_toggle_row(look, "Show the song title", "The title of what's playing, low on the left of the music wallpaper.", "music_show_song", Callable(), "visualiser visualizer title now playing track name song")
+	_toggle_row(look, "Show the play bar", "The timeline with play, pause and skip at the bottom of the music wallpaper.", "music_show_controls", Callable(), "visualiser visualizer timeline seek pause skip controls player")
 
 	var you := _group("personalise", "Pointer and icons")
 	_pointer_rows(you)
