@@ -347,7 +347,7 @@ vec4 music_bar(float i, float n, float w, float cx, float cy, float pitch) {
 	float v = mix(quick, calm, k * 0.6);
 	// At rest the row still breathes, a slow wave from the middle out.
 	float idle = 0.035 + 0.025 * (0.5 + 0.5 * sin(s * 9.0 - music_phase.x * 2.0 + side));
-	float h = mix(idle, 0.05 + 0.36 * v, music_beat.z) * (1.0 - 0.6 * s * s) + 0.012;
+	float h = mix(idle, 0.05 + 0.36 * v, music_beat.z) * (1.0 - 0.82 * pow(s, 1.4)) + 0.012;
 	float yo = 0.012 * sin(i * 1.7 + music_phase.y) * (1.0 - s);
 	return vec4(x, cy + yo, w * 0.5, h * 0.5);
 }
@@ -418,10 +418,10 @@ vec3 wall_music(vec2 uv, float ph) {
 	col += back;
 
 	// The glass bars.
-	const float N = 41.0;
-	float pitch = aspect * 0.78 / N;
-	float w = pitch * 0.58;
-	float rad = w * 0.32;
+	const float N = 45.0;
+	float pitch = aspect * 0.95 / N;
+	float w = pitch * 0.68;
+	float rad = w * 0.1;
 	float fi = floor((p.x - cx) / pitch + (N - 1.0) * 0.5 + 0.5);
 	float halo = 0.0;
 	vec3 glass = vec3(0.0);
@@ -452,15 +452,16 @@ vec3 wall_music(vec2 uv, float ph) {
 			// bar to bar, so the row reads as many panes of tinted glass.
 			float bx = clamp((b.x - cx) / (aspect * 0.8) + 0.5 + 0.16 * sin(i * 1.31), 0.0, 1.0);
 			vec3 lc = mix(music_light(clamp(bx - 0.35, 0.0, 1.0)), music_light(clamp(bx + 0.35, 0.0, 1.0)), smoothstep(-0.8, 0.8, lq.y));
-			// A rounded glass rod: looking through it, the view bends more
-			// the nearer the edge, so the light behind is drawn in from the
-			// side (and flipped), and the edges catch whatever bright light
-			// sits beside the bar. Nothing here is a drawn outline.
+			// A square glass column: a flat front face shows what's behind
+			// almost straight through, and the narrow bevels down each side
+			// bend the view sharply, drawing in the light from beside the bar.
+			// Nothing here is a drawn outline.
 			float ax = abs(lq.x);
-			float cosv = sqrt(max(1.0 - ax * ax, 0.0));
-			float bend = lq.x / max(cosv, 0.18);
-			vec2 pr = p - vec2(bend * b.z * 1.6, lq.y * b.w * 0.03);
-			vec3 seen = col - back + music_back(pr, cx, cy, power, fp) * (1.0 + 0.2 * cosv);
+			float bev = smoothstep(0.8, 1.0, ax);
+			float cosv = 1.0 - 0.88 * bev;
+			float bend = sign(lq.x) * (0.06 * ax + 2.6 * bev * bev);
+			vec2 pr = p - vec2(bend * b.z, lq.y * b.w * 0.02);
+			vec3 seen = col - back + music_back(pr, cx, cy, power, fp) * (1.0 + 0.12 * (1.0 - bev));
 			// The glass is faintly tinted by the lights behind it, deeper where
 			// it's thicker, and lets a little of that light glow inside.
 			float through = 0.3 + 0.7 * exp(-pow((p.y - cy) * 6.0, 2.0));
@@ -469,20 +470,20 @@ vec3 wall_music(vec2 uv, float ph) {
 			// Light entering the glass scatters inside it, so the bar glows
 			// faintly in the lights' colours, most where the light is behind;
 			// the rounded front gathers some into a soft line down the middle.
-			body += lc * (0.04 + 0.15 * through) * (0.55 + 0.5 * power);
-			body += (back + lc * 0.05) * 0.7 * pow(cosv, 10.0);
-			// Close to the edge the view hits the inside of the glass too
-			// steeply to pass through and reflects back in, so a rod shows a
-			// thin darker band just inside its rim.
-			body *= 1.0 - 0.32 * smoothstep(0.8, 0.93, ax) * (1.0 - smoothstep(0.95, 0.995, ax));
+			body += lc * (0.07 + 0.2 * through) * (0.55 + 0.5 * power);
+			body += (back + lc * 0.05) * 0.18 * (1.0 - bev);
+			// Where the face turns into the bevel the view meets the inside of
+			// the glass too steeply to pass through, so a thin darker line runs
+			// down each side, just inside the edge.
+			body *= 1.0 - 0.3 * exp(-pow((ax - 0.84) / 0.045, 2.0));
 			// Fresnel: the glass reflects more at a glancing angle, and what it
 			// reflects is the light around it, so dim surroundings give a dim edge.
 			float fres = 0.04 + 0.96 * pow(1.0 - cosv, 5.0);
-			vec3 around = col * 0.95 + back * 0.9 + lc * 0.06;
+			vec3 around = col + back * 1.7 + lc * 0.1;
 			body = mix(body, around, fres * 0.85);
 			// The rounded ends do the same.
-			float endv = 1.0 - smoothstep(0.0, 0.8, (1.0 - abs(lq.y)) * b.w / b.z);
-			body = mix(body, around, endv * 0.35);
+			float endv = 1.0 - smoothstep(0.0, 0.2, (1.0 - abs(lq.y)) * b.w / b.z);
+			body = mix(body, around, endv * 0.5);
 			glass = body;
 		}
 	}
