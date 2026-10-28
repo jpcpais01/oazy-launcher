@@ -565,6 +565,29 @@ namespace OazyClaude
 			return "\"" + s.Replace("\\\"", "\\\\\"").Replace("\"", "\\\"") + "\"";
 		}
 
+		// In -p mode Claude Code bills any ANTHROPIC_API_KEY in the environment,
+		// while the interactive claude only uses one you said yes to and
+		// otherwise your Claude subscription (and its extra usage). Keep the key
+		// only if you approved it in Claude Code, or if it's your only sign-in.
+		public static bool DropApiKey()
+		{
+			string key = (Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? "").Trim();
+			if (key == "") return false;
+			string dir = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+			Dictionary<string, object> cfg = Json.Load(Path.Combine(!string.IsNullOrEmpty(dir) ? dir : App.Home(), ".claude.json"));
+			if (cfg == null) return false;
+			string tail = key.Length > 20 ? key.Substring(key.Length - 20) : key;
+			object r;
+			Dictionary<string, object> resp = cfg.TryGetValue("customApiKeyResponses", out r) ? r as Dictionary<string, object> : null;
+			if (resp != null)
+			{
+				if (resp.TryGetValue("approved", out r) && r is object[] && Array.IndexOf((object[])r, tail) >= 0) return false;
+				if (resp.TryGetValue("rejected", out r) && r is object[] && Array.IndexOf((object[])r, tail) >= 0) return true;
+			}
+			// Not asked yet: drop it if you're signed in to Claude, as claude would.
+			return (cfg.TryGetValue("oauthAccount", out r) && r is Dictionary<string, object>) || File.Exists(Path.Combine(ConfigDir(), ".credentials.json"));
+		}
+
 		// Where Claude Code keeps its transcripts.
 		public static string ConfigDir()
 		{
@@ -624,6 +647,7 @@ namespace OazyClaude
 			si.StandardErrorEncoding = new UTF8Encoding(false);
 			si.EnvironmentVariables["PATH"] = Cli.FreshPath();
 			si.EnvironmentVariables["CLAUDE_CODE_ENTRYPOINT"] = "oazy-claude";
+			if (Cli.DropApiKey()) si.EnvironmentVariables.Remove("ANTHROPIC_API_KEY");
 			try
 			{
 				proc = Process.Start(si);
