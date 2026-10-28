@@ -349,7 +349,7 @@ vec4 music_bar(float i, float n, float w, float cx, float cy, float pitch) {
 	float v = mix(quick, calm, k * 0.6);
 	// At rest the row still breathes, a slow wave from the middle out.
 	float idle = 0.035 + 0.025 * (0.5 + 0.5 * sin(s * 9.0 - music_phase.x * 2.0 + side));
-	float h = mix(idle, 0.05 + 0.36 * v, music_beat.z) * (1.0 - 0.6 * s * s) + 0.012;
+	float h = mix(idle, 0.05 + 0.36 * v, music_beat.z) * (1.0 - 0.82 * pow(s, 1.4)) + 0.012;
 	float yo = 0.012 * sin(i * 1.7 + music_phase.y) * (1.0 - s);
 	return vec4(x, cy + yo, w * 0.5, h * 0.5);
 }
@@ -357,6 +357,26 @@ vec4 music_bar(float i, float n, float w, float cx, float cy, float pitch) {
 float music_box(vec2 p, vec4 b, float r) {
 	vec2 q = abs(p - b.xy) - b.zw + r;
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// The light behind the row at `p`: a wide soft core and rays fanning out,
+// in the vibe's colours. The glass samples it again where it bends the view.
+vec3 music_back(vec2 p, float cx, float cy, float power, vec4 fp) {
+	vec2 dc = p - vec2(cx, cy);
+	float lx = clamp((p.x - cx) / (aspect * 0.8) + 0.5, 0.0, 1.0);
+	vec3 light = music_light(lx);
+	vec2 cq = dc * vec2(0.85, 4.5);
+	vec3 c = mix(light, music_glow.rgb, 0.25) * exp(-dot(cq, cq) * 1.6) * 0.38 * power;
+	float ang = atan(dc.y, dc.x * 0.55);
+	float rd = length(dc * vec2(0.6, 1.0));
+	float rays = pow(0.5 + 0.5 * sin(ang * 7.0 + fp.z), 8.0) * 0.55 + pow(0.5 + 0.5 * sin(ang * 13.0 - 2.0 * fp.z + 1.3), 14.0) * 0.35;
+	rays += pow(0.5 + 0.5 * sin(ang * 4.0 - fp.w + 0.7), 5.0) * 0.3;
+	// A touch of prism: each ray's hue shifts with its angle.
+	vec3 prism = 0.6 + 0.4 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + ang * 0.35 + lx * 0.5));
+	vec3 ray_col = mix(light, prism * mix(light, music_glow.rgb, 0.5), 0.45);
+	float flat_ = abs(cos(ang));
+	c += ray_col * rays * exp(-rd * 2.4) * smoothstep(0.02, 0.3, rd) * (0.36 * power) * (0.3 + 0.7 * flat_ * flat_);
+	return c;
 }
 
 // A row of thin glass bars dancing to the music, lit from behind by soft
@@ -396,27 +416,19 @@ vec3 wall_music(vec2 uv, float ph) {
 	float lx = clamp((p.x - cx) / (aspect * 0.8) + 0.5, 0.0, 1.0);
 	vec3 light = music_light(lx);
 	float power = 0.45 + 0.55 * on * (0.4 + lvl) + 0.25 * kick;
-	vec2 cq = dc * vec2(0.85, 4.5);
-	col += mix(light, glow, 0.25) * exp(-dot(cq, cq) * 1.6) * 0.38 * power;
-	float ang = atan(dc.y, dc.x * 0.55);
-	float rd = length(dc * vec2(0.6, 1.0));
-	float rays = pow(0.5 + 0.5 * sin(ang * 7.0 + fp.z), 8.0) * 0.55 + pow(0.5 + 0.5 * sin(ang * 13.0 - 2.0 * fp.z + 1.3), 14.0) * 0.35;
-	rays += pow(0.5 + 0.5 * sin(ang * 4.0 - fp.w + 0.7), 5.0) * 0.3;
-	// A touch of prism: each ray's hue shifts with its angle.
-	vec3 prism = 0.6 + 0.4 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + ang * 0.35 + lx * 0.5));
-	vec3 ray_col = mix(light, prism * mix(light, glow, 0.5), 0.45);
-	float flat_ = abs(cos(ang));
-	col += ray_col * rays * exp(-rd * 2.4) * smoothstep(0.02, 0.3, rd) * (0.36 * power) * (0.3 + 0.7 * flat_ * flat_);
+	vec3 back = music_back(p, cx, cy, power, fp);
+	col += back;
 
 	// The glass bars.
-	const float N = 41.0;
-	float pitch = aspect * 0.78 / N;
-	float w = pitch * 0.58;
-	float rad = w * 0.32;
+	const float N = 45.0;
+	float pitch = aspect * 0.95 / N;
+	float w = pitch * 0.68;
+	float rad = w * 0.1;
 	float fi = floor((p.x - cx) / pitch + (N - 1.0) * 0.5 + 0.5);
 	float halo = 0.0;
 	vec3 glass = vec3(0.0);
 	float inside = 0.0;
+	float spill = 0.0;
 	for (int j = -1; j <= 1; j++) {
 		float i = fi + float(j);
 		if (i < 0.0 || i > N - 1.0) {
@@ -424,7 +436,16 @@ vec3 wall_music(vec2 uv, float ph) {
 		}
 		vec4 b = music_bar(i, N, w, cx, cy, pitch);
 		float d = music_box(p, b, rad);
-		halo = max(halo, exp(-max(d, 0.0) * 55.0) * (0.4 + b.w * 3.0));
+		// Light scattered by the glass into the air around it: a soft haze
+		// that clings to each bar, strongest where the light crosses the row.
+		halo = max(halo, exp(-max(d, 0.0) * 70.0) * (0.25 + b.w * 2.0) * (0.45 + 0.55 * exp(-pow((p.y - cy) * 5.0, 2.0))));
+		// A little of the light carried along the glass leaks out past each
+		// end, a faint glow that fades a short way into the sky.
+		if (j == 0) {
+			float dx = (p.x - b.x) / b.z;
+			float past = max(abs(p.y - b.y) - b.w, 0.0);
+			spill = exp(-dx * dx * 1.5) * exp(-past * 38.0) * step(0.0001, past);
+		}
 		if (j == 0 && d < 0.002) {
 			vec2 lq = (p - b.xy) / b.zw;
 			float a = 1.0 - smoothstep(-0.0012, 0.0012, d);
@@ -433,23 +454,45 @@ vec3 wall_music(vec2 uv, float ph) {
 			// bar to bar, so the row reads as many panes of tinted glass.
 			float bx = clamp((b.x - cx) / (aspect * 0.8) + 0.5 + 0.16 * sin(i * 1.31), 0.0, 1.0);
 			vec3 lc = mix(music_light(clamp(bx - 0.35, 0.0, 1.0)), music_light(clamp(bx + 0.35, 0.0, 1.0)), smoothstep(-0.8, 0.8, lq.y));
-			// Clear glass: what's behind shows through, lifted and tinted,
-			// brightest across the middle of the row where the light is.
-			float through = 0.35 + 0.65 * exp(-pow((p.y - cy) * 6.0, 2.0));
-			vec3 body = col * 0.75 + lc * (0.12 + 0.3 * through) * (0.7 + 0.5 * power) + glow * 0.03;
-			// Thickness: brighter sides and a lit streak down one side.
-			body += mix(glow, lc, 0.3) * pow(abs(lq.x), 6.0) * 0.3;
-			body += glow * exp(-pow((lq.x + 0.5) / 0.12, 2.0)) * 0.12;
-			// Caps catch the light.
-			body += glow * exp(-(1.0 - abs(lq.y)) * b.w / 0.005) * 0.28;
-			// A fine bright rim.
-			body += glow * exp(-d * d * 3.0e6) * 0.4;
+			// A square glass column: a flat front face shows what's behind
+			// almost straight through, and the narrow bevels down each side
+			// bend the view sharply, drawing in the light from beside the bar.
+			// Nothing here is a drawn outline.
+			float ax = abs(lq.x);
+			float bev = smoothstep(0.8, 1.0, ax);
+			float cosv = 1.0 - 0.88 * bev;
+			float bend = sign(lq.x) * (0.06 * ax + 2.6 * bev * bev);
+			vec2 pr = p - vec2(bend * b.z, lq.y * b.w * 0.02);
+			vec3 seen = col - back + music_back(pr, cx, cy, power, fp) * (1.0 + 0.12 * (1.0 - bev));
+			// The glass is faintly tinted by the lights behind it, deeper where
+			// it's thicker, and lets a little of that light glow inside.
+			float through = 0.3 + 0.7 * exp(-pow((p.y - cy) * 6.0, 2.0));
+			vec3 tint = mix(vec3(1.0), lc / max(max(lc.r, max(lc.g, lc.b)), 0.001), 0.18 * cosv);
+			vec3 body = seen * 0.92 * tint;
+			// Light entering the glass scatters inside it, so the bar glows
+			// faintly in the lights' colours, most where the light is behind;
+			// the rounded front gathers some into a soft line down the middle.
+			body += lc * (0.07 + 0.2 * through) * (0.55 + 0.5 * power);
+			body += (back + lc * 0.05) * 0.18 * (1.0 - bev);
+			// Where the face turns into the bevel the view meets the inside of
+			// the glass too steeply to pass through, so a thin darker line runs
+			// down each side, just inside the edge.
+			body *= 1.0 - 0.3 * exp(-pow((ax - 0.84) / 0.045, 2.0));
+			// Fresnel: the glass reflects more at a glancing angle, and what it
+			// reflects is the light around it, so dim surroundings give a dim edge.
+			float fres = 0.04 + 0.96 * pow(1.0 - cosv, 5.0);
+			vec3 around = col + back * 1.7 + lc * 0.1;
+			body = mix(body, around, fres * 0.85);
+			// The rounded ends do the same.
+			float endv = 1.0 - smoothstep(0.0, 0.2, (1.0 - abs(lq.y)) * b.w / b.z);
+			body = mix(body, around, endv * 0.5);
 			glass = body;
 		}
 	}
 	vec3 halo_col = mix(light, glow, 0.3);
-	col += halo_col * halo * 0.1 * (0.5 + power);
-	col = mix(col, glass, inside * 0.92);
+	col += halo_col * halo * 0.06 * (0.5 + power);
+	col += halo_col * spill * 0.05 * power;
+	col = mix(col, glass, inside);
 
 	// Sparkles drifting around the bars, brighter on the highs.
 	float sp = music_stars(p + vec2(0.0, 0.02 * sin(fp.y)), 0.022, ph * 2.0, 3200.0);

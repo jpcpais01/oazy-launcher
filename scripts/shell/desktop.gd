@@ -29,6 +29,9 @@ const STEP := 120.0
 const CLOCK := preload("res://shaders/clock.gdshader")
 const SHADE := preload("res://shaders/hero_shade.gdshader")
 
+## The first screen moved: how far (px) and how much of it still shows.
+signal scrolled(px: float, top_alpha: float)
+
 var main: Node
 ## The first screen (everything above) and the second one, below it.
 var _top: Control
@@ -919,6 +922,7 @@ func _apply_scroll() -> void:
 	var below_a := smoothstep(0.08, 0.8, k)
 	_top.modulate.a = top_a
 	below.modulate.a = below_a
+	scrolled.emit(_scroll, top_a)
 	_top.visible = k < 0.999
 	below.visible = k > 0.001
 	_scrim.visible = k > 0.001

@@ -64,6 +64,7 @@ func _ready() -> void:
 	now_playing = NowPlaying.new()
 	now_playing.main = self
 	add_child(now_playing)
+	desktop.scrolled.connect(now_playing.follow_scroll)
 	Music.toggled.connect(func(on: bool) -> void:
 		if not on:
 			set_clean_view(false)
