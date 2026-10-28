@@ -7,6 +7,8 @@ class_name ChatMarkdown
 
 ## [{"t": "text", "bb": String}, {"t": "code", "lang": String, "code": String}, ...]
 static func blocks(md: String) -> Array[Dictionary]:
+	# Mood tags are for Claude's avatar, never shown.
+	md = ClaudeMood.strip(md)
 	var out: Array[Dictionary] = []
 	var prose := PackedStringArray()
 	var lines := md.replace("\r\n", "\n").split("\n")
