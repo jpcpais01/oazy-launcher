@@ -1,9 +1,9 @@
 class_name NowPlaying
 extends Control
 ## The music wallpaper's player, drawn straight onto the desktop with no box
-## around it: the song title low on the left, and at the bottom centre
-## a hairline timeline (a little live waveform rides the playhead; click or
-## drag to seek) over previous, play/pause and next, with the time beside.
+## around it: the song title low on the left, and at the bottom centre a
+## hairline timeline (click or drag to seek) over previous, play/pause and
+## next, with the time beside.
 ## It follows whatever Windows' media controls report (Music.media), Chrome
 ## first. The title and the play bar can each be turned off in Personalise.
 ## Hidden while the music wallpaper is off or nothing is playing, and with the
@@ -166,7 +166,7 @@ static func _clock(sec: float) -> String:
 	return "%02d:%02d" % [s / 60, s % 60]
 
 
-## The hairline timeline with a small live waveform around the playhead.
+## The hairline timeline and its playhead.
 class _Track:
 	extends Control
 
@@ -214,19 +214,6 @@ class _Track:
 		var thick := 2.0 if _hover and can_seek else 1.0
 		draw_line(Vector2(0, y), Vector2(size.x, y), Color(1, 1, 1, 0.2), thick, true)
 		draw_line(Vector2(0, y), Vector2(at, y), Color(1, 1, 1, 0.62), thick, true)
-		# The waveform: a few dozen hairlines, tallest at the playhead, moving
-		# with what Music hears.
-		var n := 26
-		for k in range(-n, n + 1):
-			var x := at + float(k) * 3.0
-			if x < 0.0 or x > size.x:
-				continue
-			var fall := exp(-float(k * k) / 90.0)
-			var band: float = Music.bands[mini(absi(k) * Music.BANDS / (n + 1), Music.BANDS - 1)]
-			var h := (1.0 + 9.0 * band * Music.presence) * fall
-			if h < 0.6:
-				continue
-			draw_line(Vector2(x, y - h), Vector2(x, y + h), Color(1, 1, 1, 0.35 + 0.5 * fall), 1.0, true)
 		draw_circle(Vector2(at, y), 3.5 if _hover and can_seek else 2.5, Color(1, 1, 1, 0.95), true, -1.0, true)
 
 
