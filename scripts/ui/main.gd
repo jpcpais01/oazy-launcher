@@ -12,6 +12,9 @@ const APP_SIZES := {&"library": Vector2(1260, 780), &"settings": Vector2(1120, 8
 
 var wallpaper: Wallpaper
 var desktop: Desktop
+var now_playing: NowPlaying
+## The music wallpaper's clean view: desktop and player cleared away.
+var clean_view := false
 var layer: WindowLayer
 var taskbar: Taskbar
 var start: StartPanel
@@ -58,6 +61,13 @@ func _ready() -> void:
 	desktop = Desktop.new()
 	desktop.main = self
 	add_child(desktop)
+	now_playing = NowPlaying.new()
+	now_playing.main = self
+	add_child(now_playing)
+	Music.toggled.connect(func(on: bool) -> void:
+		if not on:
+			set_clean_view(false)
+	)
 	layer = WindowLayer.new()
 	layer.main = self
 	layer.reserved_bottom = Taskbar.RESERVE + 4.0
@@ -102,6 +112,7 @@ func _ready() -> void:
 		if o:
 			_fg_at_start = Host.foreground
 		desktop.dim(o)
+		now_playing.dim(o)
 		if o:
 			assistant.close()
 			_close_popups()
@@ -993,7 +1004,22 @@ func _input(event: InputEvent) -> void:
 		layer.press_at(pos)
 
 
+## While the music wallpaper plays, clicking the bare desktop clears it all
+## away (all but the taskbar) to leave just the music; click again for it back.
+func set_clean_view(on: bool) -> void:
+	if on == clean_view:
+		return
+	clean_view = on
+	desktop.set_clean(on)
+	now_playing.set_clean(on)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and not event.double_click \
+			and Music.on and loaded and not modal_open() and not start.is_open and not assistant.is_open:
+		set_clean_view(not clean_view)
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT and not modal_open():
 		_show_desktop_menu(event.position)
 		get_viewport().set_input_as_handled()

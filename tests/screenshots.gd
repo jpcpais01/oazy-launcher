@@ -393,6 +393,8 @@ func _ready() -> void:
 ## The music wallpaper on two very different songs.
 func _music(main: Node) -> void:
 	Music.set_on(true)
+	Music.set_mock_media({"has": true, "app": "Chrome", "title": "Celestial Echoes", "artist": "Aura of Sound", "playing": true,
+		"can_seek": true, "can_next": true, "can_prev": true, "dur": 252.0, "pos": 165.0})
 	var songs := {
 		# Bright, quick, major: warm.
 		"joy": [[880, 940, 820, 610, 540, 600, 520, 470, 430, 380, 330, 300, 260, 210, 160, 110], 0.75, 0.8, 0, 1.0, 0.62],
@@ -408,6 +410,12 @@ func _music(main: Node) -> void:
 			"c": float(song[5]), "f": 0.15, "r": 3.0, "m": float(song[4]), "key": int(song[3]), "kc": 0.8}, float(song[1]), float(song[2]))
 		await _wait(1.6)
 		await shot("01m-desktop-music-" + id)
+	# Clicking the desktop: just the music and the taskbar.
+	main.set_clean_view(true)
+	await _wait(1.0)
+	await shot("01m-desktop-music-clean")
+	main.set_clean_view(false)
+	await _wait(0.8)
 	var shown := []
 	for c in main.get_children():
 		if c is CanvasItem and c != main.wallpaper and (c as CanvasItem).visible:
@@ -417,6 +425,7 @@ func _music(main: Node) -> void:
 	await shot("01x-wallpaper-music")
 	for c in shown:
 		(c as CanvasItem).visible = true
+	Music.set_mock_media({})
 	Music.set_mock({})
 	Music.set_on(false)
 	await _wait(1.6)

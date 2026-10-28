@@ -11,8 +11,9 @@
 //   4 Ripple  slow rings spreading over still water
 //   5 Bloom   a flower of tinted glass petals turning very slowly
 //   6 Shallows sunlight falling in shafts through clear water onto sand
-//   7 Music   the music wallpaper: a sun on a dark oasis, lit by what's
-//             playing (see Music, which feeds the music_* globals below)
+//   7 Music   the music wallpaper: glass bars lit from behind on a celestial
+//             sky, moving with what's playing (see Music, which feeds
+//             the music_* globals below)
 //
 // Motion is built from whole cycles per hour. Godot's TIME wraps every hour,
 // and this way the wrap lands exactly where it started, so nothing ever jumps.
@@ -295,89 +296,168 @@ float music_spec(vec4 b0, vec4 b1, vec4 b2, vec4 b3, float s) {
 	return mix(v[i], v[min(i + 1, 15)], t * t * (3.0 - 2.0 * t));
 }
 
-// A sun resting on a dark oasis. Its pools of sky breathe with the bass, the
-// sun swells on every kick and sends rings across the water, light falls in
-// shafts with the mids and highs, and three sheets of liquid glass along the
-// bottom are the spectrum itself (bass in the middle, highs out to the
-// sides), the back one slow, the front ones quick. The colours are the vibe.
+float music_hash(vec2 p) {
+	p = fract(p * vec2(234.34, 435.345));
+	p += dot(p, p + 34.23);
+	return fract(p.x * p.y);
+}
+
+float music_noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(music_hash(i), music_hash(i + vec2(1.0, 0.0)), f.x),
+		mix(music_hash(i + vec2(0.0, 1.0)), music_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// Soft nebula: three octaves of value noise.
+float music_cloud(vec2 p) {
+	return music_noise(p) * 0.55 + music_noise(p * 2.03 + 7.1) * 0.3 + music_noise(p * 4.1 + 3.7) * 0.15;
+}
+
+// A field of tiny stars, one per cell, each twinkling at its own pace.
+float music_stars(vec2 p, float cell, float ph, float sharp) {
+	vec2 g = p / cell;
+	vec2 id = floor(g);
+	float r = music_hash(id);
+	vec2 at = vec2(music_hash(id + 3.1), music_hash(id + 7.7)) * 0.8 + 0.1;
+	float d = length(fract(g) - at);
+	float tw = 0.55 + 0.45 * sin(ph * floor(20.0 + r * 60.0) + r * 40.0);
+	return exp(-d * d * sharp) * pow(r, 6.0) * tw;
+}
+
+// The light behind the glass, coloured along the row: the vibe's three
+// lights, with a faint prism shimmer.
+vec3 music_light(float x) {
+	vec3 c = mix(music_b.rgb, music_a.rgb, smoothstep(0.0, 0.5, x));
+	c = mix(c, music_c.rgb, smoothstep(0.55, 1.0, x));
+	return c;
+}
+
+// The bar at column `i` of `n`: its centre and half size.
+vec4 music_bar(float i, float n, float w, float cx, float cy, float pitch) {
+	float x = cx + (i - (n - 1.0) * 0.5) * pitch;
+	float s = clamp(abs(i - (n - 1.0) * 0.5) / ((n - 1.0) * 0.5), 0.0, 1.0);
+	// Left and right read the spectrum a little differently, quick and slow,
+	// so it's never a mirror image.
+	float side = i < (n - 1.0) * 0.5 ? 0.0 : 1.0;
+	float quick = music_spec(music_bands0, music_bands1, music_bands2, music_bands3, s * 0.92 + side * 0.04);
+	float calm = music_spec(music_slow0, music_slow1, music_slow2, music_slow3, s * 0.92 + (1.0 - side) * 0.04);
+	float k = 0.5 + 0.5 * sin(i * 2.39);
+	float v = mix(quick, calm, k * 0.6);
+	// At rest the row still breathes, a slow wave from the middle out.
+	float idle = 0.035 + 0.025 * (0.5 + 0.5 * sin(s * 9.0 - music_phase.x * 2.0 + side));
+	float h = mix(idle, 0.05 + 0.36 * v, music_beat.z) * (1.0 - 0.6 * s * s) + 0.012;
+	float yo = 0.012 * sin(i * 1.7 + music_phase.y) * (1.0 - s);
+	return vec4(x, cy + yo, w * 0.5, h * 0.5);
+}
+
+float music_box(vec2 p, vec4 b, float r) {
+	vec2 q = abs(p - b.xy) - b.zw + r;
+	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// A row of thin glass bars dancing to the music, lit from behind by soft
+// coloured light that spills through them as rays and haze, in front of a
+// pale celestial sky with nebulae and stars. The bars are the spectrum,
+// bass in the middle; the light swells with the level and every kick, and
+// the colours are the vibe.
 vec3 wall_music(vec2 uv, float ph) {
 	vec2 p = vec2(uv.x * aspect, uv.y);
 	float lvl = music_level.x;
-	float bass = music_level.y;
-	float high = music_level.w;
 	float kick = music_beat.x;
 	float flash = music_beat.y;
+	float on = music_beat.z;
 	vec4 fp = music_phase;
 	vec3 glow = music_glow.rgb;
-	const float H = 0.745;
+	float cx = aspect * 0.5;
+	float cy = 0.47;
 
-	// Sky: deep at the top, a pool of each vibe colour drifting and breathing.
-	vec3 col = mix(music_base.rgb, music_base.rgb * 1.6 + music_a.rgb * 0.08, smoothstep(0.0, H, uv.y));
-	vec2 ca = vec2(aspect * (0.24 + 0.05 * sin(fp.x)), 0.14 + 0.05 * cos(fp.y));
-	vec2 cb = vec2(aspect * (0.8 + 0.05 * cos(fp.x + 1.3)), 0.3 + 0.05 * sin(2.0 * fp.y + 0.4));
-	vec2 cc = vec2(aspect * 0.5, H + 0.02);
-	col = mix(col, music_a.rgb, wall_pool(p, ca, 0.62 + 0.12 * bass) * (0.6 + 0.25 * lvl));
-	col = mix(col, music_b.rgb, wall_pool(p, cb, 0.55 + 0.1 * music_level.z) * (0.5 + 0.25 * lvl));
-	col = mix(col, music_c.rgb, wall_pool(p, cc, 0.42 + 0.1 * bass) * (0.35 + 0.35 * lvl));
+	// Sky: deep at the top, paler toward the light, a warm glow low right.
+	vec3 col = mix(music_base.rgb * 0.6, music_base.rgb * 1.2 + music_a.rgb * 0.1, smoothstep(0.0, 0.75, uv.y));
+	col = mix(col, music_c.rgb * 0.75 + glow * 0.1, wall_pool(p, vec2(aspect * 0.92, 1.05), 0.75) * 0.55);
+	col = mix(col, music_b.rgb * 0.6, wall_pool(p, vec2(aspect * 0.1, 0.35), 0.6) * 0.35);
+	// Nebulae drifting slowly, brighter near the light.
+	vec2 np = p * 1.6 + vec2(0.18 * sin(fp.x), 0.12 * cos(fp.y));
+	float neb = music_cloud(np);
+	float wisp = smoothstep(0.45, 0.85, music_cloud(np * 1.7 + 4.0 + 0.1 * sin(fp.z)));
+	vec2 dc = p - vec2(cx, cy);
+	float near = exp(-dot(dc * vec2(0.9, 2.2), dc * vec2(0.9, 2.2)) * 2.2);
+	col += mix(music_a.rgb, music_b.rgb, neb) * smoothstep(0.3, 0.85, neb) * (0.14 + 0.2 * near);
+	col += mix(glow, music_c.rgb, 0.4) * wisp * (0.04 + 0.08 * near) * (1.0 - smoothstep(0.75, 1.0, uv.y));
 
-	// Shafts of light fanning down from above, stronger with the highs.
-	vec2 src = vec2(aspect * 0.5, -0.5);
-	vec2 dv = p - src;
-	float ang = atan(dv.x, dv.y);
-	float shafts = pow(0.5 + 0.5 * sin(ang * 11.0 + fp.z), 10.0) + 0.6 * pow(0.5 + 0.5 * sin(ang * 17.0 - 2.0 * fp.z + 1.0), 14.0);
-	col += mix(glow, music_b.rgb, 0.4) * shafts * (1.0 - smoothstep(0.1, H, uv.y)) * (0.02 + 0.07 * high + 0.05 * flash);
+	// Stars: fine and sparse, more of them around the bars.
+	col += glow * music_stars(p, 0.035, ph, 900.0) * (0.5 + 0.8 * near);
+	col += glow * music_stars(p + 0.5, 0.017, ph, 2600.0) * (0.25 + 1.4 * near) * (0.7 + 0.6 * music_level.w);
 
-	// The sun on the horizon, a hair larger on every kick.
-	vec2 sc = vec2(aspect * 0.5, H - 0.015);
-	float r = 0.066 + 0.016 * bass + 0.014 * kick;
-	float sd = length(p - sc) / r;
-	vec3 sun = mix(glow, music_c.rgb, 0.25 + 0.35 * smoothstep(-1.0, 1.0, (p.y - sc.y) / r));
-	col += mix(music_c.rgb, glow, 0.4) * exp(-sd * sd * 0.18) * (0.08 + 0.14 * lvl + 0.08 * kick);
-	col = mix(col, sun, (1.0 - smoothstep(0.97, 1.0, sd)) * step(uv.y, H) * (0.75 + 0.25 * lvl));
+	// The light behind the row: a wide soft core, and rays fanning out.
+	float lx = clamp((p.x - cx) / (aspect * 0.8) + 0.5, 0.0, 1.0);
+	vec3 light = music_light(lx);
+	float power = 0.45 + 0.55 * on * (0.4 + lvl) + 0.25 * kick;
+	vec2 cq = dc * vec2(0.85, 4.5);
+	col += mix(light, glow, 0.25) * exp(-dot(cq, cq) * 1.6) * 0.38 * power;
+	float ang = atan(dc.y, dc.x * 0.55);
+	float rd = length(dc * vec2(0.6, 1.0));
+	float rays = pow(0.5 + 0.5 * sin(ang * 7.0 + fp.z), 8.0) * 0.55 + pow(0.5 + 0.5 * sin(ang * 13.0 - 2.0 * fp.z + 1.3), 14.0) * 0.35;
+	rays += pow(0.5 + 0.5 * sin(ang * 4.0 - fp.w + 0.7), 5.0) * 0.3;
+	// A touch of prism: each ray's hue shifts with its angle.
+	vec3 prism = 0.6 + 0.4 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + ang * 0.35 + lx * 0.5));
+	vec3 ray_col = mix(light, prism * mix(light, glow, 0.5), 0.45);
+	float flat_ = abs(cos(ang));
+	col += ray_col * rays * exp(-rd * 2.4) * smoothstep(0.02, 0.3, rd) * (0.36 * power) * (0.3 + 0.7 * flat_ * flat_);
 
-	// Water below the horizon: darker, with the sun's broken reflection and
-	// a ring for every kick.
-	float below = smoothstep(H - 0.002, H + 0.002, uv.y);
-	if (below > 0.0) {
-		float dy = uv.y - H;
-		vec3 water = mix(music_base.rgb * 1.3 + music_a.rgb * 0.1, music_base.rgb * 0.8, smoothstep(0.0, 0.35, dy));
-		water = mix(water, music_c.rgb * 0.6, wall_pool(p, cc + vec2(0.0, 0.06), 0.3) * 0.35);
-		float lines = 0.5 + 0.5 * sin(dy * 420.0 / (0.3 + dy * 3.0) - 2.0 * fp.w + sin(p.x * 9.0 + fp.y) * 1.5);
-		float w = 0.05 + dy * 0.35 + 0.03 * bass;
-		float streak = exp(-pow((p.x - sc.x) / w, 2.0)) * exp(-dy * 6.0);
-		water += mix(glow, music_c.rgb, 0.3) * streak * smoothstep(0.35, 1.0, lines) * (0.12 + 0.3 * lvl + 0.15 * high);
-		vec2 rq = (p - vec2(sc.x, H + 0.035)) * vec2(1.0, 5.0);
-		float rd = length(rq);
-		float rings = 0.0;
-		for (int k = 0; k < 4; k++) {
-			float age = music_rings[k];
-			float d = rd - age * 0.7;
-			rings += exp(-d * d * 1800.0) * music_ring_power[k] * pow(max(0.0, 1.0 - age / 1.7), 2.0);
+	// The glass bars.
+	const float N = 41.0;
+	float pitch = aspect * 0.78 / N;
+	float w = pitch * 0.58;
+	float rad = w * 0.32;
+	float fi = floor((p.x - cx) / pitch + (N - 1.0) * 0.5 + 0.5);
+	float halo = 0.0;
+	vec3 glass = vec3(0.0);
+	float inside = 0.0;
+	for (int j = -1; j <= 1; j++) {
+		float i = fi + float(j);
+		if (i < 0.0 || i > N - 1.0) {
+			continue;
 		}
-		water += mix(glow, music_b.rgb, 0.3) * rings * 0.2;
-		col = mix(col, water, below);
-		// The horizon itself: one fine lit line.
-		col += glow * exp(-dy * dy * 250000.0) * (0.08 + 0.12 * lvl);
+		vec4 b = music_bar(i, N, w, cx, cy, pitch);
+		float d = music_box(p, b, rad);
+		halo = max(halo, exp(-max(d, 0.0) * 55.0) * (0.4 + b.w * 3.0));
+		if (j == 0 && d < 0.002) {
+			vec2 lq = (p - b.xy) / b.zw;
+			float a = 1.0 - smoothstep(-0.0012, 0.0012, d);
+			inside = a;
+			// Each bar holds a little gradient of the lights behind it, shifted
+			// bar to bar, so the row reads as many panes of tinted glass.
+			float bx = clamp((b.x - cx) / (aspect * 0.8) + 0.5 + 0.16 * sin(i * 1.31), 0.0, 1.0);
+			vec3 lc = mix(music_light(clamp(bx - 0.35, 0.0, 1.0)), music_light(clamp(bx + 0.35, 0.0, 1.0)), smoothstep(-0.8, 0.8, lq.y));
+			// Clear glass: what's behind shows through, lifted and tinted,
+			// brightest across the middle of the row where the light is.
+			float through = 0.35 + 0.65 * exp(-pow((p.y - cy) * 6.0, 2.0));
+			vec3 body = col * 0.75 + lc * (0.12 + 0.3 * through) * (0.7 + 0.5 * power) + glow * 0.03;
+			// Thickness: brighter sides and a lit streak down one side.
+			body += mix(glow, lc, 0.3) * pow(abs(lq.x), 6.0) * 0.3;
+			body += glow * exp(-pow((lq.x + 0.5) / 0.12, 2.0)) * 0.12;
+			// Caps catch the light.
+			body += glow * exp(-(1.0 - abs(lq.y)) * b.w / 0.005) * 0.28;
+			// A fine bright rim.
+			body += glow * exp(-d * d * 3.0e6) * 0.4;
+			glass = body;
+		}
 	}
+	vec3 halo_col = mix(light, glow, 0.3);
+	col += halo_col * halo * 0.1 * (0.5 + power);
+	col = mix(col, glass, inside * 0.92);
 
-	// Liquid glass along the bottom, shaped by the spectrum.
-	for (int i = 0; i < 3; i++) {
-		float fi = float(i);
-		float s = abs(uv.x - 0.5 + 0.03 * sin(fp.w + fi * 2.1)) * 2.0;
-		float spec = i == 0 ? music_spec(music_slow0, music_slow1, music_slow2, music_slow3, s * 0.9) : music_spec(music_bands0, music_bands1, music_bands2, music_bands3, s * (0.85 + 0.15 * fi));
-		spec *= 1.0 - 0.35 * s;
-		float y = 0.855 + fi * 0.042 - (0.085 - fi * 0.015) * spec - 0.012 * sin(p.x * (2.6 + fi) + fp.x * (1.0 + fi) + fi);
-		float d = uv.y - y;
-		float inside = smoothstep(-0.0015, 0.0015, d);
-		vec3 sheet = mix(mix(music_a.rgb, music_b.rgb, fi * 0.5), music_base.rgb, 0.35 + 0.15 * fi);
-		sheet *= 1.0 - 0.5 * smoothstep(0.0, 0.22, d);
-		sheet += glow * exp(-max(d, 0.0) * 28.0) * (0.06 + 0.1 * spec);
-		col = mix(col, sheet, inside * (0.55 + 0.15 * fi));
-		col += glow * exp(-d * d * 300000.0) * (0.1 + 0.25 * spec + 0.15 * flash);
-		col += mix(glow, music_b.rgb, 0.5) * exp(-max(-d, 0.0) * 45.0) * (1.0 - inside) * spec * 0.05;
-	}
+	// Sparkles drifting around the bars, brighter on the highs.
+	float sp = music_stars(p + vec2(0.0, 0.02 * sin(fp.y)), 0.022, ph * 2.0, 3200.0);
+	float band = exp(-pow((p.y - cy) / 0.24, 2.0)) * smoothstep(aspect * 0.45, aspect * 0.15, abs(p.x - cx));
+	col += glow * sp * band * (0.8 + 1.6 * music_level.w + 1.2 * flash) * 1.4;
 
-	col *= 1.0 + 0.05 * flash + 0.04 * kick;
+	col *= 1.0 + 0.04 * kick;
+	// A soft shoulder above 0.75, so the light never clips to flat white.
+	vec3 over = max(col - 0.75, 0.0);
+	col = min(col, 0.75) + 0.25 * (1.0 - exp(-over * 4.0));
 	return wall_vignette(col, uv);
 }
 
