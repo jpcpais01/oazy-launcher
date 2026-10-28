@@ -79,7 +79,7 @@ const BRAND_ALIASES := {
 	"googleflow": "flow", "flowbygoogle": "flow", "zoomworkplace": "zoom", "teams": "microsoftteams",
 	"bravebrowser": "brave", "vlcmediaplayer": "vlc", "chatgptdesktop": "chatgpt",
 	"msteams": "microsoftteams", "teamsforworkorschool": "microsoftteams", "teamsclassic": "microsoftteams",
-	"spotifymusic": "spotify", "slacktechnologies": "slack",
+	"spotifymusic": "spotify", "slacktechnologies": "slack", "sunoai": "suno", "youtubeapp": "youtube",
 }
 ## Edition words after an app's name that don't change its art.
 const BRAND_TAILS := ["desktop", "beta", "preview", "canary", "ptb", "new", "classic"]

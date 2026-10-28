@@ -7,7 +7,8 @@ files inside the exe (see include_filter in export_presets.cfg).
 Each app's mark and name centred over its brand colours: soft light blooms, a
 liquid-glass orb and fine grain, with the name set in Outfit. Marks come from
 tools/brand_src/marks (CC0: @iconify-json/logos, simple-icons). A finished
-cover or logo in tools/brand_src/<slug>_{cover,logo}.png is used as it is.
+cover, hero or logo in tools/brand_src/<slug>_{cover,hero,logo}.png is used as
+it is (a given hero is cropped to the banner shape).
 Run: python3 tools/make_brand_art.py  (needs Pillow, numpy, fonttools, brotli, cairosvg)
 """
 import io, math, os, random, sys, tempfile, zlib
@@ -42,6 +43,8 @@ APPS = {
     "epicgameslauncher": ("Epic Games", "Play, free every week", "#0e0e10", ["#5a5a66", "#d8d8e2", "#2a2a34", "#0078f2"], "#ffffff"),
     "arcgisearth": ("ArcGIS Earth", "The whole planet, in 3D", "#02050c", ["#1f6fd1", "#0b2a5c", "#5fb4ff", "#0a1630"], "#ffffff"),
     "hyperliquid": ("Hyperliquid", "Trade on-chain", "#030809", ["#97fce4", "#1f6f62", "#5fe0c8", "#0b2e2a"], "#ffffff"),
+    "youtube": ("YouTube", "Watch anything", "#0f0f0f", ["#ff0033", "#7a0019", "#ff5a6e", "#2a0008"], "#ffffff"),
+    "suno": ("Suno", "Make any song", "#2a0b2e", ["#ff6a1a", "#b04ad8", "#ff2e4d", "#e8b0ff"], "#ffffff"),
     "microsoftteams": ("Teams", "Meet, chat, call", "#14123a", ["#5b5fc7", "#7b83eb", "#4b53bc", "#c5c9ff"], "#ffffff"),
 }
 
@@ -257,6 +260,14 @@ def cover(slug, app):
 
 
 def hero(slug, app):
+    given = os.path.join(SRC, slug + "_hero.png")
+    if os.path.exists(given):
+        im = Image.open(given).convert("RGB")
+        w, h = im.width, min(im.height, round(im.width * 1100 / 2560))
+        w = min(w, round(h * 2560 / 1100))
+        x, y = (im.width - w) // 2, (im.height - h) // 2
+        im = im.crop((x, y, x + w, y + h)).resize((1600, 688), Image.LANCZOS)
+        return im.filter(ImageFilter.UnsharpMask(2, 50, 2))
     _, _, base, blooms, _ = app
     if slug in SCENES:
         gx, gy, gr = SCENES[slug][1]
