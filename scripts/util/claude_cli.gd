@@ -58,11 +58,14 @@ func start() -> String:
 	if session != "":
 		args.append_array(["--resume", session])
 	var dir := cwd if cwd != "" and DirAccess.dir_exists_absolute(cwd) else home()
+	var drop_key := drop_api_key()
 	var info: Dictionary
 	if App.is_windows():
 		# Godot can't start a process in another folder, so cmd does: Godot
 		# quotes the whole line once and /s takes those quotes off again.
 		var line := "cd /d %s && %s" % [_quote(dir.replace("/", "\\")), _quote(exe.replace("/", "\\"))]
+		if drop_key:
+			line = "set \"ANTHROPIC_API_KEY=\" && " + line
 		for a in args:
 			line += " " + _quote(a)
 		var cmd := OS.get_environment("ComSpec")
@@ -70,7 +73,10 @@ func start() -> String:
 			cmd = "C:\\Windows\\System32\\cmd.exe"
 		info = OS.execute_with_pipe(cmd, PackedStringArray(["/d", "/s", "/c", line]), true)
 	else:
-		var sh_args := PackedStringArray(["-c", "cd \"$1\" && shift && exec \"$@\"", "sh", dir, exe])
+		var script := "cd \"$1\" && shift && exec \"$@\""
+		if drop_key:
+			script = "unset ANTHROPIC_API_KEY; " + script
+		var sh_args := PackedStringArray(["-c", script, "sh", dir, exe])
 		sh_args.append_array(args)
 		info = OS.execute_with_pipe("/bin/sh", sh_args, true)
 	if info.is_empty() or info.get("stdio") == null:
@@ -215,6 +221,33 @@ func _on_end(gen: int) -> void:
 	var tail := _err_tail
 	_mutex.unlock()
 	exited.emit(code, tail.strip_edges())
+
+
+## True when an ANTHROPIC_API_KEY in the environment should be kept from
+## claude. In -p mode Claude Code bills any such key, while the interactive
+## claude only uses one you said yes to and otherwise uses your Claude
+## subscription (and its extra usage). So a stray key with no credit left made
+## the orb say "Credit balance is too low" while the terminal worked. Keep the
+## key only if you approved it in Claude Code, or if it's your only sign-in.
+static func drop_api_key() -> bool:
+	var key := OS.get_environment("ANTHROPIC_API_KEY").strip_edges()
+	if key == "":
+		return false
+	var dir := OS.get_environment("CLAUDE_CONFIG_DIR").replace("\\", "/")
+	var path := dir.path_join(".claude.json") if dir != "" else home().path_join(".claude.json")
+	var cfg: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not cfg is Dictionary:
+		return false
+	var resp: Variant = cfg.get("customApiKeyResponses", {})
+	var tail := key.right(20)
+	if resp is Dictionary:
+		if resp.get("approved", []) is Array and tail in resp["approved"]:
+			return false
+		if resp.get("rejected", []) is Array and tail in resp["rejected"]:
+			return true
+	# Not asked yet: drop it if you're signed in to Claude, as claude would.
+	var conf := dir if dir != "" else home().path_join(".claude")
+	return cfg.get("oauthAccount") is Dictionary or FileAccess.file_exists(conf.path_join(".credentials.json"))
 
 
 # --- Finding Claude Code --------------------------------------------------------------------
