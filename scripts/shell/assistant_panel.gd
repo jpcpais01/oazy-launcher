@@ -4,8 +4,10 @@ extends Control
 ## the orb. Underneath it is the Claude Code on this PC, signed in as you and
 ## started in your home folder (ClaudeCli). Replies stream in, what Claude is
 ## doing shows as one quiet line, and anything that would change your PC waits
-## for Allow. "Open in Claude" carries the conversation over to the full Oazy
-## Claude app. Built once and kept in Start's layer, so opening it is only
+## for Allow. Past chats (Claude Code's own history for your home folder) open
+## again from the clock, and it sits in Alt+Tab like a window while you have a
+## conversation going. "Open in Claude" carries the conversation over to the
+## full Oazy Claude app. Built once and kept in Start's layer, so opening it is only
 ## showing it; claude itself is started as it opens, so the first reply
 ## doesn't wait for it.
 
@@ -33,6 +35,9 @@ const LOOK_WORKING := {"swirl": -1.1, "waves": 0.9}
 
 var main: Node
 var is_open := false
+## The window you went to when you last left it (Host hwnd): while it's still
+## the one in front, Alt+Tab puts Claude next.
+var left_to := 0
 ## Screenshots and tests: no claude, events come from handle_message().
 var mock := false
 var running := false
@@ -55,6 +60,14 @@ var _composer: PanelContainer
 var _prompt: TextEdit
 var _send: Button
 var _expand: Button
+var _history_btn: Button
+## Past chats: the list, and the rows in it.
+var _history: Control
+var _history_list: VBoxContainer
+var _history_empty: Control
+var _history_serial := 0
+## The last picture of the popup, for its Alt+Tab card.
+var _shot: Texture2D
 ## Ask first / Allow all, under the box.
 var _mode: Button
 var _foot_note: Label
@@ -96,6 +109,8 @@ func _ready() -> void:
 	col.add_child(stack)
 	_home = _build_home()
 	stack.add_child(_home)
+	_history = _build_history()
+	stack.add_child(_history)
 	_scroll = ScrollContainer.new()
 	_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -186,13 +201,21 @@ func _build_header() -> Control:
 	row.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_blob.add_child(row)
+	_history_btn = _head_button("history", "Past chats")
+	_history_btn.pressed.connect(func() -> void:
+		if _history.visible:
+			_show_thread(_has_conversation())
+		else:
+			show_history()
+	)
+	row.add_child(_history_btn)
 	var fresh := _head_button("edit", "New chat")
 	fresh.pressed.connect(new_chat)
 	row.add_child(fresh)
 	_expand = _head_button("expand", "Open in the Claude app")
 	_expand.pressed.connect(_open_in_app)
 	row.add_child(_expand)
-	_blob.reserve_right = 34.0 * 2.0 + 4.0
+	_blob.reserve_right = 34.0 * 3.0 + 8.0
 	return _blob
 
 
@@ -267,6 +290,80 @@ func _chip(icon_name: String, text: String, prompt: String) -> Button:
 			_sync_send()
 		else:
 			submit(prompt)
+	)
+	return b
+
+
+## Past chats: one quiet list, newest first, the one you're in marked.
+func _build_history() -> Control:
+	var view := Kit.vbox(10)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	view.visible = false
+	var head := Kit.label("Past chats", 13, 600, App.TEXT_MUTE)
+	head.custom_minimum_size.y = 22
+	view.add_child(head)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	view.add_child(scroll)
+	_history_list = Kit.vbox(2)
+	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_history_list)
+	_history_empty = Kit.vbox(6)
+	_history_empty.alignment = BoxContainer.ALIGNMENT_CENTER
+	_history_empty.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_history_empty.visible = false
+	var none := Kit.label("No past chats yet", 15, 600, App.TEXT_DIM)
+	none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_history_empty.add_child(none)
+	var hint := Kit.label("Conversations you have here show up in this list.", 13, 500, App.TEXT_MUTE)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_history_empty.add_child(hint)
+	view.add_child(_history_empty)
+	return view
+
+
+func _history_row(e: Dictionary) -> Button:
+	var current := str(e["id"]) == _cli.session and _has_conversation()
+	var b := Button.new()
+	b.custom_minimum_size.y = 50
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.tooltip_text = str(e["title"])
+	var bg := Color(1, 1, 1, 0.07) if current else Color(1, 1, 1, 0.0)
+	b.add_theme_stylebox_override("normal", Kit.box(bg, 13))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, bg.a + 0.05), 13))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, bg.a + 0.09), 13))
+	var row := Kit.hbox(12)
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 12
+	row.offset_right = -12
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(row)
+	var ic := Kit.icon_rect("chat", 15, Color(1, 1, 1, 0.75 if current else 0.42))
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(ic)
+	var col := Kit.vbox(1)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(col)
+	var t := Kit.label(str(e["title"]), 14, 500, App.TEXT if current else Color(1, 1, 1, 0.86))
+	t.clip_text = true
+	t.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	col.add_child(t)
+	var when := Fmt.ago(int(e.get("at", 0)))
+	if when == "Never played":
+		when = ""
+	var sub := Kit.label("This chat" if current else when, 12, 500, App.TEXT_MUTE)
+	sub.visible = sub.text != ""
+	col.add_child(sub)
+	b.pressed.connect(func() -> void:
+		Sfx.play(&"select")
+		if current:
+			_show_thread(true)
+		else:
+			load_chat(e)
 	)
 	return b
 
@@ -476,8 +573,14 @@ func open() -> void:
 func close() -> void:
 	if not is_open:
 		return
+	_take_shot()
 	is_open = false
 	_prompt.release_focus()
+	left_to = 0
+	get_tree().create_timer(0.6).timeout.connect(func() -> void:
+		if not is_open:
+			left_to = Host.foreground
+	)
 	if _tween and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
@@ -509,13 +612,130 @@ func _sync_greeting() -> void:
 	_greeting.text = part + (", " + name if name != "" else "")
 
 
+## Alt+Tab lists it while it's open or there's a conversation to come back to.
+func in_switcher() -> bool:
+	return is_open or running or _has_conversation()
+
+
 func _has_conversation() -> bool:
 	return _thread.get_child_count() > 1
 
 
+## What the conversation's about: its first message, for Alt+Tab and the app.
+func title() -> String:
+	for c in _thread.get_children():
+		if c.has_meta("user_text"):
+			return str(c.get_meta("user_text")).replace("\n", " ").strip_edges().left(80)
+	return ""
+
+
+## A picture of the popup as it looks now (the last one when it's closed), or
+## null if there's never been one.
+func snapshot() -> Texture2D:
+	_take_shot()
+	return _shot
+
+
+func _take_shot() -> void:
+	if not is_open or not visible or modulate.a < 0.9 or DisplayServer.get_name() == "headless":
+		return
+	var vp := get_viewport()
+	var img := vp.get_texture().get_image()
+	if img == null or img.is_empty():
+		return
+	var k := Vector2(img.get_size()) / vp.get_visible_rect().size
+	var r := get_global_transform_with_canvas() * Rect2(Vector2.ZERO, size)
+	var px := Rect2i(Rect2(r.position * k, r.size * k)).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
+	if px.size.x < 8 or px.size.y < 8:
+		return
+	_shot = ImageTexture.create_from_image(img.get_region(px))
+
+
 func _show_thread(on: bool) -> void:
+	_history.visible = false
 	_home.visible = not on
 	_scroll.visible = on
+	_sync_history_btn()
+
+
+func _sync_history_btn() -> void:
+	var on := _history.visible
+	_history_btn.add_theme_color_override("icon_normal_color", Color.WHITE if on else Color(1, 1, 1, 0.62))
+	_history_btn.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.1), 999) if on else Kit.empty())
+
+
+## The list of past chats, read fresh each time.
+func show_history() -> void:
+	_home.visible = false
+	_scroll.visible = false
+	_history.visible = true
+	_sync_history_btn()
+	_history_serial += 1
+	var serial := _history_serial
+	var cwd := ClaudeCli.home()
+	if mock:
+		_fill_history(serial, ClaudeHistory.recent(cwd))
+		return
+	WorkerThreadPool.add_task(func() -> void:
+		var list := ClaudeHistory.recent(cwd)
+		_fill_history.call_deferred(serial, list)
+	, false, "Claude past chats")
+
+
+func _fill_history(serial: int, list: Array[Dictionary]) -> void:
+	if serial != _history_serial:
+		return
+	for c in _history_list.get_children():
+		c.queue_free()
+	for e in list:
+		_history_list.add_child(_history_row(e))
+	_history_list.get_parent().visible = not list.is_empty()
+	_history_empty.visible = list.is_empty()
+
+
+## Opens a past chat: its messages as they were, and the next one carries on
+## from there (claude --resume).
+func load_chat(e: Dictionary) -> void:
+	_reset()
+	_cli.session = str(e["id"])
+	if str(e.get("cwd", "")) != "" and DirAccess.dir_exists_absolute(str(e["cwd"])):
+		_cli.cwd = str(e["cwd"])
+	_show_thread(true)
+	_follow = true
+	var path := str(e["path"])
+	var id := _cli.session
+	if mock:
+		_replay(id, ClaudeHistory.lines(path))
+		return
+	WorkerThreadPool.add_task(func() -> void:
+		var ls := ClaudeHistory.lines(path)
+		_replay.call_deferred(id, ls)
+	, false, "Claude chat")
+
+
+func _replay(id: String, ls: Array[Dictionary]) -> void:
+	if _cli.session != id or running:
+		return
+	for m in ls:
+		if str(m.get("type", "")) == "assistant":
+			_on_assistant(m)
+		elif not bool(m.get("isMeta", false)):
+			var text := ClaudeHistory.user_text(m)
+			if text != "":
+				_add(_user_bubble(text))
+			else:
+				_on_user(m)
+	for t in _tools.values():
+		if not t["done"]:
+			t["done"] = true
+			_sync_tool(t)
+	_work_label.text = "Thinking"
+	_streamed.clear()
+	_scroll_down.call_deferred()
+	if is_open:
+		_prompt.grab_focus()
+		if not mock and not _cli.running() and ClaudeCli.find() != "":
+			_start_cli()
 
 
 ## Typing that reached another of Oazy's layers while this is open (shell
@@ -606,8 +826,19 @@ func stop() -> void:
 
 ## A fresh conversation: the old one stays in Claude Code's history.
 func new_chat() -> void:
+	_reset()
+	_show_thread(false)
+	if is_open:
+		_prompt.grab_focus()
+		if not mock and ClaudeCli.find() != "":
+			_start_cli()
+
+
+## Clears the thread and leaves claude stopped.
+func _reset() -> void:
 	_cli.stop()
 	_cli.session = ""
+	_cli.cwd = ClaudeCli.home()
 	_set_running(false)
 	for c in _thread.get_children():
 		if c != _working:
@@ -619,15 +850,10 @@ func new_chat() -> void:
 	_asks.clear()
 	_dirty.clear()
 	_writing = false
-	_show_thread(false)
 	_prompt.text = ""
 	_fit_input()
 	_sync_send()
 	_blob.reset()
-	if is_open:
-		_prompt.grab_focus()
-		if not mock and ClaudeCli.find() != "":
-			_start_cli()
 
 
 func _start_cli() -> bool:
@@ -649,13 +875,9 @@ func _open_in_app() -> void:
 	if sid == "" or not _has_conversation():
 		ClaudeApp.open({"cwd": _cli.cwd})
 		return
-	var title := ""
-	for c in _thread.get_children():
-		if c.has_meta("user_text"):
-			title = str(c.get_meta("user_text")).split("\n")[0].left(80)
-			break
+	var cwd := _cli.cwd
 	_cli.stop()
-	ClaudeApp.open({"cwd": _cli.cwd, "resume": sid, "title": title})
+	ClaudeApp.open({"cwd": cwd, "resume": sid, "title": title()})
 	new_chat()
 
 

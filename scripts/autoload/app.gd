@@ -152,8 +152,9 @@ func _update_fps(focused: bool) -> void:
 		Engine.max_fps = 60 if eco else _vsync_cap
 
 
-func _smooth(n: Node) -> void:
-	if is_instance_valid(n) and n.is_inside_tree():
+func _smooth(n: Variant) -> void:
+	# Untyped: a view freed in the same frame arrives as a dead object.
+	if is_instance_valid(n) and (n as Node).is_inside_tree():
 		SmoothScroll.attach(n as Control)
 
 
