@@ -14,6 +14,8 @@
 //   7 Music   the music wallpaper: glass bars lit from behind on a celestial
 //             sky, moving with what's playing (see Music, which feeds
 //             the music_* globals below)
+//   8 Party   the music wallpaper's party mode: the bars on a lake at dusk
+//             under fireworks (see party.gdshaderinc)
 //
 // Motion is built from whole cycles per hour. Godot's TIME wraps every hour,
 // and this way the wrap lands exactly where it started, so nothing ever jumps.
@@ -461,9 +463,13 @@ vec3 wall_music(vec2 uv, float ph) {
 	return wall_vignette(col, uv);
 }
 
+#include "res://shaders/party.gdshaderinc"
+
 vec3 wall_style_color(int style, vec2 uv, float ph) {
 	if (style == 7) {
 		return wall_music(uv, ph);
+	} else if (style == 8) {
+		return wall_party(uv, ph);
 	} else if (style == 1) {
 		return wall_aurora(uv, ph);
 	} else if (style == 2) {

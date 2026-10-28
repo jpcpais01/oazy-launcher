@@ -414,6 +414,22 @@ func _music(main: Node) -> void:
 			"c": float(song[5]), "f": 0.15, "r": 3.0, "m": float(song[4]), "key": int(song[3]), "kc": 0.8}, float(song[1]), float(song[2]))
 		await _wait(1.6)
 		await shot("01m-desktop-music-" + id)
+	# Party mode: fireworks over the lake, at a few moments of their lives.
+	Music.set_party(true)
+	Music.set_mock_bursts([[0.55, 0.21, 0.9], [1.3, 0.64, 0.7], [2.1, 0.43, 0.6], [0.12, 0.87, 0.8]])
+	await _wait(1.8)
+	await shot("01m-desktop-party")
+	main.set_clean_view(true)
+	for id in songs:
+		var song: Array = songs[id]
+		Music.key = int(song[3])
+		Music.set_mock({"b": song[0], "db": -16.0, "o": 0.6, "k": 0.0, "bpm": 120.0, "bc": 0.8, "ph": 0.1,
+			"c": float(song[5]), "f": 0.15, "r": 3.0, "m": float(song[4]), "key": int(song[3]), "kc": 0.8}, float(song[1]), float(song[2]))
+		await _wait(1.2)
+		await shot("01m-party-" + id)
+	main.set_clean_view(false)
+	Music.set_party(false)
+	await _wait(1.6)
 	# Clicking the desktop: just the music and the taskbar.
 	main.set_clean_view(true)
 	await _wait(1.0)

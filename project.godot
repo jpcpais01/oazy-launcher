@@ -96,6 +96,18 @@ music_glow={
 "type": "vec4",
 "value": Vector4(0.9, 0.95, 1, 1)
 }
+music_burst={
+"type": "vec4",
+"value": Vector4(9, 9, 9, 9)
+}
+music_burst_seed={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_burst_power={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 
 [autoload]
 
