@@ -284,7 +284,7 @@ func _is_ready() -> bool:
 func _target_width() -> float:
 	# From the labels themselves: a container that was hidden still holds
 	# the minimum size it had before its text changed.
-	var inner := _short.get_minimum_size().x
+	var inner := _short.get_combined_minimum_size().x
 	if _open:
 		inner = maxf(_title.get_minimum_size().x, _sub.get_minimum_size().x)
 		if _action.visible:
