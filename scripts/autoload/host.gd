@@ -20,6 +20,10 @@ signal switch_key(key: String)
 signal wifi_event(d: Dictionary)
 ## Another app went fullscreen (a game, a video) or came back out of it.
 signal fullscreen_changed(on: bool)
+## About sixty times a second while music is being listened to (see Music).
+signal audio_frame(d: Dictionary)
+## What music is being listened to now: "chrome", "all" or "" (nothing).
+signal audio_source(src: String)
 
 const SOURCE := "res://native/oazy_host.cs"
 const CSC := [
@@ -195,6 +199,10 @@ func _on_line(line: String) -> void:
 				switch_key.emit(key)
 			"wifi":
 				wifi_event.emit(d)
+			"audio":
+				audio_frame.emit(d)
+			"audio_src":
+				audio_source.emit(str(d.get("src", "")))
 			"picture":
 				# A newer kept picture: loaded when something asks for it.
 				var hw := int(d.get("hwnd", 0))
@@ -504,6 +512,16 @@ func thumb_clear() -> void:
 ## Alt+Tab opens Oazy's switcher instead of Windows' own (see switch_key).
 func set_switcher(on: bool) -> void:
 	request(["switcher", 1 if on else 0])
+
+
+## Starts listening to what's playing: "chrome" (Chrome alone, or everything
+## while Chrome is closed) or "all". Frames arrive as audio_frame.
+func listen(source: String) -> void:
+	request(["audio", source])
+
+
+func stop_listening() -> void:
+	request(["audio_stop"])
 
 
 func lock_pc() -> void:

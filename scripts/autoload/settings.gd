@@ -25,6 +25,10 @@ const DEFAULTS := {
 	"accent": "38d6c4",
 	"wallpaper": "oasis",
 	"wallpaper_light": "auto",
+	## The music wallpaper (taskbar toggle), and what it listens to: "chrome"
+	## (Chrome alone, everything while it's closed) or "all".
+	"music_wallpaper": false,
+	"music_source": "chrome",
 	"user_name": "",
 	"pins": [],
 	"pins_initialized": false,
