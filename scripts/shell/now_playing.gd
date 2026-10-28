@@ -1,11 +1,11 @@
 class_name NowPlaying
 extends Control
 ## The music wallpaper's player, drawn straight onto the desktop with no box
-## around it: the artist and title low on the left, and at the bottom centre
+## around it: the song title low on the left, and at the bottom centre
 ## a hairline timeline (a little live waveform rides the playhead; click or
 ## drag to seek) over previous, play/pause and next, with the time beside.
 ## It follows whatever Windows' media controls report (Music.media), Chrome
-## first. The song and the play bar can each be turned off in Personalise.
+## first. The title and the play bar can each be turned off in Personalise.
 ## Hidden while the music wallpaper is off or nothing is playing, and with the
 ## rest of the desktop in the clean view.
 
@@ -15,7 +15,6 @@ const TRACK_UP := 78.0
 const ROW_GAP := 26.0
 
 var main: Node
-var _artist: Label
 var _title: Label
 var _time: Label
 var _track: _Track
@@ -35,13 +34,7 @@ func _ready() -> void:
 	modulate.a = 0.0
 	visible = false
 
-	_artist = Kit.label("", 12, 500, Color(1, 1, 1, 0.72))
-	var spaced := FontVariation.new()
-	spaced.base_font = Kit.font(500)
-	spaced.spacing_glyph = 3
-	_artist.add_theme_font_override("font", spaced)
-	add_child(_artist)
-	_title = Kit.label("", 34, 400, Color(1, 1, 1, 0.94))
+	_title = Kit.label("", 26, 400, Color(1, 1, 1, 0.94))
 	var airy := FontVariation.new()
 	airy.base_font = Kit.font(400)
 	airy.spacing_glyph = 1
@@ -90,16 +83,13 @@ func _layout() -> void:
 	_time.position = Vector2(_track.position.x + TRACK_W - 140.0, row - 10.0)
 	var left := 64.0
 	var title_w := clampf(w * 0.34, 260.0, 620.0)
-	_title.size = Vector2(title_w, 44.0)
-	_title.position = Vector2(left, row - 30.0)
-	_artist.size = Vector2(title_w, 18.0)
-	_artist.position = Vector2(left + 2.0, _title.position.y - 20.0)
+	_title.size = Vector2(title_w, 36.0)
+	_title.position = Vector2(left, row - 18.0)
 
 
 func _sync() -> void:
 	var m := Music.media
 	var has: bool = m.get("has", false) and str(m.get("title", "")) != ""
-	_artist.text = str(m.get("artist", "")).to_upper()
 	_title.text = str(m.get("title", ""))
 	_title.tooltip_text = _title.text
 	_play.kind = "pause" if m.get("playing", false) else "play"
@@ -108,7 +98,6 @@ func _sync() -> void:
 	_track.can_seek = m.get("can_seek", false) and float(m.get("dur", 0.0)) > 0.0
 	var song := bool(Settings.get_value("music_show_song"))
 	var controls := bool(Settings.get_value("music_show_controls"))
-	_artist.visible = song
 	_title.visible = song
 	for c: Control in [_track, _prev, _play, _next, _time]:
 		c.visible = controls
