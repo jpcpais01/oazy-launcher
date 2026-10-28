@@ -143,10 +143,10 @@ vec3 party_scene(vec2 p, float ph, float bright) {
 	col += mix(party_gold(), glow, 0.4) * gl * smoothstep(0.0, 0.06, hy - p.y) * exp(-up * 2.2) * (0.5 + 0.9 * music_level.w) * bright;
 
 	// The glass bars, standing on the water.
-	const float N = 41.0;
-	float pitch = aspect * 0.78 / N;
-	float w = pitch * 0.58;
-	float rad = w * 0.32;
+	const float N = 45.0;
+	float pitch = aspect * 0.95 / N;
+	float w = pitch * 0.68;
+	float rad = w * 0.1;
 	float fi = floor((p.x - cx) / pitch + (N - 1.0) * 0.5 + 0.5);
 	float halo = 0.0;
 	vec3 glass = vec3(0.0);
@@ -168,16 +168,22 @@ vec3 party_scene(vec2 p, float ph, float bright) {
 			vec3 lc = mix(music_light(clamp(bx - 0.3, 0.0, 1.0)), warm, smoothstep(-0.6, 1.0, lq.y) * 0.6);
 			// Lit from below and behind: brightest at the foot of each bar.
 			float foot = 0.4 + 0.6 * smoothstep(-1.0, 1.0, lq.y);
-			vec3 body = col * 0.72 + lc * (0.16 + 0.3 * foot) * (0.7 + 0.5 * power) + glow * 0.03;
-			body += mix(glow, lc, 0.3) * pow(abs(lq.x), 6.0) * 0.3;
-			body += glow * exp(-pow((lq.x + 0.5) / 0.12, 2.0)) * 0.12;
-			body += glow * exp(-(1.0 - abs(lq.y)) * b.w / 0.005) * 0.3 * step(lq.y, 0.0);
-			body += glow * exp(-d * d * 3.0e6) * 0.4;
+			// Squared glass, as on the music wallpaper: a clear front face lit
+			// from within, bevelled sides that reflect the light around them,
+			// and no drawn outline.
+			float ax = abs(lq.x);
+			float bev = smoothstep(0.8, 1.0, ax);
+			vec3 body = col * 0.8 + lc * (0.12 + 0.28 * foot) * (0.7 + 0.5 * power);
+			body *= 1.0 - 0.3 * exp(-pow((ax - 0.84) / 0.045, 2.0));
+			float fres = 0.04 + 0.96 * pow(0.88 * bev, 5.0);
+			body = mix(body, col * 1.15 + lc * 0.12, fres * 0.85);
+			float endv = 1.0 - smoothstep(0.0, 0.2, (1.0 - abs(lq.y)) * b.w / b.z);
+			body = mix(body, col * 1.15 + lc * 0.12, endv * 0.5);
 			glass = body;
 		}
 	}
 	col += mix(warm, glow, 0.3) * halo * 0.1 * (0.5 + power);
-	col = mix(col, glass, inside * 0.92);
+	col = mix(col, glass, inside);
 	return col;
 }
 
