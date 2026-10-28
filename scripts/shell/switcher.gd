@@ -177,6 +177,14 @@ func commit() -> void:
 	_close(true)
 	if e.is_empty():
 		return
+	if main and main.get("assistant") != null:
+		var a: AssistantPanel = main.assistant
+		if e.has("assistant"):
+			a.open()
+			_lift.call_deferred(Shell.hwnd_of(a))
+			return
+		# Going somewhere else leaves Claude, even if Windows never told its layer.
+		a.close()
 	var win: ShellWindow = e.get("shell")
 	if win != null:
 		if is_instance_valid(win) and main:
@@ -203,7 +211,11 @@ func close_selected() -> void:
 		return
 	var e: Dictionary = _entries[selected]
 	var win: ShellWindow = e.get("shell")
-	if win != null:
+	if e.has("assistant"):
+		# Closing Claude's card puts the conversation away (it stays in past chats).
+		main.assistant.close()
+		main.assistant.new_chat()
+	elif win != null:
 		if is_instance_valid(win):
 			win.close()
 	else:
@@ -244,6 +256,17 @@ func _collect() -> Array[Dictionary]:
 	var at := 0 if (main and main.windows_in_front()) or Host.self_foreground else mini(1, out.size())
 	for i in own.size():
 		out.insert(at + i, own[i])
+	# Claude's popup, while there's a conversation: first while it's open, next
+	# when you've only just left it, else after Oazy's own windows.
+	if main and main.get("assistant") != null and (main.assistant as AssistantPanel).in_switcher():
+		var a: AssistantPanel = main.assistant
+		var e := {"assistant": true, "title": a.title() if a.title() != "" else "Claude", "item": Catalog.item(ClaudeApp.REF), "min": false, "pic": a.snapshot()}
+		var pos := mini(at + own.size(), out.size())
+		if a.is_open:
+			pos = 0
+		elif a.left_to != 0 and a.left_to == Host.foreground:
+			pos = mini(1, out.size())
+		out.insert(pos, e)
 	return out.slice(0, MAX_WINDOWS)
 
 
@@ -341,7 +364,7 @@ func _make_card(i: int) -> Dictionary:
 	node.mouse_filter = Control.MOUSE_FILTER_STOP
 	node.size = _base
 	_stage.add_child(node)
-	var live: bool = Host.available and e.get("shell") == null and not bool(e["min"])
+	var live: bool = Host.available and e.get("shell") == null and not e.has("assistant") and not bool(e["min"])
 	var it: Dictionary = e["item"]
 	var mat := ShaderMaterial.new()
 	mat.shader = CARD
@@ -396,7 +419,7 @@ func _make_card(i: int) -> Dictionary:
 	var c := {"node": node, "mat": mat, "x_btn": x, "x": 0.0, "y": 0.0, "sc": 1.0, "al": 0.0, "hot": 0.0,
 		"hover": 0.0, "over": false, "live": live, "hwnd": int(e.get("hwnd", 0)),
 		"shot": shot, "icon_box": icon_box, "badge": badge, "pane": pane, "busy": false, "since": 0.0, "failed": false}
-	var cached: Texture2D = Host.picture_of(c["hwnd"]) if e.get("shell") == null else null
+	var cached: Texture2D = e.get("pic") if e.has("assistant") else (Host.picture_of(c["hwnd"]) if e.get("shell") == null else null)
 	if cached:
 		_set_shot(c, cached, false)
 	x.pressed.connect(func() -> void:

@@ -686,6 +686,45 @@ func _ui_tests() -> void:
 	await _wait(0.3)
 	check(main.start.is_open and not ai.is_open, "assistant: right-clicking the orb opens Start instead")
 	main.start.close()
+	await _wait(0.2)
+	# Alt+Tab: the conversation is there to come back to.
+	main.switcher.handle_key("open")
+	var at := -1
+	for i in main.switcher._entries.size():
+		if main.switcher._entries[i].has("assistant"):
+			at = i
+	check(at >= 0 and str(main.switcher._entries[at]["title"]) == "hello", "assistant: in Alt+Tab with its conversation")
+	main.switcher.selected = maxi(at, 0)
+	main.switcher.commit()
+	await _wait(0.3)
+	check(ai.is_open, "assistant: Alt+Tab brings it back")
+	main.switcher.handle_key("open")
+	check(main.switcher._entries[0].has("assistant"), "assistant: first in Alt+Tab while it's open")
+	main.switcher.handle_key("cancel")
+	await _wait(0.3)
+	# Past chats, from a Claude Code history made up here.
+	var conf := ProjectSettings.globalize_path("user://smoke_claude")
+	var was_conf := OS.get_environment("CLAUDE_CONFIG_DIR")
+	OS.set_environment("CLAUDE_CONFIG_DIR", conf)
+	var pdir := ClaudeHistory.project_dir(ClaudeCli.home())
+	DirAccess.make_dir_recursive_absolute(pdir)
+	var tf := FileAccess.open(pdir.path_join("abc-123.jsonl"), FileAccess.WRITE)
+	tf.store_line(JSON.stringify({"type": "user", "cwd": ClaudeCli.home(), "message": {"role": "user", "content": "Plan my week"}}))
+	tf.store_line(JSON.stringify({"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/x/notes.md"}}]}}))
+	tf.store_line(JSON.stringify({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}))
+	tf.store_line(JSON.stringify({"type": "assistant", "message": {"id": "m2", "role": "assistant", "content": [{"type": "text", "text": "Here's a **plan**."}]}}))
+	tf.store_line(JSON.stringify({"type": "ai-title", "aiTitle": "Weekly plan"}))
+	tf.close()
+	var past := ClaudeHistory.recent(ClaudeCli.home())
+	check(past.size() == 1 and str(past[0]["title"]) == "Weekly plan" and str(past[0]["id"]) == "abc-123", "assistant: reads past chats")
+	ai.mock = true
+	ai.show_history()
+	check(ai._history.visible and ai._history_list.get_child_count() == 1, "assistant: past chats list")
+	ai.load_chat(past[0])
+	check(not ai._history.visible and ai._cli.session == "abc-123" and ai.title() == "Plan my week" and ai._tools.size() == 1, "assistant: a past chat opens where it left off")
+	OS.set_environment("CLAUDE_CONFIG_DIR", was_conf)
+	DirAccess.remove_absolute(pdir.path_join("abc-123.jsonl"))
+	ai.close()
 	ai.new_chat()
 	check(not ai._has_conversation(), "assistant: new chat clears it")
 	ai.mock = false

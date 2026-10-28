@@ -520,6 +520,57 @@ func _assistant(main: Node) -> void:
 	a.handle_message({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "PowerShell", "tool_use_id": "t2", "input": {"command": "New-Item -ItemType Directory \"$HOME\\Downloads\\Old installers\"\nMove-Item \"$HOME\\Downloads\\Cyberpunk2077_setup.exe\", \"$HOME\\Downloads\\Win11_23H2.iso\" \"$HOME\\Downloads\\Old installers\"", "description": "Move the used installers into Old installers"}}})
 	await _wait(0.6)
 	await shot("02g-assistant-ask")
+	a._answer("r1", true)
+	a.handle_message({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "content": "ok"}]}})
+	a.handle_message({"type": "assistant", "message": {"id": "m4", "content": [{"type": "text", "text": "Done. Both installers are in **Downloads/Old installers** now."}]}})
+	a.handle_message({"type": "result", "subtype": "success"})
+	await _wait(0.4)
+	a.close()
+	await _wait(0.4)
+	# Alt+Tab: the conversation waits there like a window.
+	main.switcher.handle_key("open")
+	for i in main.switcher._entries.size():
+		if main.switcher._entries[i].has("assistant"):
+			main.switcher.selected = i
+	main.switcher._select(main.switcher.selected, false)
+	await _wait(0.8)
+	await shot("02h-assistant-alt-tab")
+	main.switcher.handle_key("cancel")
+	await _wait(0.4)
+	a.new_chat()
+	# Past chats, from a made-up Claude Code history.
+	var was_conf := OS.get_environment("CLAUDE_CONFIG_DIR")
+	OS.set_environment("CLAUDE_CONFIG_DIR", ProjectSettings.globalize_path("user://shots_claude"))
+	var dir := ClaudeHistory.project_dir(ClaudeCli.home())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var chats := [
+		["Free up space in Downloads", "What's taking up the most space in my Downloads folder?", 0],
+		["Birthday message for Rita", "Help me write a birthday message to Rita", 3600 * 5],
+		["Explain how VPNs work", "Explain this to me simply: how does a VPN work?", 86400 + 3600],
+		["Rename holiday photos by date", "Rename the photos in Pictures/Algarve by the date they were taken", 86400 * 3],
+		["What I worked on this week", "What did I work on this week?", 86400 * 6],
+	]
+	var now := int(Time.get_unix_time_from_system())
+	for i in chats.size():
+		var path := dir.path_join("shot-%d.jsonl" % i)
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_line(JSON.stringify({"type": "user", "cwd": ClaudeCli.home(), "message": {"role": "user", "content": chats[i][1]}}))
+		f.store_line(JSON.stringify({"type": "assistant", "message": {"id": "h%d" % i, "role": "assistant", "content": [{"type": "text", "text": "Sure, here's a short summary."}]}}))
+		f.store_line(JSON.stringify({"type": "ai-title", "aiTitle": chats[i][0]}))
+		f.close()
+		# Older chats, older files.
+		OS.execute("touch", PackedStringArray(["-d", "@%d" % (now - int(chats[i][2])), path]))
+	a.open()
+	await _wait(0.5)
+	a.show_history()
+	await _wait(0.6)
+	await shot("02i-assistant-past-chats")
+	var past := ClaudeHistory.recent(ClaudeCli.home())
+	if past.size() > 1:
+		a.load_chat(past[1])
+	await _wait(0.6)
+	await shot("02j-assistant-past-chat-open")
+	OS.set_environment("CLAUDE_CONFIG_DIR", was_conf)
 	a.close()
 	await _wait(0.4)
 	a.new_chat()
