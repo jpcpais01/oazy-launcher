@@ -1069,7 +1069,11 @@ function drawHistory(lines) {
 }
 
 function cleanUser(t) {
-	t = String(t || '').trim();
+	t = String(t || '');
+	// Context the orb sent along that the user never saw (an idea's notes).
+	const hidden = t.indexOf('<oazy-context>');
+	if (hidden > 0) t = t.slice(0, hidden);
+	t = t.trim();
 	if (!t || t.startsWith('<') || t.startsWith('Caveat:')) {
 		const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t);
 		return cmd ? cmd[1].trim() : '';

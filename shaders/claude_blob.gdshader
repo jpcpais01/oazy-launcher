@@ -1,5 +1,5 @@
 // Claude's avatar in the orb popup: a small jelly of the same water as
-// Oazy's orb, sitting on the header's floor. One rect, drawn in pixels from
+// Oazy's orb, sitting on the popup's roof. One rect, drawn in pixels from
 // the ground point up, so it stays crisp at any size. Everything that moves
 // (squash, lean, wobble, face) is a uniform eased on the CPU by ClaudeBlob;
 // the shader only draws the pose it is given.

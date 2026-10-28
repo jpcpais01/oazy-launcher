@@ -7,7 +7,9 @@ extends Control
 ## for Allow. Past chats (Claude Code's own history for your home folder) open
 ## again from the clock, and it sits in Alt+Tab like a window while you have a
 ## conversation going. "Open in Claude" carries the conversation over to the
-## full Oazy Claude app. Built once and kept in Start's layer, so opening it is only
+## full Oazy Claude app. Claude itself (ClaudeBlob) lives on the popup's roof,
+## outside the glass, and now and then says an idea it had about one of your
+## projects (ClaudeIdeas) from up there. Built once and kept in Start's layer, so opening it is only
 ## showing it; claude itself is started as it opens, so the first reply
 ## doesn't wait for it.
 
@@ -18,7 +20,11 @@ signal busy_changed(on: bool)
 signal needs_you(why: String)
 
 const W := 468.0
-const H := 660.0
+const H := 600.0
+## The strip above the glass Claude lives on (the blob's whole box), and how
+## much of it ever shows: room kept free above the popup.
+const ROOF := 84.0
+const ROOF_SHOWN := 82.0
 const PAD := 18.0
 ## Stops claude this long after the popup closed with nothing running; the
 ## next message resumes the same conversation.
@@ -45,8 +51,23 @@ var running := false
 var _cli: ClaudeCli
 var _glass: GlassPanel
 var _home: Control
-## Claude itself, living along the top.
+## Claude itself, living on the roof.
 var _blob: ClaudeBlob
+## Its ideas, and the bubble it says them in.
+var _ideas: ClaudeIdeas
+var _bubble: PanelContainer
+var _bubble_repo: Label
+var _bubble_text: Label
+var _bubble_tween: Tween
+var _seen_timer: Timer
+## The small settings card over the bottom of the popup, from the gear.
+var _settings: PanelContainer
+var _settings_btn: Button
+var _ideas_switch: ToggleSwitch
+var _allow_switch: ToggleSwitch
+var _project_list: VBoxContainer
+var _project_note: Label
+var _projects_serial := 0
 var _greeting: Label
 var _chips: VBoxContainer
 var _setup: Control
@@ -70,7 +91,6 @@ var _history_serial := 0
 var _shot: Texture2D
 ## Ask first / Allow all, under the box.
 var _mode: Button
-var _foot_note: Label
 var _tween: Tween
 var _idle: Timer
 var _follow := true
@@ -97,10 +117,9 @@ func _ready() -> void:
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	col.offset_left = PAD
 	col.offset_right = -PAD
-	col.offset_top = 14
+	col.offset_top = PAD
 	col.offset_bottom = -PAD
 	add_child(col)
-	col.add_child(_build_header())
 
 	var stack := Control.new()
 	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -147,13 +166,13 @@ func _ready() -> void:
 		Sfx.play(&"toggle")
 	)
 	foot.add_child(_mode)
-	_foot_note = Kit.label("", 11, 500, App.TEXT_MUTE)
-	_foot_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_foot_note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_foot_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_foot_note.clip_text = true
-	_foot_note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	foot.add_child(_foot_note)
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	foot.add_child(gap)
+	_build_buttons(foot)
+	_build_roof()
+	_build_settings()
 	_sync_mode()
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		if key == "claude_auto_allow":
@@ -166,6 +185,18 @@ func _ready() -> void:
 	_cli.message.connect(handle_message)
 	_cli.exited.connect(_on_exit)
 	add_child(_cli)
+	_ideas = ClaudeIdeas.new()
+	_ideas.mock = mock
+	_ideas.arrived.connect(_on_idea)
+	add_child(_ideas)
+	_seen_timer = Timer.new()
+	_seen_timer.one_shot = true
+	_seen_timer.wait_time = 2.5
+	_seen_timer.timeout.connect(func() -> void:
+		if is_open and _bubble.visible:
+			_ideas.seen()
+	)
+	add_child(_seen_timer)
 	_idle = Timer.new()
 	_idle.one_shot = true
 	_idle.wait_time = IDLE_STOP
@@ -187,20 +218,82 @@ func _ready() -> void:
 
 
 func shell_shape() -> Array[Rect2]:
-	return [_glass.shadow_rect()]
+	return [_glass.shadow_rect(), _roof_rect()]
+
+
+## Where Claude and its bubble can be, above the glass.
+func _roof_rect() -> Rect2:
+	var r := _blob.get_global_rect()
+	return Rect2(r.position.x, r.end.y - ROOF_SHOWN, r.size.x, ROOF_SHOWN)
 
 
 # --- Building ------------------------------------------------------------------------------
 
-## The header is Claude's own strip: it lives along the whole width, with
-## the two buttons tucked in the top right corner.
-func _build_header() -> Control:
+## Claude's roof: a strip over the top edge of the glass, outside it, that
+## the jelly walks along, with the bubble it says its ideas in.
+func _build_roof() -> void:
 	_blob = ClaudeBlob.new()
 	_blob.area = self
-	var row := Kit.hbox(4)
-	row.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_blob.add_child(row)
+	_blob.inset = 20.0
+	_blob.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_blob.offset_top = -ROOF
+	_blob.offset_bottom = 0.0
+	add_child(_blob)
+
+	_bubble = PanelContainer.new()
+	_bubble.visible = false
+	_bubble.mouse_filter = Control.MOUSE_FILTER_STOP
+	_bubble.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_bubble.tooltip_text = "Ask Claude about this idea"
+	_bubble.add_theme_stylebox_override("panel", Kit.box(Color(0.075, 0.1, 0.14, 0.9), 16, Color(1, 1, 1, 0.08), 1, 12, 8))
+	_bubble.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			_bubble.accept_event()
+			_ask_about_idea()
+	)
+	_bubble.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_bubble.offset_left = _blob.home_room()
+	_bubble.offset_right = -_blob.inset - 2.0
+	_bubble.offset_bottom = -ClaudeBlob.FLOOR - 5.0
+	_bubble.offset_top = _bubble.offset_bottom
+	_bubble.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_blob.add_child(_bubble)
+	var row := Kit.hbox(8)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bubble.add_child(row)
+	var words := Kit.vbox(1)
+	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(words)
+	_bubble_repo = Kit.label("", 10, 600, App.TEXT_MUTE)
+	_bubble_repo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bubble_repo.clip_text = true
+	_bubble_repo.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	words.add_child(_bubble_repo)
+	_bubble_text = Kit.label("", 13, 500, App.TEXT)
+	_bubble_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bubble_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bubble_text.max_lines_visible = 2
+	_bubble_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	words.add_child(_bubble_text)
+	var x := FxButton.icon_only("close", "Not now", 12, 24)
+	x.focus_mode = Control.FOCUS_NONE
+	x.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	x.add_theme_color_override("icon_normal_color", Color(1, 1, 1, 0.4))
+	x.add_theme_color_override("icon_hover_color", Color.WHITE)
+	x.pressed.connect(func() -> void:
+		_ideas.clear()
+		_sync_idea()
+	)
+	row.add_child(x)
+
+
+## Settings, past chats, a new chat and the Claude app, at the right end of
+## the footer.
+func _build_buttons(row: HBoxContainer) -> void:
+	_settings_btn = _head_button("settings", "Settings")
+	_settings_btn.pressed.connect(func() -> void: _show_settings(not _settings.visible))
+	row.add_child(_settings_btn)
 	_history_btn = _head_button("history", "Past chats")
 	_history_btn.pressed.connect(func() -> void:
 		if _history.visible:
@@ -215,12 +308,157 @@ func _build_header() -> Control:
 	_expand = _head_button("expand", "Open in the Claude app")
 	_expand.pressed.connect(_open_in_app)
 	row.add_child(_expand)
-	_blob.reserve_right = 34.0 * 3.0 + 8.0
-	return _blob
+
+
+## A small card over the bottom right of the popup: ideas on or off, asking
+## first, and which of your GitHub projects Claude thinks about.
+func _build_settings() -> void:
+	_settings = PanelContainer.new()
+	_settings.visible = false
+	_settings.mouse_filter = Control.MOUSE_FILTER_STOP
+	var box := Kit.box(Color(0.07, 0.09, 0.13, 1.0), 18, Color(1, 1, 1, 0.08), 1, 16, 14)
+	_settings.add_theme_stylebox_override("panel", Kit.shadowed(box, Color(0, 0, 0, 0.3), 24, Vector2(0, 8)))
+	_settings.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_settings.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_settings.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_settings.offset_right = -PAD
+	_settings.offset_left = -PAD - 330.0
+	_settings.offset_bottom = -PAD - 40.0
+	_settings.offset_top = _settings.offset_bottom
+	add_child(_settings)
+	var col := Kit.vbox(10)
+	_settings.add_child(col)
+	col.add_child(Kit.label("Settings", 15, 600, App.TEXT))
+
+	_ideas_switch = _settings_switch(col, "Ideas from Claude", "Now and then Claude reads one of your projects and suggests something.", "claude_ideas")
+	_allow_switch = _settings_switch(col, "Allow everything", "Edits and commands go through without asking first.", "claude_auto_allow")
+
+	var head := Kit.hbox(6)
+	col.add_child(head)
+	var title := Kit.label("Projects Claude thinks about", 12, 600, App.TEXT_DIM)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(title)
+	var refresh := FxButton.icon_only("refresh", "Check GitHub again", 13, 26)
+	refresh.focus_mode = Control.FOCUS_NONE
+	refresh.add_theme_color_override("icon_normal_color", Color(1, 1, 1, 0.5))
+	refresh.add_theme_color_override("icon_hover_color", Color.WHITE)
+	refresh.pressed.connect(func() -> void: _fill_projects(true))
+	head.add_child(refresh)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size.y = 168
+	col.add_child(scroll)
+	_project_list = Kit.vbox(2)
+	_project_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_project_list)
+	_project_note = Kit.label("", 11, 500, App.TEXT_MUTE)
+	_project_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_project_note.custom_minimum_size = Vector2(290, 32)
+	_project_list.add_child(_project_note)
+	Settings.changed.connect(func(key: String, v: Variant) -> void:
+		if key == "claude_ideas":
+			_ideas_switch.set_on(bool(v))
+		elif key == "claude_auto_allow":
+			_allow_switch.set_on(bool(v))
+	)
+
+
+func _settings_switch(col: VBoxContainer, title: String, desc: String, key: String) -> ToggleSwitch:
+	var row := Kit.hbox(12)
+	col.add_child(row)
+	var words := Kit.vbox(1)
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(words)
+	words.add_child(Kit.label(title, 13, 500, App.TEXT))
+	var d := Kit.label(desc, 11, 500, App.TEXT_MUTE)
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	d.custom_minimum_size = Vector2(220, 30)
+	words.add_child(d)
+	var sw := ToggleSwitch.new()
+	sw.focus_mode = Control.FOCUS_NONE
+	sw.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sw.set_on(bool(Settings.get_value(key)))
+	sw.toggled.connect(func(on: bool) -> void: Settings.set_value(key, on))
+	row.add_child(sw)
+	return sw
+
+
+func _show_settings(on: bool) -> void:
+	if on == _settings.visible:
+		return
+	_settings.visible = on
+	if not on:
+		return
+	_settings.modulate.a = 0.0
+	var t := create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	t.tween_property(_settings, "modulate:a", 1.0, 0.16)
+	Sfx.play(&"open")
+	_fill_projects(false)
+
+
+## The project list, each one ticked unless you've left it out.
+func _fill_projects(fresh: bool) -> void:
+	_projects_serial += 1
+	var serial := _projects_serial
+	for c in _project_list.get_children():
+		if c != _project_note:
+			c.queue_free()
+	_project_note.visible = true
+	_project_note.text = "Looking at GitHub…"
+	var list: Array = await _ideas.projects(fresh)
+	if serial != _projects_serial or not is_inside_tree():
+		return
+	if list.is_empty():
+		_project_note.text = "Couldn't reach your GitHub projects. Sign in with the GitHub CLI (gh auth login) to include private ones."
+		return
+	_project_note.visible = false
+	for r in list:
+		_project_list.add_child(_project_row(str(r)))
+
+
+func _project_row(repo: String) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.text = repo.get_slice("/", 1)
+	b.tooltip_text = repo
+	b.clip_text = true
+	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	b.add_theme_font_override("font", Kit.font(500))
+	b.add_theme_font_size_override("font_size", 13)
+	b.add_theme_constant_override("h_separation", 10)
+	b.add_theme_stylebox_override("normal", Kit.empty(8, 6))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.05), 10, Color(0, 0, 0, 0), 0, 8, 6))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.08), 10, Color(0, 0, 0, 0), 0, 8, 6))
+	b.add_theme_stylebox_override("hover_pressed", Kit.box(Color(1, 1, 1, 0.08), 10, Color(0, 0, 0, 0), 0, 8, 6))
+	var sync := func() -> void:
+		var skip: Array = Settings.get_value("claude_projects_skip")
+		var on := not skip.has(repo)
+		b.icon = Icons.tex("check" if on else "dot", 14, Color.WHITE)
+		var tint := App.accent if on else Color(1, 1, 1, 0.22)
+		for c in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_hover_pressed_color"]:
+			b.add_theme_color_override(c, tint)
+		var text := App.TEXT if on else App.TEXT_MUTE
+		for c in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+			b.add_theme_color_override(c, text)
+	sync.call()
+	b.pressed.connect(func() -> void:
+		var skip: Array = (Settings.get_value("claude_projects_skip") as Array).duplicate()
+		if skip.has(repo):
+			skip.erase(repo)
+		else:
+			skip.append(repo)
+		Settings.set_value("claude_projects_skip", skip)
+		sync.call()
+		Sfx.play(&"toggle")
+	)
+	return b
 
 
 func _head_button(icon_name: String, tip: String) -> Button:
-	var b := FxButton.icon_only(icon_name, tip, 16, 34)
+	var b := FxButton.icon_only(icon_name, tip, 15, 30)
 	b.focus_mode = Control.FOCUS_NONE
 	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	b.add_theme_color_override("icon_normal_color", Color(1, 1, 1, 0.62))
@@ -470,7 +708,6 @@ func _sync_mode() -> void:
 	_mode.add_theme_stylebox_override("hover", Kit.box(Color(bg, bg.a + 0.05), 999, line, 1, 10, 4))
 	_mode.add_theme_stylebox_override("pressed", Kit.box(Color(bg, bg.a + 0.08), 999, line, 1, 10, 4))
 	_mode.add_theme_stylebox_override("hover_pressed", Kit.box(Color(bg, bg.a + 0.08), 999, line, 1, 10, 4))
-	_foot_note.text = "Claude can make mistakes."
 	# Anything waiting for an answer goes through once you switch it on.
 	if auto:
 		for id in _asks.keys():
@@ -539,6 +776,7 @@ func open() -> void:
 		_prompt.grab_focus()
 		return
 	is_open = true
+	_ideas.mock = mock
 	_idle.stop()
 	_sync_greeting()
 	_fit_input()
@@ -561,6 +799,7 @@ func open() -> void:
 	_tween.tween_property(self, "scale", Vector2.ONE, 0.32)
 	_tween.tween_property(self, "position:y", target_y, 0.32)
 	_blob.set_active(true)
+	_sync_idea()
 	Sfx.play(&"open")
 	Shell.focus(self)
 	_prompt.grab_focus()
@@ -590,12 +829,18 @@ func close() -> void:
 	if not running:
 		_idle.start()
 	_blob.set_active(false)
+	_seen_timer.stop()
+	# Seen: it's said. Not yet: it waits for next time.
+	if not _ideas.current.is_empty() and not _ideas.waiting():
+		_ideas.clear()
+	_blob.present(false)
+	_show_settings(false)
 	visibility_changed_to.emit(false)
 
 
 func _place() -> void:
 	var vp := Shell.view_size()
-	size = Vector2(minf(W, vp.x - 20.0), minf(H, vp.y - Taskbar.RESERVE - 14.0))
+	size = Vector2(minf(W, vp.x - 20.0), minf(H, vp.y - Taskbar.RESERVE - 14.0 - ROOF_SHOWN))
 	position = Vector2(Taskbar.MARGIN, vp.y - Taskbar.RESERVE - 4.0 - size.y)
 
 
@@ -775,16 +1020,105 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed:
 		var over_orb: bool = main != null and main.get("taskbar") != null and main.taskbar.orb.get_global_rect().has_point(event.position)
-		if not get_global_rect().has_point(event.position) and not over_orb:
+		if _settings.visible and not _settings.get_global_rect().has_point(event.position) and not _settings_btn.get_global_rect().has_point(event.position):
+			_show_settings(false)
+		var on_roof := _blob.get_body_rect().has_point(event.position) or (_bubble.visible and _bubble.get_global_rect().has_point(event.position))
+		if not get_global_rect().has_point(event.position) and not over_orb and not on_roof:
 			close()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		close()
+		if _settings.visible:
+			_show_settings(false)
+		else:
+			close()
 		get_viewport().set_input_as_handled()
+
+
+# --- Claude's ideas --------------------------------------------------------------------------
+
+## An idea came to it in the background: said now if you're here, otherwise
+## the orb ripples and it waits for you.
+func _on_idea(_idea: Dictionary) -> void:
+	if is_open:
+		_sync_idea()
+	else:
+		needs_you.emit("idea")
+
+
+## The bubble is up while the popup is open, there's an idea to say and Claude
+## isn't busy with your conversation.
+func _sync_idea() -> void:
+	var idea := _ideas.current
+	var show := is_open and not idea.is_empty() and not running
+	_blob.present(show)
+	if not show:
+		_seen_timer.stop()
+		if _bubble.visible:
+			if _bubble_tween and _bubble_tween.is_valid():
+				_bubble_tween.kill()
+			_bubble_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+			_bubble_tween.tween_property(_bubble, "modulate:a", 0.0, 0.12)
+			_bubble_tween.tween_callback(func() -> void: _bubble.visible = false)
+		return
+	_bubble_repo.text = str(idea.get("repo", "")).get_slice("/", 1)
+	_bubble_text.text = str(idea.get("idea", ""))
+	# A wrapping label needs its width up front to know how tall it is:
+	# the bubble less its padding and the close button.
+	var w := size.x + _bubble.offset_right - _bubble.offset_left - 24.0 - 24.0 - 8.0
+	_bubble_text.custom_minimum_size.x = maxf(80.0, w)
+	_bubble_text.size.x = _bubble_text.custom_minimum_size.x
+	var lines := clampi(_bubble_text.get_line_count(), 1, 2)
+	_bubble_text.custom_minimum_size.y = lines * (_bubble_text.get_line_height() + 4)
+	# Grows up from the roof, never down over the glass.
+	_bubble.offset_top = _bubble.offset_bottom - _bubble.get_combined_minimum_size().y
+	if _ideas.waiting():
+		_seen_timer.start()
+	if _bubble.visible and _bubble.modulate.a > 0.99:
+		return
+	_bubble.visible = true
+	_bubble.modulate.a = 0.0
+	_bubble.pivot_offset = Vector2(0, _bubble.size.y)
+	_bubble.scale = Vector2.ONE * 0.94
+	if _bubble_tween and _bubble_tween.is_valid():
+		_bubble_tween.kill()
+	# Just after its little jump of surprise.
+	_bubble_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_bubble_tween.tween_property(_bubble, "modulate:a", 1.0, 0.24).set_delay(0.3)
+	_bubble_tween.tween_property(_bubble, "scale", Vector2.ONE, 0.3).set_delay(0.3)
+
+
+## Tests and screenshots: says this idea as if it had just come ({} takes it
+## away again).
+func say_idea(idea: Dictionary) -> void:
+	if idea.is_empty():
+		_ideas.clear()
+		_sync_idea()
+		return
+	_ideas.current = idea
+	_on_idea(idea)
+
+
+## Clicked: Claude tells you more, in the chat, with the project at hand.
+func _ask_about_idea() -> void:
+	var idea := _ideas.current
+	if idea.is_empty() or running:
+		return
+	var repo := str(idea.get("repo", ""))
+	var text := "You had an idea for my project %s: \"%s\". Tell me more about it." % [repo.get_slice("/", 1), str(idea.get("idea", ""))]
+	var why := str(idea.get("why", ""))
+	var path := str(idea.get("path", "")).replace("/", "\\") if App.is_windows() else str(idea.get("path", ""))
+	_ideas.clear()
+	_sync_idea()
+	Sfx.play(&"select")
+	# What you see is the question; Claude also gets what it was thinking and
+	# where the project is.
+	submit(text, "Not shown to the user. When you had the idea you noted: %s The latest version of github.com/%s is checked out at %s if you want to look." % [why, repo, path])
 
 
 # --- Talking to Claude -----------------------------------------------------------------------
 
-func submit(text: String = "") -> void:
+## Sends `text` as you (typed, or a chip); `context` goes along to Claude
+## without showing in the chat.
+func submit(text: String = "", context: String = "") -> void:
 	if text == "":
 		text = _prompt.text.strip_edges()
 		if text == "":
@@ -807,7 +1141,10 @@ func submit(text: String = "") -> void:
 			if not _start_cli():
 				_set_running(false)
 				return
-		_cli.send_text(text)
+		if context != "":
+			_cli.send_text("%s\n\n%s%s</oazy-context>" % [text, ClaudeHistory.CONTEXT_TAG, context])
+		else:
+			_cli.send_text(text)
 	_sync_send()
 
 
@@ -886,6 +1223,7 @@ func _set_running(on: bool) -> void:
 		_sync_working()
 		return
 	running = on
+	_sync_idea()
 	_since = Time.get_ticks_msec()
 	_work_label.text = "Thinking"
 	_sync_working()

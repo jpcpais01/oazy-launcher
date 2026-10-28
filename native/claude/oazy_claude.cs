@@ -821,6 +821,9 @@ namespace OazyClaude
 					if (b != null && Json.Str(b, "type") == "text") { text = Json.Str(b, "text"); break; }
 				}
 			}
+			// Context the orb sent along that the user never saw (an idea's notes).
+			int hidden = text.IndexOf("<oazy-context>", StringComparison.Ordinal);
+			if (hidden > 0) text = text.Substring(0, hidden);
 			text = text.Trim();
 			if (text.StartsWith("<") || text.StartsWith("Caveat:") || text.StartsWith("[Request interrupted")) return "";
 			return text;

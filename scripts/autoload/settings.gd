@@ -62,6 +62,12 @@ const DEFAULTS := {
 	"claude_app_pinned": false,
 	## The orb's Claude popup lets every edit and command through without asking.
 	"claude_auto_allow": false,
+	## Claude thinks about your GitHub projects in the background and says an
+	## idea now and then from the orb popup (ClaudeIdeas).
+	"claude_ideas": true,
+	## GitHub projects ("owner/name") Claude leaves alone, picked in the orb
+	## popup's settings. New projects are in until you leave them out.
+	"claude_projects_skip": [],
 	"files_oazy": true,
 	"cleaner_watch": true,
 	"pointer": "oazy",
