@@ -10,6 +10,7 @@ extends Control
 ## rising from that button rather than as a window.
 ## Left of the network sits the music wallpaper's toggle, a little
 ## equaliser that dances while it's on; right-click it for what it hears.
+## While it's on, a small star slides out beside it: party mode.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
@@ -26,6 +27,8 @@ const RESERVE := HEIGHT + MARGIN * 2.0
 const FLOAT_SHADOW := 0.14
 const DOCK_SHADOW := 0.08
 const APP_GAP := 4.0
+## The room party mode's star takes beside the music toggle.
+const PARTY_SLOT := 32.0
 
 var main: Node
 var layer: WindowLayer
@@ -50,6 +53,10 @@ var _battery: Label
 var _sound: Button
 var _net: Button
 var _music: Button
+var _party: Button
+var _party_slot: Control
+var _party_tween: Tween
+var _party_shown := false
 var _net_glyph: SignalGlyph
 var _net_wired: TextureRect
 var _clock_btn: Button
@@ -124,7 +131,11 @@ func _ready() -> void:
 	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_battery)
 
-	row.add_child(_music_button())
+	var music_row := Kit.hbox(0)
+	music_row.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	music_row.add_child(_party_button())
+	music_row.add_child(_music_button())
+	row.add_child(music_row)
 	row.add_child(_network_button())
 
 	_sound = _tray_button(Vector2(36, 36), "Sound and quick settings")
@@ -887,6 +898,9 @@ func _on_menu(id: int) -> void:
 		23:
 			main.open_settings("personalise")
 			return
+		24:
+			Music.set_party(not Music.party)
+			return
 		3:
 			if App.is_windows():
 				OS.create_process("taskmgr.exe", [])
@@ -1063,6 +1077,9 @@ func _music_button() -> Button:
 			_menu_btn = null
 			_menu.clear()
 			_menu.add_icon_item(Icons.tex("music", 18), "Turn music wallpaper off" if Music.on else "Turn music wallpaper on", 20)
+			if Music.on:
+				_menu.add_check_item("Party mode", 24)
+				_menu.set_item_checked(_menu.item_count - 1, Music.party)
 			_menu.add_separator()
 			var chrome: bool = Settings.get_value("music_source") == "chrome"
 			_menu.add_radio_check_item("Listen to Chrome", 21)
@@ -1079,8 +1096,62 @@ func _music_button() -> Button:
 	return _music
 
 
+## Party mode's star: tucked away while the music wallpaper is off, sliding
+## out to the music toggle's left while it's on.
+func _party_button() -> Control:
+	_party_slot = Control.new()
+	_party_slot.clip_contents = true
+	_party_slot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_party_slot.custom_minimum_size = Vector2(PARTY_SLOT if Music.on else 0.0, 36)
+	_party_slot.modulate.a = 1.0 if Music.on else 0.0
+	_party_slot.visible = Music.on
+	_party_shown = Music.on
+	_party = _tray_button(Vector2(28, 28), "")
+	_party.toggle_mode = true
+	_party.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	_party.offset_left = -30
+	_party.offset_right = -2
+	_party.offset_top = -14
+	_party.offset_bottom = 14
+	var glyph := StarGlyph.new(16)
+	glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_party.add_child(glyph)
+	_party.toggled.connect(func(v: bool) -> void:
+		if v != Music.party:
+			Sfx.play(&"toggle")
+			Music.set_party(v)
+	)
+	_party_slot.add_child(_party)
+	Music.party_changed.connect(func(_v: bool) -> void: _update_party())
+	_update_party()
+	return _party_slot
+
+
+func _update_party() -> void:
+	_party.set_pressed_no_signal(Music.party)
+	_party.tooltip_text = "Party mode\n" + ("On: the music wallpaper is celebrating" if Music.party else "Turn the music wallpaper into a celebration")
+
+
+## Slides the star out (or back in) as the music wallpaper turns on (or off).
+func _slide_party(show: bool) -> void:
+	if _party_slot == null:
+		return
+	_party_shown = show
+	if _party_tween and _party_tween.is_valid():
+		_party_tween.kill()
+	if show:
+		_party_slot.visible = true
+	_party_tween = create_tween().set_parallel().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	_party_tween.tween_property(_party_slot, "custom_minimum_size:x", PARTY_SLOT if show else 0.0, 0.3)
+	_party_tween.tween_property(_party_slot, "modulate:a", 1.0 if show else 0.0, 0.22 if show else 0.16)
+	if not show:
+		_party_tween.chain().tween_callback(func() -> void: _party_slot.visible = false)
+
+
 func _update_music() -> void:
 	_music.set_pressed_no_signal(Music.on)
+	if _party_slot and _party_shown != Music.on:
+		_slide_party(Music.on)
 	var tip := "Music wallpaper"
 	if Music.on:
 		match Music.source:

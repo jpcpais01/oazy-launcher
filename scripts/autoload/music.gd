@@ -13,12 +13,17 @@ extends Node
 ## (valence). That picks the colours: serene songs lean turquoise, joyful
 ## ones amber and coral, tense ones violet and magenta, sad ones deep blue,
 ## and the key nudges the hue around the circle of fifths.
+##
+## Party mode (the taskbar's star) turns the picture into a celebration:
+## the same bars on a lake at dusk, with fireworks opening on the beat. The
+## bursts are timed here and handed to the shader as music_burst*.
 
 signal toggled(on: bool)
 ## "chrome", "all", or "" while nothing is being heard.
 signal source_changed(src: String)
 ## The song Windows' media controls report changed (see media).
 signal media_changed
+signal party_changed(on: bool)
 
 const BANDS := 16
 ## Bands climb fast and fall slower, so hits read and nothing flickers.
@@ -29,8 +34,14 @@ const SLOW := 2.2
 const LINGER := 1.6
 ## Russell's circumplex corners -> hue: [valence, arousal, hue].
 const MOODS := [[1.0, 1.0, 0.065], [1.0, 0.0, 0.48], [-1.0, 1.0, 0.84], [-1.0, 0.0, 0.62]]
+## Fireworks: at most one per this many seconds on the beat (calm to
+## intense songs), and one anyway after a lull (playing, or silent).
+const BURST_GAP := [0.95, 0.5]
+const BURST_LULL := [1.4, 2.8]
 
 var on := false
+## Party mode: only while the music wallpaper is on.
+var party := false
 var source := ""
 ## Eased spectrum (0..1, low to high), quick and slow.
 var bands := PackedFloat32Array()
@@ -69,6 +80,10 @@ var _linger := 0.0
 var _mocked := false
 var _demo_t := 0.0
 var _paused := false
+var _burst := [9.0, 9.0, 9.0, 9.0]
+var _burst_seed := [0.0, 0.0, 0.0, 0.0]
+var _burst_power := [0.0, 0.0, 0.0, 0.0]
+var _since_burst := 9.0
 
 
 func _ready() -> void:
@@ -125,11 +140,46 @@ func set_on(v: bool) -> void:
 		Host.stop_listening()
 		source = ""
 		source_changed.emit("")
+		set_party(false)
 	toggled.emit(v)
 
 
 func toggle() -> void:
 	set_on(not on)
+
+
+## Party mode on or off (the taskbar's star); it opens with a firework.
+func set_party(v: bool) -> void:
+	v = v and on
+	if v == party:
+		return
+	party = v
+	if v:
+		_launch(0.8)
+		_since_burst = -0.6
+	party_changed.emit(v)
+
+
+## Fixed fireworks for screenshots: [age, seed, power] each.
+func set_mock_bursts(bursts: Array) -> void:
+	for i in 4:
+		var b: Array = bursts[i] if i < bursts.size() else [9.0, 0.0, 0.0]
+		_burst[i] = float(b[0])
+		_burst_seed[i] = float(b[1])
+		_burst_power[i] = float(b[2])
+	_publish()
+
+
+## A firework from whichever slot is oldest.
+func _launch(power: float) -> void:
+	var slot := 0
+	for i in 4:
+		if _burst[i] > _burst[slot]:
+			slot = i
+	_burst[slot] = 0.0
+	_burst_seed[slot] = randf()
+	_burst_power[slot] = clampf(power, 0.3, 1.0)
+	_since_burst = 0.0
 
 
 func _listen() -> void:
@@ -214,6 +264,8 @@ func _on_frame(d: Dictionary) -> void:
 		_rings[_next_ring] = 0.0
 		_ring_power[_next_ring] = clampf(k, 0.4, 1.0)
 		_next_ring = (_next_ring + 1) % 4
+		if party and _since_burst > lerpf(BURST_GAP[0], BURST_GAP[1], arousal):
+			_launch(k)
 	flash = maxf(flash, float(d.get("o", 0.0)) * 0.7)
 	var new_bpm := float(d.get("bpm", 0.0))
 	if new_bpm > 0.0:
@@ -244,6 +296,10 @@ func _process(delta: float) -> void:
 	flash *= exp(-delta * 8.0)
 	for i in 4:
 		_rings[i] = minf(_rings[i] + delta, 9.0)
+		_burst[i] = minf(_burst[i] + delta, 9.0)
+	_since_burst += delta
+	if party and _since_burst > (BURST_LULL[0] if presence > 0.3 else BURST_LULL[1]):
+		_launch(0.45 + 0.3 * level)
 	var heard := 0.0
 	if not _frame.is_empty() and _frame_age < 0.5:
 		heard = smoothstep(-66.0, -46.0, float(_frame.get("db", -100.0)))
@@ -364,6 +420,9 @@ func _publish() -> void:
 	rs.global_shader_parameter_set("music_rings", Vector4(_rings[0], _rings[1], _rings[2], _rings[3]))
 	rs.global_shader_parameter_set("music_ring_power", Vector4(_ring_power[0], _ring_power[1], _ring_power[2], _ring_power[3]) * presence)
 	rs.global_shader_parameter_set("music_phase", _phase)
+	rs.global_shader_parameter_set("music_burst", Vector4(_burst[0], _burst[1], _burst[2], _burst[3]))
+	rs.global_shader_parameter_set("music_burst_seed", Vector4(_burst_seed[0], _burst_seed[1], _burst_seed[2], _burst_seed[3]))
+	rs.global_shader_parameter_set("music_burst_power", Vector4(_burst_power[0], _burst_power[1], _burst_power[2], _burst_power[3]))
 	var names := ["music_base", "music_a", "music_b", "music_c", "music_glow"]
 	for i in names.size():
 		var c: Color = _palette[i]
