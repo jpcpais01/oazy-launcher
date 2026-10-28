@@ -5,8 +5,9 @@ extends Control
 ## a hairline timeline (a little live waveform rides the playhead; click or
 ## drag to seek) over previous, play/pause and next, with the time beside.
 ## It follows whatever Windows' media controls report (Music.media), Chrome
-## first. Hidden while the music wallpaper is off or nothing is playing, and
-## with the rest of the desktop in the clean view.
+## first. The song and the play bar can each be turned off in Personalise.
+## Hidden while the music wallpaper is off or nothing is playing, and with the
+## rest of the desktop in the clean view.
 
 const TRACK_W := 460.0
 ## Above the taskbar: the timeline, then the buttons under it.
@@ -68,6 +69,10 @@ func _ready() -> void:
 	resized.connect(_layout)
 	Music.media_changed.connect(_sync)
 	Music.toggled.connect(func(_on: bool) -> void: _sync())
+	Settings.changed.connect(func(key: String, _v: Variant) -> void:
+		if key == "music_show_song" or key == "music_show_controls":
+			_sync()
+	)
 	_sync()
 	_layout()
 
@@ -101,7 +106,13 @@ func _sync() -> void:
 	_prev.disabled = not m.get("can_prev", true)
 	_next.disabled = not m.get("can_next", true)
 	_track.can_seek = m.get("can_seek", false) and float(m.get("dur", 0.0)) > 0.0
-	_set_shown(Music.on and has and not _clean)
+	var song := bool(Settings.get_value("music_show_song"))
+	var controls := bool(Settings.get_value("music_show_controls"))
+	_artist.visible = song
+	_title.visible = song
+	for c: Control in [_track, _prev, _play, _next, _time]:
+		c.visible = controls
+	_set_shown(Music.on and has and not _clean and (song or controls))
 
 
 ## Fades out with the desktop behind Start.

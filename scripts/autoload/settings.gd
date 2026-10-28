@@ -29,6 +29,10 @@ const DEFAULTS := {
 	## (Chrome alone, everything while it's closed) or "all".
 	"music_wallpaper": false,
 	"music_source": "chrome",
+	## What the music wallpaper's player shows: the song (title and artist)
+	## and the play bar (timeline, buttons and time).
+	"music_show_song": true,
+	"music_show_controls": true,
 	"user_name": "",
 	"pins": [],
 	"pins_initialized": false,
