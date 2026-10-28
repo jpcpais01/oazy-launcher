@@ -102,6 +102,12 @@ var _asks := {}
 var _writing := false
 var _dirty: Array[Dictionary] = []
 var _since := 0
+## What was last sent to claude, to send again on your API key if the plan's
+## usage ran out on it.
+var _sent := ""
+## Unix time the plan's usage comes back once claude said it's out (0: not
+## said when, -1: it isn't out).
+var _limit_at := -1.0
 
 
 func _ready() -> void:
@@ -1141,10 +1147,9 @@ func submit(text: String = "", context: String = "") -> void:
 			if not _start_cli():
 				_set_running(false)
 				return
-		if context != "":
-			_cli.send_text("%s\n\n%s%s</oazy-context>" % [text, ClaudeHistory.CONTEXT_TAG, context])
-		else:
-			_cli.send_text(text)
+		_sent = text if context == "" else "%s\n\n%s%s</oazy-context>" % [text, ClaudeHistory.CONTEXT_TAG, context]
+		_limit_at = -1.0
+		_cli.send_text(_sent)
 	_sync_send()
 
 
@@ -1276,10 +1281,14 @@ func handle_message(m: Dictionary) -> void:
 				_asks.erase(id)
 				_sync_working()
 		"rate_limit_event":
+			# "rejected" only means the plan's own window is used up: with extra
+			# usage on, claude carries on with it (as Claude Code's own UI does).
 			var info: Dictionary = m.get("rate_limit_info", {})
-			if str(info.get("status", "")) == "rejected":
+			if str(info.get("status", "")) == "rejected" and not bool(info.get("isUsingOverage", false)) and not bool(info.get("overageInUse", false)):
+				# The turn ends in an error next: _on_result says so, or carries on
+				# with your API key.
 				var at := int(info.get("resetsAt", 0))
-				_notice("You've reached your usage limit", ("It resets at %s." % Time.get_time_string_from_unix_time(at + _utc_offset()).left(5)) if at > 0 else "")
+				_limit_at = float(at) if at > 0 else 0.0
 
 
 func _on_stream(e: Dictionary) -> void:
@@ -1351,6 +1360,10 @@ func _on_stream(e: Dictionary) -> void:
 func _on_assistant(m: Dictionary) -> void:
 	if m.get("parent_tool_use_id") != null:
 		return
+	# An API error dressed as a reply ("You've hit your limit"): the result
+	# right after it says so in a notice, or the turn carries on with your key.
+	if m.get("error") != null:
+		return
 	var msg: Dictionary = m.get("message", {})
 	var streamed := _streamed.has(str(msg.get("id", "")))
 	var content: Variant = msg.get("content", [])
@@ -1398,13 +1411,19 @@ func _on_result(m: Dictionary) -> void:
 		if not row["done"]:
 			row["done"] = true
 			_sync_tool(row)
-	_blob.done(_last_reply())
 	var sub := str(m.get("subtype", ""))
-	if bool(m.get("is_error", false)) or (sub != "" and sub != "success"):
-		var text := str(m.get("result", ""))
-		if text == "" and m.get("errors") is Array:
-			text = "\n".join(PackedStringArray(m["errors"]))
-		if _is_sign_in(text):
+	var failed := bool(m.get("is_error", false)) or (sub != "" and sub != "success")
+	var text := str(m.get("result", ""))
+	if text == "" and m.get("errors") is Array:
+		text = "\n".join(PackedStringArray(m["errors"]))
+	if failed and _sent != "" and (_limit_at >= 0.0 or _is_limit(text)) and _cli.can_use_key():
+		_use_key()
+		return
+	_blob.done(_last_reply())
+	if failed:
+		if _limit_at >= 0.0 or _is_limit(text):
+			_limit_notice(int(_limit_at))
+		elif _is_sign_in(text):
 			_sign_in_notice(text)
 		elif sub == "error_max_turns":
 			_notice("Claude stopped after many steps", "Send a message to let it carry on.")
@@ -1431,6 +1450,30 @@ func _on_exit(code: int, err: String) -> void:
 		_sign_in_notice(err)
 	elif was or (code != 0 and err != ""):
 		_notice("Claude Code stopped", err.right(400) if err != "" else "It closed unexpectedly. Send your message again to pick up where you left off.")
+
+
+func _is_limit(text: String) -> bool:
+	var t := text.to_lower()
+	return t.contains("hit your limit") or t.contains("usage limit") or t.contains("reached your")
+
+
+func _limit_notice(at: int) -> void:
+	_notice("You've reached your usage limit", ("It resets at %s." % Time.get_time_string_from_unix_time(at + _utc_offset()).left(5)) if at > 0 else "")
+
+
+## Your Claude plan is out of usage and an ANTHROPIC_API_KEY is set: carry
+## on with the key until the plan resets, and send the message again on it.
+func _use_key() -> void:
+	var at := _limit_at
+	_limit_at = -1.0
+	_cli.key_until = at if at > Time.get_unix_time_from_system() else Time.get_unix_time_from_system() + 5 * 3600
+	_cli.stop()
+	if not _start_cli():
+		_set_running(false)
+		return
+	_cli.send_text(_sent)
+	var back := Time.get_time_string_from_unix_time(int(_cli.key_until) + _utc_offset()).left(5)
+	_notice("Using your API key", "Your Claude plan is out of usage until %s, so Claude carries on with your API credits." % back)
 
 
 func _is_sign_in(text: String) -> bool:

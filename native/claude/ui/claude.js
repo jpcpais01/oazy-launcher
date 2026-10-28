@@ -905,7 +905,8 @@ function onClaude(m) {
 			break;
 		case 'rate_limit_event': {
 			const r = m.rate_limit_info || {};
-			if (r.status === 'rejected') notice('error', 'You\'ve reached your usage limit', r.resetsAt ? 'It resets at ' + new Date(r.resetsAt * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) + '.' : '');
+			// "rejected" with extra usage in use still goes on, paid from that.
+			if (r.status === 'rejected' && r.isUsingOverage !== true && r.overageInUse !== true) notice('error', 'You\'ve reached your usage limit', r.resetsAt ? 'It resets at ' + new Date(r.resetsAt * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) + '.' : '');
 			break;
 		}
 	}
