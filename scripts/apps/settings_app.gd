@@ -844,11 +844,33 @@ func _build_desktop() -> void:
 	, "celsius fahrenheit temperature forecast")
 	_sync_units()
 
+	_wallet_row(desk)
+
 	var bar := _group("desktop", "Taskbar")
 	_button_row(bar, "Reset taskbar", "Go back to the suggested pinned apps.", "Reset", "pin", func() -> void:
 		Catalog.reset_pins()
 		App.toast("Taskbar reset", &"success")
 	, "pins pinned apps")
+
+
+## The wallet whose positions show on the desktop's trading desk.
+func _wallet_row(list: VBoxContainer) -> void:
+	var row := _row(list, "Hyperliquid wallet", "The public address whose positions and P&L show on the desktop's trading desk, two scrolls down. Oazy only reads it; it never asks for a key.", "trading crypto positions pnl address hyperliquid")
+	var edit := LineEdit.new()
+	edit.placeholder_text = "0x…"
+	edit.text = str(Settings.get_value("hl_address"))
+	edit.custom_minimum_size = Vector2(300, 40)
+	edit.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	edit.text_changed.connect(func(t: String) -> void:
+		var v := t.strip_edges()
+		if v.trim_prefix("0x").length() == 64 and v.trim_prefix("0x").is_valid_hex_number():
+			# That's a private key: never keep it, not even for a moment.
+			edit.text = ""
+			App.toast("That looked like a private key, so Oazy wiped it. Only paste your public address.", &"error")
+		elif v == "" or Hyperliquid.is_address(v):
+			Settings.set_value("hl_address", v.to_lower())
+	)
+	row.add_child(edit)
 
 
 func _sync_units() -> void:

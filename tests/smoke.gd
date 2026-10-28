@@ -433,6 +433,24 @@ func _logic_tests() -> void:
 	check(items.size() == 2 and int(items[0]["at"]) > int(items[1]["at"]), "news: newest first, time zones applied")
 	check(News.parse_date("Sun, 26 Oct 2026 10:00:00 GMT") == Time.get_unix_time_from_datetime_string("2026-10-26T10:00:00"), "news: RFC 822 dates")
 
+	# The trading desk: Hyperliquid answers, read without the network.
+	var hm := {}
+	var hc := {}
+	check(Hyperliquid.parse_meta_and_ctxs([{"universe": [{"name": "BTC", "szDecimals": 5, "maxLeverage": 40}, {"name": "kPEPE", "szDecimals": 0, "maxLeverage": 10}]},
+		[{"markPx": "111842.0", "prevDayPx": "110000.0", "dayNtlVlm": "2100000000.0", "openInterest": "30000.5", "funding": "0.0000125", "oraclePx": "111850.0", "midPx": "111841.5"},
+		{"markPx": "0.012345", "prevDayPx": "0.0125", "dayNtlVlm": "1.0", "openInterest": "1.0", "funding": "-0.0001", "oraclePx": "0.0123", "midPx": null}]], hm, hc)
+		and int(hm["BTC"]["sz"]) == 5 and is_equal_approx(float(hc["BTC"]["prev"]), 110000.0) and hc.has("kPEPE"), "hyperliquid: meta and 24h stats")
+	var hb := Hyperliquid.parse_book({"coin": "BTC", "time": 1, "levels": [[{"px": "100.5", "sz": "2.0", "n": 3}, {"px": "100.0", "sz": "1.0", "n": 1}], [{"px": "101.0", "sz": "0.5", "n": 2}]]})
+	check((hb["bids"] as Array).size() == 2 and is_equal_approx(float(hb["asks"][0][0]), 101.0), "hyperliquid: order book levels")
+	var hcan := Hyperliquid.parse_candles([{"t": 7200000, "T": 10799999, "s": "BTC", "i": "1h", "o": "2", "c": "3", "h": "4", "l": "1", "v": "10", "n": 5}, {"t": 3600000, "o": "1", "c": "2", "h": "2", "l": "1", "v": "5"}])
+	check(hcan.size() == 2 and int(hcan[0][0]) == 3600 and is_equal_approx(float(hcan[1][4]), 3.0), "hyperliquid: candles, oldest first")
+	var hacct := Hyperliquid.parse_account({"marginSummary": {"accountValue": "1000.0", "totalNtlPos": "500.0", "totalRawUsd": "500.0", "totalMarginUsed": "50.0"}, "withdrawable": "900.0",
+		"assetPositions": [{"type": "oneWay", "position": {"coin": "ETH", "szi": "-2.0", "entryPx": "4000.0", "positionValue": "7800.0", "unrealizedPnl": "200.0", "returnOnEquity": "0.25", "liquidationPx": "4500.0", "leverage": {"type": "isolated", "value": 10}, "marginUsed": "800.0"}}]})
+	check(hacct.get("positions", []).size() == 1 and float(hacct["positions"][0]["szi"]) == -2.0 and not bool(hacct["positions"][0]["cross"]) and int(hacct["positions"][0]["lev"]) == 10, "hyperliquid: account and positions")
+	check(Hyperliquid.is_address("0x" + "a1".repeat(20)) and not Hyperliquid.is_address("0x" + "a1".repeat(32)) and not Hyperliquid.is_address("hello"), "hyperliquid: addresses, never keys")
+	check(Hyperliquid.fmt_px(111842.0) == "111,842" and Hyperliquid.fmt_px(3950.55) == "3,950.6" and Hyperliquid.fmt_px(0.012345) == "0.012345" and Hyperliquid.fmt_usd(-12.5, true) == "−$12.50", "hyperliquid: price formatting")
+	check(not HlExchange.can_trade() and not bool(HlExchange.place({}).get("ok", true)), "hyperliquid: trading stays off")
+
 func _mock_apps() -> Array:
 	return [
 		{"name": "Google Chrome", "id": "Chrome"},
@@ -467,6 +485,14 @@ func _ui_tests() -> void:
 	await _wait(1.5)
 	check(desk.below.visible and not desk._top.visible and is_equal_approx(desk.below.position.y, 0.0), "desktop: glides to the second screen and parks the first")
 	check(desk.below._cards.get_child_count() == mini(DesktopBelow.CARDS, DesktopBelow.top_refs().size()), "desktop: second screen has its covers")
+	check(not desk.trade.visible and not desk.trade._active, "desktop: trading desk parked on the second screen")
+	desk.page(1)
+	await _wait(1.5)
+	check(desk.trade.visible and desk.trade._active and not desk.below.visible and not desk.below._active and is_equal_approx(desk.trade.position.y, 0.0), "desktop: on to the trading desk, second screen parked")
+	check(desk.trade.hl.focused, "desktop: the desk streams only while it's in view")
+	desk.page(-1)
+	await _wait(1.5)
+	check(desk.below.visible and not desk.trade.visible and not desk.trade.hl.focused, "desktop: back to the second screen, desk stops streaming")
 	desk.page(-1)
 	await _wait(1.5)
 	check(desk._top.visible and not desk.below.visible and desk._top.position.y == 0.0, "desktop: glides back up")

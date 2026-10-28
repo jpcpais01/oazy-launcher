@@ -475,8 +475,103 @@ func _below(main: Node) -> void:
 	await _wait(0.3)
 	await shot("01s2-desktop-markets-edit")
 	below._close_market_edit()
-	main.desktop.page(-1)
-	await _wait(1.4)
+	await _trade(main)
+	main.desktop.scroll_to(0.0)
+	await _wait(1.6)
+
+
+## The trading desk. CI can reach Hyperliquid, so first a live look (logged,
+## to catch API changes), then a fixed sample so the pictures compare.
+func _trade(main: Node) -> void:
+	var trade: DesktopTrade = main.desktop.trade
+	var hl := trade.hl
+	hl.start(true)
+	main.desktop.page(1)
+	var waited := 0.0
+	while waited < 12.0 and (hl.candles.is_empty() or hl.book.is_empty() or hl.trades.is_empty()):
+		await _wait(0.25)
+		waited += 0.25
+	print("  hyperliquid live: feed %s, mids %d, ctxs %d, candles %d, book %d/%d, trades %d (%s)" % [str(hl.live), hl.mids.size(), hl.ctxs.size(), hl.candles.size(),
+		(hl.book.get("bids", []) as Array).size(), (hl.book.get("asks", []) as Array).size(), hl.trades.size(), hl.last_error])
+	if hl.live and not hl.candles.is_empty():
+		await _wait(1.0)
+		await shot("01t0-desktop-trade-live")
+	hl.set_mock(_mock_hl())
+	Settings.set_value("hl_address", "")
+	await _wait(1.0)
+	await shot("01t1-desktop-trade-no-wallet")
+	Settings.set_value("hl_address", "0x" + "5e9ee1089755c3435139848e47e6635505d5a13a".substr(0, 40))
+	hl.set_mock({"account": _mock_hl()["account"]})
+	await _wait(0.6)
+	trade._chart._hover = Vector2(trade._chart.size.x * 0.62, trade._chart.size.y * 0.35)
+	trade._chart.queue_redraw()
+	await _wait(0.4)
+	await shot("01t-desktop-trade")
+	Settings.set_value("hl_coin", "ETH")
+	hl.set_mock(_mock_hl("ETH"))
+	await _wait(0.6)
+	await shot("01t2-desktop-trade-eth")
+	Settings.set_value("hl_coin", "BTC")
+	hl.set_mock(_mock_hl())
+
+
+static func _mock_hl(c: String = "BTC") -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	var spec := {"BTC": [111842.0, -1.27, 5], "ETH": [3951.4, 2.31, 4], "SOL": [194.62, 4.08, 2], "HYPE": [46.214, 6.42, 2]}
+	var ctxs := {}
+	var meta := {}
+	var mids := {}
+	var sparks := {}
+	for k in spec:
+		var px: float = spec[k][0]
+		ctxs[k] = {"mark": px, "prev": px / (1.0 + spec[k][1] / 100.0), "vol": px * 21000.0, "oi": 300000000.0 / px * 8.0, "funding": 0.0000125, "oracle": px * 1.0002}
+		meta[k] = {"sz": spec[k][2], "lev": 40 if k == "BTC" else (25 if k == "ETH" else 10)}
+		mids[k] = str(px)
+		var line := []
+		var v: float = ctxs[k]["prev"]
+		for i in 24:
+			v += (px - v) / (24 - i) + rng.randf_range(-0.006, 0.006) * px
+			line.append(v)
+		line[23] = px
+		sparks[k] = line
+	var last: float = spec[c][0]
+	var now := int(Time.get_unix_time_from_system()) / 3600 * 3600
+	var candles := []
+	var p := last * 0.955
+	for i in 160:
+		var o := p
+		var drift := (last - p) / (160 - i) * 0.6
+		var cl := o + drift + rng.randf_range(-0.0075, 0.0075) * last
+		var hi := maxf(o, cl) + rng.randf_range(0.0, 0.004) * last
+		var lo := minf(o, cl) - rng.randf_range(0.0, 0.004) * last
+		candles.append([now - (159 - i) * 3600, o, hi, lo, cl, rng.randf_range(200.0, 1400.0) * (1.0 if c == "BTC" else 20.0)])
+		p = cl
+	candles[159][4] = last
+	candles[159][2] = maxf(candles[159][2], last)
+	candles[159][3] = minf(candles[159][3], last)
+	var tick := 1.0 if c == "BTC" else 0.1
+	var bids := []
+	var asks := []
+	for i in 20:
+		bids.append([last - tick * (i + 1) * (1 + i / 4), snappedf(rng.randf_range(0.05, 3.5) * (1.0 if c == "BTC" else 30.0), 0.0001)])
+		asks.append([last + tick * (i + 1) * (1 + i / 4), snappedf(rng.randf_range(0.05, 3.5) * (1.0 if c == "BTC" else 30.0), 0.0001)])
+	var trades := []
+	var t_ms := int(Time.get_unix_time_from_system()) * 1000
+	var tick_now := Time.get_ticks_msec()
+	for i in 60:
+		t_ms -= rng.randi_range(200, 4000)
+		trades.append({"px": last + tick * rng.randi_range(-6, 6), "sz": snappedf(rng.randf_range(0.001, 1.2) * (1.0 if c == "BTC" else 25.0), 0.00001), "side": "B" if rng.randf() > 0.45 else "A",
+			"time": t_ms, "tid": i, "seen": tick_now - 200 if i < 2 else 0})
+	var acct := {
+		"value": 48210.55, "ntl": 92000.0, "margin": 9120.4, "withdrawable": 36120.0, "at": 0,
+		"positions": [
+			{"coin": "BTC", "szi": 0.42, "entry": 108420.0, "value": 46973.6, "upnl": 1437.2, "roe": 0.31, "liq": 79310.0, "margin": 4697.4, "lev": 10, "cross": true},
+			{"coin": "ETH", "szi": -6.5, "entry": 4122.3, "value": 25684.1, "upnl": 1110.85, "roe": 0.43, "liq": 4890.5, "margin": 2568.4, "lev": 10, "cross": true},
+			{"coin": "HYPE", "szi": 410.0, "entry": 48.905, "value": 18947.7, "upnl": -1103.3, "roe": -0.59, "liq": 31.22, "margin": 1854.6, "lev": 10, "cross": false},
+		],
+	}
+	return {"ctxs": ctxs, "meta": meta, "mids": mids, "sparks": sparks, "candles": candles, "book": {"bids": bids, "asks": asks, "time": 0}, "trades": trades, "account": acct}
 
 
 static func _mock_quotes() -> Dictionary:

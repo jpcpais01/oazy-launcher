@@ -142,10 +142,16 @@ func _tick() -> void:
 # --- Shared pieces -------------------------------------------------------------------------
 
 func _panel() -> Array:
+	return glass_panel(self)
+
+
+## One of the desktop's glass widget panels, added to `host`:
+## [panel, column inside it, header row at the top of the column].
+static func glass_panel(host: Control) -> Array:
 	var p := GlassPanel.new(false, RADIUS, GlassPanel.TINT_WIDGET)
 	p.set_shadow_strength(0.22, 26, 10.0)
 	p.mouse_filter = Control.MOUSE_FILTER_PASS
-	add_child(p)
+	host.add_child(p)
 	var rim := Panel.new()
 	rim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
