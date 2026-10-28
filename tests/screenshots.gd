@@ -115,6 +115,10 @@ func _ready() -> void:
 		await _music(main)
 		get_tree().quit()
 		return
+	if OS.get_environment("OAZY_SHOTS_ONLY") == "switcher":
+		await _switcher_shots(main)
+		get_tree().quit()
+		return
 	await shot("01-desktop")
 	for size_id in ["small", "large"]:
 		Settings.set_value("fav_icon_size", size_id)
@@ -676,6 +680,51 @@ func _mock_photo(sky: Color, glow: Color) -> Texture2D:
 				c = c.darkened(0.55)
 			img.set_pixel(x, y, c)
 	return ImageTexture.create_from_image(img)
+
+
+## Dev runs: just the Alt+Tab stack, with stand-in pictures of a few screens.
+func _switcher_shots(main: Node) -> void:
+	var pics: Array[Texture2D] = [ImageTexture.create_from_image(get_viewport().get_texture().get_image())]
+	var lib: ShellWindow = main.open_app(&"library")
+	await _wait(1.2)
+	pics.append(ImageTexture.create_from_image(get_viewport().get_texture().get_image()))
+	var settings: ShellWindow = main.open_app(&"settings")
+	await _wait(1.2)
+	pics.append(ImageTexture.create_from_image(get_viewport().get_texture().get_image()))
+	var list: Array = Host.windows.duplicate(true)
+	list.append({"hwnd": 104, "title": "Spotify Premium", "exe": "C:/Users/joao/AppData/Roaming/Spotify/Spotify.exe", "name": "Spotify", "min": true})
+	list.append({"hwnd": 105, "title": "Notes.txt - Notepad", "exe": "C:/Windows/System32/notepad.exe", "name": "Notepad", "min": true})
+	Host.set_mock_windows(list, 0)
+	for i in Host.windows.size():
+		var hw := int(Host.windows[i]["hwnd"])
+		if hw != 105:
+			Host.captures[hw] = pics[i % pics.size()]
+	lib.minimize()
+	await _wait(0.6)
+	main.switcher.handle_key("open")
+	await _wait(1.0)
+	await shot("07b-switcher")
+	main.switcher.step(1)
+	await _wait(0.12)
+	await shot("07b1-switcher-moving")
+	await _wait(0.8)
+	await shot("07b2-switcher-next")
+	main.switcher.step(-1)
+	main.switcher.step(-1)
+	await _wait(0.12)
+	await shot("07b3-switcher-back-moving")
+	await _wait(0.8)
+	await shot("07b4-switcher-back")
+	main.switcher._select(main.switcher._entries.size() - 1)
+	await _wait(0.9)
+	await shot("07b5-switcher-minimised")
+	main.switcher.handle_key("cancel")
+	await _wait(0.4)
+	var chrome: TaskbarButton = main.taskbar.button_for("app:Chrome")
+	if chrome:
+		main.preview.show_for(chrome)
+	await _wait(0.8)
+	await shot("07c-preview")
 
 
 func shot(name: String) -> void:

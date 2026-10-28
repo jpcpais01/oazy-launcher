@@ -3,6 +3,8 @@ extends Control
 ## The card that rises above a taskbar button: each window of that app with
 ## its title, a close button and a live preview drawn by Windows (DWM
 ## thumbnails), or just the app's name for pinned apps that aren't open.
+## Minimised windows show too: Windows draws them as they were, and under
+## that sits the last picture Oazy kept of them (or the app's icon).
 ## There is only ever one: moving along the taskbar glides it from app to app
 ## (the taskbar decides when, see Taskbar._step_preview).
 
@@ -10,6 +12,7 @@ const CARD_W := 252.0
 const THUMB := Vector2(228, 132)
 ## Space between the card and the taskbar button it belongs to.
 const GAP := 14.0
+const ROUNDED := preload("res://shaders/rounded_tex.gdshader")
 
 var button: TaskbarButton
 var main: Node
@@ -236,9 +239,13 @@ func _card_for_window(w: Dictionary) -> Control:
 		hide_preview()
 	var parts := _card(str(w.get("title", "")), on_close, on_pick)
 	var slot: Panel = parts["slot"]
-	if not Host.available or bool(w.get("min", false)):
-		_fill_icon(slot, button.item, "Minimised" if bool(w.get("min", false)) else "")
-	_slots.append([slot, hwnd, bool(w.get("min", false))])
+	var minimised := bool(w.get("min", false))
+	var pic := Host.picture_of(hwnd) if minimised else null
+	if pic:
+		_fill_pic(slot, pic)
+	elif not Host.available or minimised:
+		_fill_icon(slot, button.item, "Minimised" if minimised else "")
+	_slots.append([slot, hwnd])
 	return parts["card"]
 
 
@@ -251,8 +258,34 @@ func _card_for_shell(win: ShellWindow) -> Control:
 			main.focus_shell_window(win)
 		hide_preview()
 	var parts := _card(win.title, on_close, on_pick)
-	_fill_icon(parts["slot"], Catalog.item(win.app_ref), "Minimised" if win.minimized else "")
+	var pic := win.snapshot()
+	if pic:
+		_fill_pic(parts["slot"], pic)
+	else:
+		_fill_icon(parts["slot"], Catalog.item(win.app_ref), "Minimised" if win.minimized else "")
 	return parts["card"]
+
+
+## A still of the window, fitted into the slot with rounded corners.
+func _fill_pic(slot: Control, tex: Texture2D) -> void:
+	var src := Vector2(tex.get_size())
+	if src.x <= 0.0 or src.y <= 0.0:
+		return
+	var room := THUMB - Vector2(8, 8)
+	var fit := (src * minf(room.x / src.x, room.y / src.y)).floor()
+	var r := TextureRect.new()
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.texture = tex
+	r.position = ((THUMB - fit) / 2.0).floor()
+	r.size = fit
+	var mat := ShaderMaterial.new()
+	mat.shader = ROUNDED
+	mat.set_shader_parameter("size", fit)
+	mat.set_shader_parameter("radius", 6.0)
+	r.material = mat
+	slot.add_child(r)
 
 
 func _fill_icon(slot: Control, it: Dictionary, note: String) -> void:
@@ -280,7 +313,7 @@ func _show_thumbs() -> void:
 	var xf_view := get_viewport().get_final_transform()
 	for s in _slots:
 		var slot: Control = s[0]
-		if bool(s[2]) or not is_instance_valid(slot):
+		if not is_instance_valid(slot):
 			continue
 		var xf := xf_view * slot.get_global_transform_with_canvas()
 		var origin := xf.origin
