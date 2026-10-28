@@ -77,7 +77,8 @@ const MD = (() => {
 	}
 
 	function render(src) {
-		const lines = String(src || '').replace(/\r/g, '').split('\n');
+		// Mood tags from the orb popup's avatar (ClaudeMood) never show.
+		const lines = String(src || '').replace(/\[\[\s*mood\s*:\s*[A-Za-z]+\s*\]\][ \t]*\n?/g, '').replace(/\r/g, '').split('\n');
 		let out = '';
 		let para = [];
 		const flush = () => {

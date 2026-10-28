@@ -46,6 +46,10 @@ func _logic_tests() -> void:
 	check(str(md[1]["lang"]) == "py" and str(md[1]["code"]) == "print(1)", "chat markdown: fenced code")
 	var open_fence := ChatMarkdown.blocks("Look:\n```\nhalf")
 	check(open_fence.size() == 2 and str(open_fence[1]["code"]) == "half", "chat markdown: code still streaming")
+	check(ClaudeMood.found("[[mood:happy]] Hi! [[mood:Proud]] [[mood:nope]]") == PackedStringArray(["happy", "proud"]), "claude mood: tags read")
+	check(ClaudeMood.strip("[[mood:happy]] Hi there") == "Hi there" and ClaudeMood.strip("[[mo") == "" and ClaudeMood.strip("Hi [[mood:ca") == "Hi ", "claude mood: tags hidden, even half arrived")
+	check(ChatMarkdown.blocks("[[mood:calm]]\nHello").size() == 1 and not str(ChatMarkdown.blocks("[[mood:calm]]\nHello")[0]["bb"]).contains("mood"), "claude mood: never drawn")
+	check(ClaudeMood.hearing("thanks so much!") == "happy" and ClaudeMood.hearing("why is it slow?") == "curious", "claude mood: reacts to what you write")
 	check(ClaudeCli._quote("C:/Program Files/x") == "\"C:/Program Files/x\"" and ClaudeCli._quote("-p") == "-p", "claude cli: argument quoting")
 
 	# Epic manifest.
@@ -682,6 +686,9 @@ func _ui_tests() -> void:
 	check(ai._mode.text == "Ask first", "assistant: back to asking first")
 	ai.handle_message({"type": "result", "subtype": "success"})
 	check(not ai.running and ai._asks.is_empty() and not main.taskbar.orb.busy, "assistant: reply done")
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}})
+	ai.handle_message({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "[[mood:excited]] Done!"}}})
+	check(ai._blob._mood == "excited" and ai._blob.is_processing(), "assistant: the avatar takes Claude's mood and lives while open")
 	main.taskbar.start_alt_pressed.emit()
 	await _wait(0.3)
 	check(main.start.is_open and not ai.is_open, "assistant: right-clicking the orb opens Start instead")

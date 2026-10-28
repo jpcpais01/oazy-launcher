@@ -31,9 +31,7 @@ const SUGGESTIONS := [
 	["edit", "Help me write a message", "Help me write a message to "],
 	["sparkles", "Explain something simply", "Explain this to me simply: "],
 ]
-const CORAL := Color("f2a27c")
 const LOOK_WORKING := {"swirl": -1.1, "waves": 0.9}
-const LOOK_CALM := {"swirl": -0.3, "waves": 0.4}
 
 var main: Node
 var is_open := false
@@ -47,7 +45,8 @@ var running := false
 var _cli: ClaudeCli
 var _glass: GlassPanel
 var _home: Control
-var _hero_orb: UpdateOrb
+## Claude itself, living along the top.
+var _blob: ClaudeBlob
 var _greeting: Label
 var _chips: VBoxContainer
 var _setup: Control
@@ -193,27 +192,15 @@ func shell_shape() -> Array[Rect2]:
 
 # --- Building ------------------------------------------------------------------------------
 
+## The header is Claude's own strip: it lives along the whole width, with
+## the two buttons tucked in the top right corner.
 func _build_header() -> Control:
-	var row := Kit.hbox(11)
-	row.custom_minimum_size.y = 40
-	var mark := Panel.new()
-	mark.custom_minimum_size = Vector2(34, 34)
-	mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mark.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.06), 11, Color(1, 1, 1, 0.07), 1))
-	var glyph := Kit.icon_rect("claude", 18, CORAL)
-	glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mark.add_child(glyph)
-	row.add_child(mark)
-	var names := Kit.vbox(0)
-	names.alignment = BoxContainer.ALIGNMENT_CENTER
-	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(names)
-	names.add_child(Kit.label("Claude", 15, 600, App.TEXT))
-	var where := Kit.label("Claude Code · your home folder", 12, 500, App.TEXT_MUTE)
-	where.clip_text = true
-	where.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	names.add_child(where)
+	_blob = ClaudeBlob.new()
+	_blob.area = self
+	var row := Kit.hbox(4)
+	row.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_blob.add_child(row)
 	_history_btn = _head_button("history", "Past chats")
 	_history_btn.pressed.connect(func() -> void:
 		if _history.visible:
@@ -228,7 +215,8 @@ func _build_header() -> Control:
 	_expand = _head_button("expand", "Open in the Claude app")
 	_expand.pressed.connect(_open_in_app)
 	row.add_child(_expand)
-	return row
+	_blob.reserve_right = 34.0 * 3.0 + 8.0
+	return _blob
 
 
 func _head_button(icon_name: String, tip: String) -> Button:
@@ -244,10 +232,6 @@ func _build_home() -> Control:
 	var view := Kit.vbox(0)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.alignment = BoxContainer.ALIGNMENT_CENTER
-	_hero_orb = UpdateOrb.icon(78, 0.9, LOOK_CALM["swirl"])
-	_hero_orb.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	view.add_child(_hero_orb)
-	view.add_child(Kit.spacer(0, 18))
 	_greeting = Kit.label("", 24, 600, App.TEXT, true)
 	_greeting.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	view.add_child(_greeting)
@@ -444,6 +428,8 @@ func _build_composer() -> Control:
 	_prompt.text_changed.connect(func() -> void:
 		_fit_input()
 		_sync_send()
+		if _prompt.text != "":
+			_blob.typing()
 	)
 	_prompt.gui_input.connect(_on_input_key)
 	_prompt.focus_entered.connect(func() -> void: _composer.add_theme_stylebox_override("panel", _composer_box(true)))
@@ -574,7 +560,7 @@ func open() -> void:
 	_tween.tween_property(self, "modulate:a", 1.0, 0.16)
 	_tween.tween_property(self, "scale", Vector2.ONE, 0.32)
 	_tween.tween_property(self, "position:y", target_y, 0.32)
-	_hero_orb.shockwave(0.9)
+	_blob.set_active(true)
 	Sfx.play(&"open")
 	Shell.focus(self)
 	_prompt.grab_focus()
@@ -603,6 +589,7 @@ func close() -> void:
 	_tween.chain().tween_callback(func() -> void: visible = false)
 	if not running:
 		_idle.start()
+	_blob.set_active(false)
 	visibility_changed_to.emit(false)
 
 
@@ -812,6 +799,7 @@ func submit(text: String = "") -> void:
 		return
 	_show_thread(true)
 	_add(_user_bubble(text))
+	_blob.heard(text)
 	_follow = true
 	_set_running(true)
 	if not mock:
@@ -833,13 +821,13 @@ func stop() -> void:
 		return
 	_cli.interrupt()
 	_work_label.text = "Stopping"
+	_blob.feel("calm")
 
 
 ## A fresh conversation: the old one stays in Claude Code's history.
 func new_chat() -> void:
 	_reset()
 	_show_thread(false)
-	_hero_orb.shockwave(0.9)
 	if is_open:
 		_prompt.grab_focus()
 		if not mock and ClaudeCli.find() != "":
@@ -865,6 +853,7 @@ func _reset() -> void:
 	_prompt.text = ""
 	_fit_input()
 	_sync_send()
+	_blob.reset()
 
 
 func _start_cli() -> bool:
@@ -967,15 +956,18 @@ func _on_stream(e: Dictionary) -> void:
 			var idx := int(e.get("index", 0))
 			match str(cb.get("type", "")):
 				"text":
-					_blocks[idx] = {"type": "text", "view": _reply_view(), "src": ""}
+					_blocks[idx] = {"type": "text", "view": _reply_view(), "src": "", "moods": 0}
 					_writing = true
+					_blob.writing()
 				"thinking", "redacted_thinking":
 					_blocks[idx] = {"type": "thinking"}
 					_work_label.text = "Thinking"
+					_blob.thinking()
 				"tool_use", "server_tool_use":
 					_writing = false
 					_blocks[idx] = {"type": "tool", "id": str(cb.get("id", "")), "json": ""}
 					_tool_row(str(cb.get("id", "")), str(cb.get("name", "")))
+					_blob.working(str(cb.get("name", "")))
 			_sync_working()
 		"content_block_delta":
 			var b: Dictionary = _blocks.get(int(e.get("index", 0)), {})
@@ -983,7 +975,10 @@ func _on_stream(e: Dictionary) -> void:
 			if b.is_empty():
 				return
 			if str(d.get("type", "")) == "text_delta" and b["type"] == "text":
-				b["src"] = str(b["src"]) + str(d.get("text", ""))
+				var piece := str(d.get("text", ""))
+				b["src"] = str(b["src"]) + piece
+				_blob.talk(piece.length())
+				_feel_from(b)
 				if not _dirty.has(b):
 					_dirty.append(b)
 			elif str(d.get("type", "")) == "input_json_delta" and b["type"] == "tool":
@@ -1028,12 +1023,15 @@ func _on_assistant(m: Dictionary) -> void:
 			continue
 		var t := str(c.get("type", ""))
 		if t == "tool_use":
+			if not streamed:
+				_blob.working(str(c.get("name", "")))
 			var row := _tool_row(str(c.get("id", "")), str(c.get("name", "")))
 			if c.get("input") is Dictionary:
 				row["input"] = c["input"]
 				_sync_tool(row)
 		elif t == "text" and not streamed and str(c.get("text", "")) != "":
-			var b := {"type": "text", "view": _reply_view(), "src": str(c["text"])}
+			var b := {"type": "text", "view": _reply_view(), "src": str(c["text"]), "moods": 0}
+			_feel_from(b)
 			_render(b)
 
 
@@ -1052,6 +1050,8 @@ func _on_user(m: Dictionary) -> void:
 				row["error"] = bool(c.get("is_error", false))
 				_sync_tool(row)
 	_work_label.text = "Thinking"
+	if running:
+		_blob.thinking()
 
 
 func _on_result(m: Dictionary) -> void:
@@ -1060,6 +1060,7 @@ func _on_result(m: Dictionary) -> void:
 		if not row["done"]:
 			row["done"] = true
 			_sync_tool(row)
+	_blob.done(_last_reply())
 	var sub := str(m.get("subtype", ""))
 	if bool(m.get("is_error", false)) or (sub != "" and sub != "success"):
 		var text := str(m.get("result", ""))
@@ -1118,6 +1119,25 @@ func _process(_delta: float) -> void:
 	for b in _dirty:
 		_render(b)
 	_dirty.clear()
+
+
+## A mood tag that just arrived in a reply goes to the avatar.
+func _feel_from(b: Dictionary) -> void:
+	var src := str(b["src"])
+	if not src.contains("[["):
+		return
+	var moods := ClaudeMood.found(src)
+	if moods.size() > int(b.get("moods", 0)):
+		b["moods"] = moods.size()
+		_blob.feel(moods[moods.size() - 1])
+
+
+## What the latest reply said, for a mood when it didn't tag one.
+func _last_reply() -> String:
+	for b in _blocks.values():
+		if b["type"] == "text":
+			return str(b["src"])
+	return ""
 
 
 # --- Thread pieces --------------------------------------------------------------------------
@@ -1439,6 +1459,7 @@ func _ask(id: String, req: Dictionary) -> void:
 	card.set_meta("tool_use_id", str(req.get("tool_use_id", "")))
 	_asks[id] = card
 	_add(card)
+	_blob.asking()
 	_follow = true
 	card.modulate.a = 0.0
 	Kit.hover_tween(card).tween_property(card, "modulate:a", 1.0, 0.22)
@@ -1459,6 +1480,7 @@ func _answer(id: String, allow: bool) -> void:
 		row["denied"] = true
 		_sync_tool(row)
 	card.queue_free()
+	_blob.answered(allow)
 	_sync_working()
 	_prompt.grab_focus()
 
@@ -1469,6 +1491,7 @@ static func _lower_first(s: String) -> String:
 
 
 func _notice(title: String, detail: String, action: String = "", cb: Callable = Callable()) -> void:
+	_blob.oops()
 	var row := Kit.hbox(11)
 	var ic := Kit.icon_rect("alert", 16, Color(App.WARNING, 0.9))
 	ic.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
