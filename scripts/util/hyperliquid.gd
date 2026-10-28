@@ -85,6 +85,7 @@ func _ready() -> void:
 				account_changed.emit()
 				_acct_in = 0.0
 			"hl_coins":
+				_sync_subs()
 				_spark_at = 0
 				if focused:
 					_fetch_sparks()
@@ -153,11 +154,12 @@ func parse_coins(text: String) -> PackedStringArray:
 
 # --- Reading -------------------------------------------------------------------------------------
 
-## The latest price: the live mid, else the last mark.
+## The latest price: the live mid, else the stats feed's mid, else its mark.
 func price(c: String) -> float:
 	if mids.has(c):
 		return float(mids[c])
-	return float((ctxs.get(c, {}) as Dictionary).get("mark", 0.0))
+	var x: Dictionary = ctxs.get(c, {})
+	return float(x.get("mid", 0.0)) if float(x.get("mid", 0.0)) > 0.0 else float(x.get("mark", 0.0))
 
 
 ## Yesterday's price at this time (for the 24h change), 0 when unknown.
@@ -223,11 +225,17 @@ func set_focus(on: bool) -> void:
 
 func _wanted() -> Dictionary:
 	var out := {"mids": {"type": "allMids"}}
+	# Every coin you follow or hold also gets its own small stats feed (mid,
+	# mark, 24h change), so the ticker and your P&L tick even without allMids.
+	var held := []
+	for p in account.get("positions", []):
+		held.append(str(p["coin"]))
+	for c in Array(coins()) + held:
+		out["ctx:" + c] = {"type": "activeAssetCtx", "coin": c}
 	if focused:
 		var c := coin()
 		out["book:" + c] = {"type": "l2Book", "coin": c}
 		out["trades:" + c] = {"type": "trades", "coin": c}
-		out["ctx:" + c] = {"type": "activeAssetCtx", "coin": c}
 		out["candle:" + c + ":" + interval()] = {"type": "candle", "coin": c, "interval": interval()}
 	return out
 
@@ -347,8 +355,9 @@ func _on_message(j: Dictionary) -> int:
 				return 2
 		"activeAssetCtx":
 			if data is Dictionary and data.get("ctx") is Dictionary:
-				ctxs[str(data.get("coin", ""))] = parse_ctx(data["ctx"])
-				return 2
+				var c := str(data.get("coin", ""))
+				ctxs[c] = parse_ctx(data["ctx"])
+				return 2 if focused and c == coin() else 1
 		"error":
 			last_error = str(data)
 	return 0
@@ -438,6 +447,7 @@ func _fetch_account() -> void:
 	if not a.is_empty():
 		account = a
 		account_changed.emit()
+		_sync_subs()
 
 
 func _fetch_candles() -> void:
@@ -497,7 +507,7 @@ static func parse_meta_and_ctxs(j: Variant, meta_out: Dictionary, ctx_out: Dicti
 
 static func parse_ctx(x: Dictionary) -> Dictionary:
 	return {
-		"mark": _f(x.get("markPx")), "prev": _f(x.get("prevDayPx")), "vol": _f(x.get("dayNtlVlm")),
+		"mark": _f(x.get("markPx")), "mid": _f(x.get("midPx")), "prev": _f(x.get("prevDayPx")), "vol": _f(x.get("dayNtlVlm")),
 		"oi": _f(x.get("openInterest")), "funding": _f(x.get("funding")), "oracle": _f(x.get("oraclePx")),
 	}
 

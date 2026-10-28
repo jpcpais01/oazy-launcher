@@ -494,7 +494,8 @@ func _trade(main: Node) -> void:
 	print("  hyperliquid live: feed %s, mids %d, ctxs %d, candles %d, book %d/%d, trades %d (%s)" % [str(hl.live), hl.mids.size(), hl.ctxs.size(), hl.candles.size(),
 		(hl.book.get("bids", []) as Array).size(), (hl.book.get("asks", []) as Array).size(), hl.trades.size(), hl.last_error])
 	if hl.live and not hl.candles.is_empty():
-		await _wait(1.0)
+		await _wait(3.0)
+		print("  hyperliquid after 3 s: mids %d, BTC %s" % [hl.mids.size(), Hyperliquid.fmt_px(hl.price("BTC"))])
 		await shot("01t0-desktop-trade-live")
 	hl.set_mock(_mock_hl())
 	Settings.set_value("hl_address", "")
