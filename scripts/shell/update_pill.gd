@@ -133,6 +133,15 @@ func _on_state(state: StringName) -> void:
 	var v := str(Updater.latest.get("version", ""))
 	_check.visible = false
 	_short.modulate = Color.WHITE
+	# The percentage sits in a slot sized for "100%", so the pill never
+	# breathes as the digits change.
+	_short.custom_minimum_size.x = 0.0
+	_short.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	if state == &"downloading":
+		var font := _short.get_theme_font("font")
+		var fs := _short.get_theme_font_size("font_size")
+		_short.custom_minimum_size.x = ceilf(font.get_string_size("100%", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+		_short.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	match state:
 		&"available":
 			_orb.snap(0.12)
@@ -275,7 +284,7 @@ func _is_ready() -> bool:
 func _target_width() -> float:
 	# From the labels themselves: a container that was hidden still holds
 	# the minimum size it had before its text changed.
-	var inner := _short.get_minimum_size().x
+	var inner := _short.get_combined_minimum_size().x
 	if _open:
 		inner = maxf(_title.get_minimum_size().x, _sub.get_minimum_size().x)
 		if _action.visible:
