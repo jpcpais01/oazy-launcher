@@ -8,6 +8,8 @@ extends Control
 ## clock (calendar) and an invisible corner that shows the desktop.
 ## The task manager always has a button among the apps; it opens as a card
 ## rising from that button rather than as a window.
+## Left of the network sits the music wallpaper's toggle, a little
+## equaliser that dances while it's on; right-click it for what it hears.
 ## Over the desktop it floats as a capsule; when an app is maximised it melts
 ## into a full-width shelf, so the strip under the bar never shows wallpaper.
 
@@ -47,6 +49,7 @@ var _date: Label
 var _battery: Label
 var _sound: Button
 var _net: Button
+var _music: Button
 var _net_glyph: SignalGlyph
 var _net_wired: TextureRect
 var _clock_btn: Button
@@ -121,6 +124,7 @@ func _ready() -> void:
 	_battery.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(_battery)
 
+	row.add_child(_music_button())
 	row.add_child(_network_button())
 
 	_sound = _tray_button(Vector2(36, 36), "Sound and quick settings")
@@ -873,6 +877,16 @@ func _on_menu(id: int) -> void:
 		11:
 			main.open_settings("desktop")
 			return
+		20:
+			Music.toggle()
+			return
+		21, 22:
+			Settings.set_value("music_source", "chrome" if id == 21 else "all")
+			_update_music()
+			return
+		23:
+			main.open_settings("personalise")
+			return
 		3:
 			if App.is_windows():
 				OS.create_process("taskmgr.exe", [])
@@ -1029,6 +1043,56 @@ func _close_flyouts(keep: Flyout) -> void:
 	for f in [quick, calendar, weather, network, tasks]:
 		if f and f != keep:
 			f.close()
+
+
+## The music wallpaper's toggle.
+func _music_button() -> Button:
+	_music = _tray_button(Vector2(36, 36), "")
+	_music.toggle_mode = true
+	_music.add_child(MusicGlyph.new(18))
+	(_music.get_child(0) as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_music.toggled.connect(func(v: bool) -> void:
+		if v != Music.on:
+			Sfx.play(&"toggle")
+			Music.set_on(v)
+	)
+	_music.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_RIGHT:
+			_music.accept_event()
+			_close_preview()
+			_menu_btn = null
+			_menu.clear()
+			_menu.add_icon_item(Icons.tex("music", 18), "Turn music wallpaper off" if Music.on else "Turn music wallpaper on", 20)
+			_menu.add_separator()
+			var chrome: bool = Settings.get_value("music_source") == "chrome"
+			_menu.add_radio_check_item("Listen to Chrome", 21)
+			_menu.set_item_checked(_menu.item_count - 1, chrome)
+			_menu.add_radio_check_item("Listen to all sound", 22)
+			_menu.set_item_checked(_menu.item_count - 1, not chrome)
+			_menu.add_separator()
+			_menu.add_icon_item(Icons.tex("settings", 18), "Wallpaper settings", 23)
+			_popup_menu(get_global_mouse_position())
+	)
+	Music.toggled.connect(func(_v: bool) -> void: _update_music())
+	Music.source_changed.connect(func(_s: String) -> void: _update_music())
+	_update_music()
+	return _music
+
+
+func _update_music() -> void:
+	_music.set_pressed_no_signal(Music.on)
+	var tip := "Music wallpaper"
+	if Music.on:
+		match Music.source:
+			"chrome":
+				tip += "\nListening to Chrome"
+			"all":
+				tip += "\nListening to all sound" + ("\n(Chrome is closed, so it hears everything)" if Settings.get_value("music_source") == "chrome" else "")
+			_:
+				tip += "\nOn"
+	else:
+		tip += "\nOff: click to light the desktop with what's playing"
+	_music.tooltip_text = tip
 
 
 ## Wi-Fi strength (or a cable) in the tray; opens the network flyout.

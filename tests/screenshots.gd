@@ -111,6 +111,10 @@ func _ready() -> void:
 		await _tasks_shots(main)
 		get_tree().quit()
 		return
+	if OS.get_environment("OAZY_SHOTS_ONLY") == "music":
+		await _music(main)
+		get_tree().quit()
+		return
 	await shot("01-desktop")
 	for size_id in ["small", "large"]:
 		Settings.set_value("fav_icon_size", size_id)
@@ -134,6 +138,7 @@ func _ready() -> void:
 			(c as CanvasItem).visible = true
 	Settings.set_value("wallpaper", "oasis")
 	await _wait(1.3)
+	await _music(main)
 	await _below(main)
 	main.weather.open(main.taskbar._weather_btn)
 	await _wait(0.9)
@@ -385,6 +390,38 @@ func _ready() -> void:
 
 ## The desktop's second screen: live markets and news when this machine can
 ## reach them (CI can), otherwise a made-up but realistic sample.
+## The music wallpaper on two very different songs.
+func _music(main: Node) -> void:
+	Music.set_on(true)
+	var songs := {
+		# Bright, quick, major: warm.
+		"joy": [[880, 940, 820, 610, 540, 600, 520, 470, 430, 380, 330, 300, 260, 210, 160, 110], 0.75, 0.8, 0, 1.0, 0.62],
+		# Slow, dark, minor: deep blue.
+		"blue": [[620, 700, 560, 380, 420, 380, 300, 240, 190, 150, 110, 80, 60, 40, 30, 20], -0.65, 0.2, 9, -1.0, 0.3],
+		# Hard, noisy, minor and loud: violet.
+		"tense": [[999, 960, 900, 700, 640, 660, 600, 560, 520, 500, 480, 440, 400, 360, 320, 260], -0.6, 0.95, 4, -0.8, 0.55],
+	}
+	for id in songs:
+		var song: Array = songs[id]
+		Music.key = int(song[3])
+		Music.set_mock({"b": song[0], "db": -16.0, "o": 0.6, "k": 0.0, "bpm": 120.0, "bc": 0.8, "ph": 0.1,
+			"c": float(song[5]), "f": 0.15, "r": 3.0, "m": float(song[4]), "key": int(song[3]), "kc": 0.8}, float(song[1]), float(song[2]))
+		await _wait(1.6)
+		await shot("01m-desktop-music-" + id)
+	var shown := []
+	for c in main.get_children():
+		if c is CanvasItem and c != main.wallpaper and (c as CanvasItem).visible:
+			(c as CanvasItem).visible = false
+			shown.append(c)
+	await _wait(0.2)
+	await shot("01x-wallpaper-music")
+	for c in shown:
+		(c as CanvasItem).visible = true
+	Music.set_mock({})
+	Music.set_on(false)
+	await _wait(1.6)
+
+
 func _below(main: Node) -> void:
 	var below: DesktopBelow = main.desktop.below
 	below.set_active(true)

@@ -4,6 +4,7 @@
 // real application windows (like Alt+Tab does), focusing / minimising /
 // closing them, live DWM thumbnails drawn into Oazy's window, app icons,
 // the list of installed apps, system stats and sensors, speaker volume, media keys,
+// what's playing (for the music wallpaper),
 // Oazy's mouse pointers and the global "home" hotkey.
 //
 // Oazy compiles this file on first run with the C# compiler that ships with
@@ -202,6 +203,7 @@ namespace Oazy
 		{
 			[PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
 			[PreserveSig] int OpenPropertyStore(int access, out IPropertyStore store);
+			[PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
 		}
 
 		[ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -458,6 +460,7 @@ namespace Oazy
 			Out.AutoFlush = true;
 			Out.NewLine = "\n";
 			Wifi.Emit = Write;
+			Audio.Emit = Write;
 			StreamReader input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
 
 			Thread loop = new Thread(MessageLoop);
@@ -660,6 +663,10 @@ namespace Oazy
 					return Wifi.Forget(Arg(p, 2));
 				case "wifi_radio":
 					return Wifi.SetRadio(Arg(p, 2) == "1");
+				case "audio":
+					return Audio.Start(Arg(p, 2));
+				case "audio_stop":
+					return Audio.Stop();
 				case "webview2":
 					return "\"ok\":true,\"version\":" + Json.Str(WebView2Version());
 			}
@@ -3606,6 +3613,871 @@ namespace Oazy
 				if (what != "" && Emit != null) Emit("{\"ev\":\"wifi\",\"what\":\"" + what + "\"" + extra + "}");
 			}
 			catch (Exception) { }
+		}
+	}
+
+	// --- Music: what's playing, for the visualiser wallpaper ----------------------------
+	//
+	// Listens to what Windows plays (WASAPI loopback) on a thread of its own and
+	// boils it down sixty times a second: a 16-band spectrum, loudness, onsets
+	// and kicks, the tempo with a running beat phase, brightness, noisiness and
+	// a running key estimate (chroma against Krumhansl's key profiles). Oazy
+	// turns those into the picture and the "vibe".
+	//
+	// "chrome" listens to Google Chrome alone through process loopback (Windows
+	// 10 2004 and later), so a minimised YouTube Music still drives it and no
+	// other app does. With Chrome closed, or where Windows can't, it falls back
+	// to everything the speakers play.
+	static class Audio
+	{
+		[ComImport, Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IAudioClient
+		{
+			[PreserveSig] int Initialize(int shareMode, int streamFlags, long bufferDuration, long periodicity, IntPtr format, IntPtr session);
+			[PreserveSig] int GetBufferSize(out uint frames);
+			[PreserveSig] int GetStreamLatency(out long latency);
+			[PreserveSig] int GetCurrentPadding(out uint frames);
+			[PreserveSig] int IsFormatSupported(int shareMode, IntPtr format, out IntPtr closest);
+			[PreserveSig] int GetMixFormat(out IntPtr format);
+			[PreserveSig] int GetDevicePeriod(out long defaultPeriod, out long minPeriod);
+			[PreserveSig] int Start();
+			[PreserveSig] int Stop();
+			[PreserveSig] int Reset();
+			[PreserveSig] int SetEventHandle(IntPtr handle);
+			[PreserveSig] int GetService(ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object service);
+		}
+
+		[ComImport, Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IAudioCaptureClient
+		{
+			[PreserveSig] int GetBuffer(out IntPtr data, out uint frames, out uint flags, out ulong devicePosition, out ulong qpcPosition);
+			[PreserveSig] int ReleaseBuffer(uint frames);
+			[PreserveSig] int GetNextPacketSize(out uint frames);
+		}
+
+		[ComImport, Guid("72A22D78-CDE4-431D-B8CC-843A71199B6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IActivateAudioInterfaceAsyncOperation
+		{
+			[PreserveSig] int GetActivateResult(out int result, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+		}
+
+		[ComImport, Guid("41D949AB-9862-444A-80F6-C261334DA5EB"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IActivateAudioInterfaceCompletionHandler
+		{
+			[PreserveSig] int ActivateCompleted(IActivateAudioInterfaceAsyncOperation op);
+		}
+
+		// Windows calls the completion handler from its own thread pool, so it
+		// has to say it's agile.
+		[ComImport, Guid("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+		public interface IAgileObject { }
+
+		[ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+		public class ActivateHandler : IActivateAudioInterfaceCompletionHandler, IAgileObject
+		{
+			public readonly ManualResetEvent Done = new ManualResetEvent(false);
+			public int Result = -1;
+			public object Client;
+
+			public int ActivateCompleted(IActivateAudioInterfaceAsyncOperation op)
+			{
+				try
+				{
+					int hr;
+					object o;
+					if (op.GetActivateResult(out hr, out o) == 0)
+					{
+						Result = hr;
+						Client = o;
+					}
+				}
+				catch (Exception) { }
+				Done.Set();
+				return 0;
+			}
+		}
+
+		[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+		struct PROCESSENTRY32
+		{
+			public uint dwSize;
+			public uint cntUsage;
+			public uint th32ProcessID;
+			public IntPtr th32DefaultHeapID;
+			public uint th32ModuleID;
+			public uint cntThreads;
+			public uint th32ParentProcessID;
+			public int pcPriClassBase;
+			public uint dwFlags;
+			[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+		}
+
+		[DllImport("Mmdevapi.dll", ExactSpelling = true)]
+		static extern int ActivateAudioInterfaceAsync([MarshalAs(UnmanagedType.LPWStr)] string path, ref Guid iid, IntPtr activationParams, IActivateAudioInterfaceCompletionHandler handler, out IActivateAudioInterfaceAsyncOperation op);
+		[DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "Process32FirstW")] static extern bool Process32First(IntPtr snap, ref PROCESSENTRY32 e);
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "Process32NextW")] static extern bool Process32Next(IntPtr snap, ref PROCESSENTRY32 e);
+		[DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+		[DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+		[DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr h, out uint code);
+		[DllImport("ole32.dll")] static extern void CoTaskMemFree(IntPtr p);
+
+		static Guid IID_IAudioClient = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
+		static Guid IID_IAudioCaptureClient = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
+		static readonly Guid FloatFormat = new Guid("00000003-0000-0010-8000-00aa00389b71");
+		static readonly Guid PcmFormat = new Guid("00000001-0000-0010-8000-00aa00389b71");
+		const int LOOPBACK = 0x20000, EVENTCALLBACK = 0x40000;
+		const int AUTOCONVERTPCM = unchecked((int)0x80000000), SRC_DEFAULT_QUALITY = 0x08000000;
+		const int ProcessRate = 44100;
+
+		public static Action<string> Emit;
+
+		class Session
+		{
+			public volatile bool Stop;
+			public string Mode;
+		}
+
+		static readonly object Lock = new object();
+		static Session Current;
+		// Process loopback refused once (older Windows): don't keep asking.
+		static volatile bool ProcessBroken;
+
+		public static string Start(string mode)
+		{
+			lock (Lock)
+			{
+				if (Current != null) Current.Stop = true;
+				Session s = new Session();
+				s.Mode = mode == "all" ? "all" : "chrome";
+				Current = s;
+				ProcessBroken = false;
+				Thread t = new Thread(delegate() { Run(s); });
+				t.IsBackground = true;
+				t.SetApartmentState(ApartmentState.MTA);
+				t.Start();
+			}
+			return "\"ok\":true";
+		}
+
+		public static string Stop()
+		{
+			lock (Lock)
+			{
+				if (Current != null) Current.Stop = true;
+				Current = null;
+			}
+			return "\"ok\":true";
+		}
+
+		static void Send(Session s, string json)
+		{
+			if (s.Stop || Emit == null) return;
+			Emit(json);
+		}
+
+		// One stream being captured, mixed down to mono into a ring.
+		class Source
+		{
+			public IAudioClient Client;
+			public IAudioCaptureClient Capture;
+			public AutoResetEvent Event;
+			public int Rate, Channels, Bytes;
+			public bool Float;
+			public uint Pid;
+			public string Device = "";
+			public bool Dead;
+			public const int Size = 16384, Mask = Size - 1;
+			public readonly float[] Ring = new float[Size];
+			public int Pos;
+			public double LastData = -10.0;
+			byte[] raw = new byte[0];
+
+			public void Drain(double now)
+			{
+				if (Dead) return;
+				uint n;
+				if (Capture.GetNextPacketSize(out n) < 0) { Dead = true; return; }
+				int guard = 0;
+				while (n > 0 && guard++ < 64)
+				{
+					IntPtr data;
+					uint frames, flags;
+					ulong a, b;
+					if (Capture.GetBuffer(out data, out frames, out flags, out a, out b) < 0) { Dead = true; return; }
+					int len = (int)frames * Channels * Bytes;
+					bool silent = (flags & 2) != 0 || data == IntPtr.Zero;
+					if (!silent)
+					{
+						if (raw.Length < len) raw = new byte[len];
+						Marshal.Copy(data, raw, 0, len);
+					}
+					float inv = 1f / Channels;
+					for (int i = 0; i < frames; i++)
+					{
+						float v = 0f;
+						if (!silent)
+						{
+							int o = i * Channels * Bytes;
+							for (int c = 0; c < Channels; c++, o += Bytes)
+							{
+								if (Float) v += BitConverter.ToSingle(raw, o);
+								else if (Bytes == 2) v += BitConverter.ToInt16(raw, o) / 32768f;
+								else if (Bytes == 4) v += BitConverter.ToInt32(raw, o) / 2147483648f;
+								else if (Bytes == 3) v += ((raw[o] << 8 | raw[o + 1] << 16 | raw[o + 2] << 24) >> 8) / 8388608f;
+							}
+						}
+						Ring[Pos] = v * inv;
+						Pos = (Pos + 1) & Mask;
+					}
+					Capture.ReleaseBuffer(frames);
+					LastData = now;
+					if (Capture.GetNextPacketSize(out n) < 0) { Dead = true; return; }
+				}
+			}
+
+			public void Dispose()
+			{
+				try { if (Client != null) Client.Stop(); } catch (Exception) { }
+				try { if (Capture != null) Marshal.ReleaseComObject(Capture); } catch (Exception) { }
+				try { if (Client != null) Marshal.ReleaseComObject(Client); } catch (Exception) { }
+				if (Event != null) Event.Close();
+				Capture = null;
+				Client = null;
+				Event = null;
+			}
+		}
+
+		// Everything the default speakers play.
+		static Source OpenSystem()
+		{
+			Native.IMMDeviceEnumerator en = null;
+			Native.IMMDevice dev = null;
+			IntPtr fmt = IntPtr.Zero;
+			Source s = new Source();
+			try
+			{
+				en = (Native.IMMDeviceEnumerator)new Native.MMDeviceEnumerator();
+				if (en.GetDefaultAudioEndpoint(0, 1, out dev) != 0 || dev == null) return null;
+				string id;
+				if (dev.GetId(out id) == 0) s.Device = id ?? "";
+				object o;
+				if (dev.Activate(ref IID_IAudioClient, 23, IntPtr.Zero, out o) != 0 || o == null) return null;
+				s.Client = (IAudioClient)o;
+				if (s.Client.GetMixFormat(out fmt) != 0 || fmt == IntPtr.Zero) { s.Dispose(); return null; }
+				int tag = Marshal.ReadInt16(fmt, 0) & 0xFFFF;
+				s.Channels = Marshal.ReadInt16(fmt, 2);
+				s.Rate = Marshal.ReadInt32(fmt, 4);
+				int bits = Marshal.ReadInt16(fmt, 14);
+				s.Bytes = bits / 8;
+				if (tag == 0xFFFE)
+				{
+					byte[] g = new byte[16];
+					Marshal.Copy(new IntPtr(fmt.ToInt64() + 24), g, 0, 16);
+					Guid sub = new Guid(g);
+					s.Float = sub == FloatFormat;
+					if (!s.Float && sub != PcmFormat) { s.Dispose(); return null; }
+				}
+				else s.Float = tag == 3;
+				if (s.Channels < 1 || s.Bytes < 2 || s.Bytes > 4 || s.Rate < 8000 || (s.Float && s.Bytes != 4)) { s.Dispose(); return null; }
+				if (s.Client.Initialize(0, LOOPBACK, 1000000, 0, fmt, IntPtr.Zero) != 0) { s.Dispose(); return null; }
+				object cap;
+				if (s.Client.GetService(ref IID_IAudioCaptureClient, out cap) != 0 || cap == null) { s.Dispose(); return null; }
+				s.Capture = (IAudioCaptureClient)cap;
+				if (s.Client.Start() != 0) { s.Dispose(); return null; }
+				return s;
+			}
+			catch (Exception) { s.Dispose(); return null; }
+			finally
+			{
+				if (fmt != IntPtr.Zero) CoTaskMemFree(fmt);
+				if (dev != null) Marshal.ReleaseComObject(dev);
+				if (en != null) Marshal.ReleaseComObject(en);
+			}
+		}
+
+		static string DefaultDevice()
+		{
+			Native.IMMDeviceEnumerator en = null;
+			Native.IMMDevice dev = null;
+			try
+			{
+				en = (Native.IMMDeviceEnumerator)new Native.MMDeviceEnumerator();
+				if (en.GetDefaultAudioEndpoint(0, 1, out dev) != 0 || dev == null) return "";
+				string id;
+				return dev.GetId(out id) == 0 ? id ?? "" : "";
+			}
+			catch (Exception) { return ""; }
+			finally
+			{
+				if (dev != null) Marshal.ReleaseComObject(dev);
+				if (en != null) Marshal.ReleaseComObject(en);
+			}
+		}
+
+		// Only what one process and its children play. Null and `refused` when
+		// Windows can't do that at all.
+		static Source OpenChrome(uint pid, out bool refused)
+		{
+			refused = false;
+			IntPtr pars = Marshal.AllocHGlobal(12);
+			IntPtr pv = Marshal.AllocHGlobal(24);
+			IntPtr fmt = Marshal.AllocHGlobal(18);
+			Source s = new Source();
+			IActivateAudioInterfaceAsyncOperation op = null;
+			try
+			{
+				// AUDIOCLIENT_ACTIVATION_PARAMS: process loopback, this process tree.
+				Marshal.WriteInt32(pars, 0, 1);
+				Marshal.WriteInt32(pars, 4, (int)pid);
+				Marshal.WriteInt32(pars, 8, 0);
+				// A PROPVARIANT holding it as a VT_BLOB.
+				for (int i = 0; i < 24; i += 4) Marshal.WriteInt32(pv, i, 0);
+				Marshal.WriteInt16(pv, 0, 65);
+				Marshal.WriteInt32(pv, 8, 12);
+				Marshal.WriteIntPtr(pv, 8 + IntPtr.Size, pars);
+				ActivateHandler h = new ActivateHandler();
+				int hr = ActivateAudioInterfaceAsync("VAD\\Process_Loopback", ref IID_IAudioClient, pv, h, out op);
+				if (hr != 0) { refused = true; return null; }
+				if (!h.Done.WaitOne(4000)) return null;
+				if (h.Result != 0 || h.Client == null) { refused = true; return null; }
+				s.Client = (IAudioClient)h.Client;
+				s.Pid = pid;
+				// The virtual device has no mix format of its own: ask for 16-bit stereo.
+				s.Rate = ProcessRate;
+				s.Channels = 2;
+				s.Bytes = 2;
+				s.Float = false;
+				Marshal.WriteInt16(fmt, 0, 1);
+				Marshal.WriteInt16(fmt, 2, 2);
+				Marshal.WriteInt32(fmt, 4, ProcessRate);
+				Marshal.WriteInt32(fmt, 8, ProcessRate * 4);
+				Marshal.WriteInt16(fmt, 12, 4);
+				Marshal.WriteInt16(fmt, 14, 16);
+				Marshal.WriteInt16(fmt, 16, 0);
+				int flags = LOOPBACK | EVENTCALLBACK;
+				if (s.Client.Initialize(0, flags | AUTOCONVERTPCM | SRC_DEFAULT_QUALITY, 200000, 0, fmt, IntPtr.Zero) != 0
+					&& s.Client.Initialize(0, flags, 200000, 0, fmt, IntPtr.Zero) != 0)
+				{
+					refused = true;
+					s.Dispose();
+					return null;
+				}
+				s.Event = new AutoResetEvent(false);
+				s.Client.SetEventHandle(s.Event.SafeWaitHandle.DangerousGetHandle());
+				object cap;
+				if (s.Client.GetService(ref IID_IAudioCaptureClient, out cap) != 0 || cap == null) { s.Dispose(); return null; }
+				s.Capture = (IAudioCaptureClient)cap;
+				if (s.Client.Start() != 0) { s.Dispose(); return null; }
+				return s;
+			}
+			catch (Exception)
+			{
+				// EntryPointNotFound and friends: this Windows can't.
+				refused = true;
+				s.Dispose();
+				return null;
+			}
+			finally
+			{
+				if (op != null) Marshal.ReleaseComObject(op);
+				Marshal.FreeHGlobal(pars);
+				Marshal.FreeHGlobal(pv);
+				Marshal.FreeHGlobal(fmt);
+			}
+		}
+
+		// Chrome's browser processes: chrome.exe whose parent isn't chrome.exe
+		// (its renderers and its audio service hang under one of these).
+		static List<uint> ChromeRoots()
+		{
+			var roots = new List<uint>();
+			IntPtr snap = CreateToolhelp32Snapshot(2, 0);
+			if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return roots;
+			try
+			{
+				var parent = new Dictionary<uint, uint>();
+				PROCESSENTRY32 e = new PROCESSENTRY32();
+				e.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+				if (!Process32First(snap, ref e)) return roots;
+				do
+				{
+					if (string.Equals(e.szExeFile, "chrome.exe", StringComparison.OrdinalIgnoreCase))
+						parent[e.th32ProcessID] = e.th32ParentProcessID;
+				} while (Process32Next(snap, ref e));
+				foreach (var kv in parent)
+					if (!parent.ContainsKey(kv.Value)) roots.Add(kv.Key);
+				roots.Sort();
+				if (roots.Count > 4) roots.RemoveRange(4, roots.Count - 4);
+			}
+			finally { CloseHandle(snap); }
+			return roots;
+		}
+
+		static bool Alive(uint pid)
+		{
+			IntPtr h = OpenProcess(0x1000, false, pid);
+			if (h == IntPtr.Zero) return false;
+			uint code;
+			bool alive = GetExitCodeProcess(h, out code) && code == 259;
+			CloseHandle(h);
+			return alive;
+		}
+
+		static void Close(List<Source> list)
+		{
+			foreach (Source s in list) s.Dispose();
+			list.Clear();
+		}
+
+		static void Run(Session session)
+		{
+			var sources = new List<Source>();
+			string kind = "";
+			Analyzer an = null;
+			Stopwatch clock = Stopwatch.StartNew();
+			double nextCheck = 0.0, nextFrame = 0.0;
+			const double Frame = 1.0 / 60.0;
+			try
+			{
+				while (!session.Stop)
+				{
+					double now = clock.Elapsed.TotalSeconds;
+					if (now >= nextCheck)
+					{
+						nextCheck = now + 3.0;
+						string was = kind;
+						kind = Choose(session, sources, kind);
+						if (kind != was) Send(session, "{\"ev\":\"audio_src\",\"src\":" + Json.Str(kind) + "}");
+						int rate = sources.Count > 0 ? sources[0].Rate : 48000;
+						if (an == null || an.Rate != rate) an = new Analyzer(rate);
+					}
+					foreach (Source s in sources) s.Drain(now);
+					if (now >= nextFrame)
+					{
+						nextFrame += Frame;
+						if (now - nextFrame > 0.1) nextFrame = now + Frame;
+						string json = an.Step(sources, now, Frame);
+						if (json != null) Send(session, json);
+					}
+					foreach (Source s in sources)
+						if (s.Dead) nextCheck = 0.0;
+					Thread.Sleep(4);
+				}
+			}
+			catch (Exception ex)
+			{
+				Send(session, "{\"ev\":\"audio_src\",\"src\":\"\",\"error\":" + Json.Str(ex.Message) + "}");
+			}
+			finally { Close(sources); }
+		}
+
+		// Keeps the right streams open; returns "chrome", "all" or "" (nothing).
+		static string Choose(Session session, List<Source> sources, string kind)
+		{
+			bool dead = false;
+			foreach (Source s in sources) dead |= s.Dead;
+			if (session.Mode == "chrome" && !ProcessBroken)
+			{
+				List<uint> roots = ChromeRoots();
+				if (roots.Count > 0)
+				{
+					bool same = kind == "chrome" && !dead && sources.Count == roots.Count;
+					if (same)
+						foreach (Source s in sources) same &= roots.Contains(s.Pid) && Alive(s.Pid);
+					if (same) return kind;
+					Close(sources);
+					bool refusedAll = true;
+					foreach (uint pid in roots)
+					{
+						bool refused;
+						Source s = OpenChrome(pid, out refused);
+						if (s != null) sources.Add(s);
+						refusedAll &= refused;
+					}
+					if (sources.Count > 0) return "chrome";
+					if (refusedAll) ProcessBroken = true;
+				}
+				else if (kind == "chrome") Close(sources);
+			}
+			if (kind == "all" && !dead && sources.Count == 1 && sources[0].Device == DefaultDevice()) return kind;
+			Close(sources);
+			Source sys = OpenSystem();
+			if (sys == null) return "";
+			sources.Add(sys);
+			return "all";
+		}
+
+		// The maths: spectrum, onsets, tempo, timbre and key.
+		class Analyzer
+		{
+			public readonly int Rate;
+			const int N = 2048, NC = 8192, Bands = 16, Env = 512;
+			readonly float[] win = new float[N], winC = new float[NC];
+			readonly float[] re = new float[NC], im = new float[NC];
+			readonly float[] buf = new float[NC];
+			readonly float[] power = new float[N / 2 + 1];
+			readonly float[] prevLog = new float[N / 2 + 1];
+			readonly int[] bandLo = new int[Bands], bandHi = new int[Bands];
+			readonly float[] bandTilt = new float[Bands];
+			readonly float[] bands = new float[Bands];
+			double refDb = -30.0;
+			// Onset detection over spectral flux, all bins and just the lows.
+			readonly float[] fluxHist = new float[45], lowHist = new float[45];
+			int histPos;
+			float f1, f2, l1, l2;
+			int sinceOnset = 100, sinceKick = 100;
+			// Tempo: the onset envelope over ~8.5 s, autocorrelated.
+			readonly float[] env = new float[Env];
+			int envPos, frames;
+			double bpm, bpmConf, candidate;
+			int candidateHits;
+			double phase;
+			readonly Queue<double> onsetTimes = new Queue<double>();
+			// Timbre and key, slowly smoothed.
+			double centroid = 0.5, flatness = 0.2;
+			readonly double[] chroma = new double[12];
+			double mode, keyClarity;
+			int key;
+			double quiet;
+			static readonly double[] Major = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+			static readonly double[] Minor = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+			static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+			public Analyzer(int rate)
+			{
+				Rate = rate;
+				for (int i = 0; i < N; i++) win[i] = (float)(0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (N - 1)));
+				for (int i = 0; i < NC; i++) winC[i] = (float)(0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (NC - 1)));
+				// 40 Hz to 16 kHz in even steps of pitch, tilted 3 dB an octave so a
+				// typical mix (much more energy low down) reads level across.
+				double hz = (double)rate / N;
+				for (int b = 0; b < Bands; b++)
+				{
+					double lo = 40.0 * Math.Pow(400.0, (double)b / Bands);
+					double hi = 40.0 * Math.Pow(400.0, (double)(b + 1) / Bands);
+					int a = (int)Math.Round(lo / hz), z = (int)Math.Round(hi / hz) - 1;
+					a = Math.Max(1, Math.Min(a, N / 2));
+					z = Math.Max(a, Math.Min(z, N / 2));
+					bandLo[b] = a;
+					bandHi[b] = z;
+					bandTilt[b] = (float)(3.0 * Math.Log(Math.Sqrt(lo * hi) / 1000.0, 2.0));
+				}
+			}
+
+			static void Fft(float[] re, float[] im, int n)
+			{
+				for (int i = 1, j = 0; i < n; i++)
+				{
+					int bit = n >> 1;
+					for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+					j ^= bit;
+					if (i < j)
+					{
+						float t = re[i]; re[i] = re[j]; re[j] = t;
+						t = im[i]; im[i] = im[j]; im[j] = t;
+					}
+				}
+				for (int len = 2; len <= n; len <<= 1)
+				{
+					double ang = -2.0 * Math.PI / len;
+					float wr = (float)Math.Cos(ang), wi = (float)Math.Sin(ang);
+					for (int i = 0; i < n; i += len)
+					{
+						float cr = 1f, ci = 0f;
+						for (int k = 0; k < len / 2; k++)
+						{
+							int a = i + k, b = a + len / 2;
+							float xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+							re[b] = re[a] - xr; im[b] = im[a] - xi;
+							re[a] += xr; im[a] += xi;
+							float nr = cr * wr - ci * wi;
+							ci = cr * wi + ci * wr;
+							cr = nr;
+						}
+					}
+				}
+			}
+
+			// The latest `n` samples of every stream that's still playing, summed.
+			bool Gather(List<Source> sources, double now, int n)
+			{
+				Array.Clear(buf, 0, n);
+				bool any = false;
+				foreach (Source s in sources)
+				{
+					if (s.Dead || now - s.LastData > 0.25) continue;
+					any = true;
+					int start = s.Pos - n;
+					for (int i = 0; i < n; i++) buf[i] += s.Ring[(start + i) & Source.Mask];
+				}
+				return any;
+			}
+
+			static double Smooth(double v, double target, double dt, double seconds)
+			{
+				return v + (target - v) * (1.0 - Math.Exp(-dt / seconds));
+			}
+
+			public string Step(List<Source> sources, double now, double dt)
+			{
+				frames++;
+				bool playing = Gather(sources, now, NC);
+				int off = NC - N;
+				double sum = 0.0;
+				for (int i = 0; i < N; i++)
+				{
+					float v = buf[off + i];
+					sum += v * v;
+					re[i] = v * win[i];
+					im[i] = 0f;
+				}
+				double rmsDb = 10.0 * Math.Log10(sum / N + 1e-12);
+				bool silent = !playing || rmsDb < -72.0;
+				quiet = silent ? quiet + dt : 0.0;
+				// Quiet for a while: a few frames a second are plenty.
+				if (quiet > 2.0 && frames % 15 != 0) return null;
+				Fft(re, im, N);
+				double norm = 4.0 / N;
+				for (int k = 0; k <= N / 2; k++)
+					power[k] = (float)((re[k] * re[k] + im[k] * im[k]) * norm * norm);
+
+				// Spectrum, against a level that follows the music down slowly.
+				double loudest = -200.0;
+				var db = new double[Bands];
+				for (int b = 0; b < Bands; b++)
+				{
+					double p = 0.0;
+					for (int k = bandLo[b]; k <= bandHi[b]; k++) p += power[k];
+					p /= bandHi[b] - bandLo[b] + 1;
+					db[b] = 10.0 * Math.Log10(p + 1e-14) + bandTilt[b];
+					loudest = Math.Max(loudest, db[b]);
+				}
+				if (!silent) refDb = Math.Max(refDb - dt * 2.5, Math.Min(loudest, 6.0));
+				refDb = Math.Max(refDb, -75.0);
+				for (int b = 0; b < Bands; b++)
+				{
+					double v = silent ? 0.0 : Math.Max(0.0, Math.Min(1.0, (db[b] - (refDb - 42.0)) / 42.0));
+					bands[b] = (float)Math.Pow(v, 1.6);
+				}
+
+				// Spectral flux on log magnitudes scaled by that same level, so how
+				// loud it's playing doesn't change what counts as a hit.
+				double scale = 1.0 / Math.Pow(10.0, refDb / 20.0);
+				int lowTop = Math.Max(2, (int)(150.0 * N / Rate));
+				int top = Math.Min(N / 2, (int)(10000.0 * N / Rate));
+				double flux = 0.0, low = 0.0;
+				for (int k = 1; k <= top; k++)
+				{
+					float lm = silent ? 0f : (float)Math.Log(1.0 + 100.0 * Math.Sqrt(power[k]) * scale);
+					double d = lm - prevLog[k];
+					if (d > 0.0)
+					{
+						flux += d;
+						if (k <= lowTop) low += d;
+					}
+					prevLog[k] = lm;
+				}
+				flux /= top;
+				low /= lowTop;
+				double onset = Peak(fluxHist, flux, ref f1, ref f2, ref sinceOnset, 6);
+				double kick = Peak(lowHist, low, ref l1, ref l2, ref sinceKick, 12);
+				histPos = (histPos + 1) % fluxHist.Length;
+				if (onset > 0.0)
+				{
+					onsetTimes.Enqueue(now);
+					// Nudge the beat clock toward hits that land near a beat.
+					if (bpm > 0.0)
+					{
+						double err = phase - Math.Round(phase);
+						if (Math.Abs(err) < 0.3) phase -= err * 0.18 * Math.Min(1.0, onset);
+					}
+				}
+				while (onsetTimes.Count > 0 && now - onsetTimes.Peek() > 4.0) onsetTimes.Dequeue();
+
+				// Tempo: autocorrelation of the onset envelope, leaning toward
+				// 120 BPM where people tap along, kept steady across songs' bars.
+				double mean = 0.0;
+				foreach (float h in fluxHist) mean += h;
+				mean /= fluxHist.Length;
+				env[envPos] = (float)Math.Max(0.0, flux - mean);
+				envPos = (envPos + 1) % Env;
+				if (frames % 30 == 0 && !silent) Tempo();
+				if (bpm > 0.0) phase += dt * bpm / 60.0;
+				phase -= Math.Floor(phase);
+
+				// Timbre: brightness (spectral centroid) and noisiness (flatness).
+				if (!silent)
+				{
+					double ws = 0.0, ps = 0.0, logs = 0.0;
+					int lo = (int)(60.0 * N / Rate), hi = Math.Min(N / 2, (int)(16000.0 * N / Rate));
+					int flo = (int)(150.0 * N / Rate), fhi = Math.Min(N / 2, (int)(8000.0 * N / Rate));
+					double fs = 0.0;
+					for (int k = lo; k <= hi; k++)
+					{
+						ws += power[k] * k * (double)Rate / N;
+						ps += power[k];
+					}
+					for (int k = flo; k <= fhi; k++)
+					{
+						logs += Math.Log(power[k] + 1e-14);
+						fs += power[k];
+					}
+					if (ps > 0.0)
+					{
+						double c = Math.Log(Math.Max(ws / ps, 1.0) / 250.0, 2.0) / Math.Log(24.0, 2.0);
+						centroid = Smooth(centroid, Math.Max(0.0, Math.Min(1.0, c)), dt, 1.5);
+					}
+					int fn = fhi - flo + 1;
+					double flat = Math.Exp(logs / fn) / (fs / fn + 1e-14);
+					flatness = Smooth(flatness, Math.Min(1.0, flat * 3.0), dt, 1.5);
+					if (frames % 6 == 0) Key();
+				}
+
+				var sb = new StringBuilder(420);
+				sb.Append("{\"ev\":\"audio\",\"b\":[");
+				for (int b = 0; b < Bands; b++)
+				{
+					if (b > 0) sb.Append(',');
+					sb.Append((int)(bands[b] * 999f));
+				}
+				sb.Append("],\"db\":").Append(rmsDb.ToString("0.0", Inv));
+				sb.Append(",\"o\":").Append(onset.ToString("0.00", Inv));
+				sb.Append(",\"k\":").Append(kick.ToString("0.00", Inv));
+				sb.Append(",\"bpm\":").Append(bpm.ToString("0.0", Inv));
+				sb.Append(",\"bc\":").Append(bpmConf.ToString("0.00", Inv));
+				sb.Append(",\"ph\":").Append(phase.ToString("0.000", Inv));
+				sb.Append(",\"c\":").Append(centroid.ToString("0.000", Inv));
+				sb.Append(",\"f\":").Append(flatness.ToString("0.000", Inv));
+				sb.Append(",\"r\":").Append((onsetTimes.Count / 4.0).ToString("0.00", Inv));
+				sb.Append(",\"m\":").Append(mode.ToString("0.00", Inv));
+				sb.Append(",\"key\":").Append(key);
+				sb.Append(",\"kc\":").Append(keyClarity.ToString("0.00", Inv));
+				sb.Append('}');
+				return sb.ToString();
+			}
+
+			// A hit: the flux one frame back is a local peak well above the last
+			// 0.75 s. Returns its strength (0 for none).
+			double Peak(float[] hist, double v, ref float p1, ref float p2, ref int since, int gap)
+			{
+				double mean = 0.0, sq = 0.0;
+				foreach (float h in hist) { mean += h; sq += h * h; }
+				mean /= hist.Length;
+				double sd = Math.Sqrt(Math.Max(0.0, sq / hist.Length - mean * mean));
+				double thresh = mean + 1.5 * sd + 0.004;
+				double hit = 0.0;
+				since++;
+				if (p1 > p2 && p1 >= v && p1 > thresh && since >= gap)
+				{
+					hit = Math.Min(1.0, (p1 - mean) / (4.0 * sd + 0.01));
+					since = 0;
+				}
+				hist[histPos] = (float)v;
+				p2 = p1;
+				p1 = (float)v;
+				return hit;
+			}
+
+			void Tempo()
+			{
+				int lo = 18, hi = 80;
+				double r0 = 0.0;
+				for (int i = 0; i < Env; i++) r0 += env[i] * env[i];
+				if (r0 <= 1e-9) return;
+				var r = new double[hi + 2];
+				int best = -1;
+				double bestW = 0.0;
+				for (int l = lo - 1; l <= hi + 1; l++)
+				{
+					double s = 0.0;
+					for (int i = l; i < Env; i++) s += env[(envPos + i) % Env] * env[(envPos + i - l) % Env];
+					r[l] = s / (Env - l);
+				}
+				for (int l = lo; l <= hi; l++)
+				{
+					double oct = Math.Log(l / 30.0, 2.0);
+					double w = r[l] * Math.Exp(-0.5 * oct * oct / (0.9 * 0.9));
+					if (r[l] >= r[l - 1] && r[l] >= r[l + 1] && w > bestW) { bestW = w; best = l; }
+				}
+				if (best < 0) return;
+				double a = r[best - 1], b = r[best], c = r[best + 1];
+				double den = a - 2.0 * b + c;
+				double lag = best + (Math.Abs(den) > 1e-12 ? 0.5 * (a - c) / den : 0.0);
+				double found = 3600.0 / lag;
+				double conf = Math.Max(0.0, Math.Min(1.0, b / (r0 / Env) * 1.5));
+				bpmConf = conf;
+				if (conf < 0.15) return;
+				if (bpm <= 0.0) { bpm = found; return; }
+				// The same tempo, or double or half of it: refine, don't jump.
+				foreach (double m in new double[] { 1.0, 2.0, 0.5 })
+				{
+					if (Math.Abs(found * m - bpm) / bpm < 0.05)
+					{
+						bpm += (found * m - bpm) * 0.3;
+						candidateHits = 0;
+						return;
+					}
+				}
+				if (candidate > 0.0 && Math.Abs(found - candidate) / candidate < 0.05) candidateHits++;
+				else { candidate = found; candidateHits = 1; }
+				if (candidateHits >= 3) { bpm = candidate; candidateHits = 0; }
+			}
+
+			// Pitch classes from a long window, smoothed over ~6 s, matched against
+			// all 24 major and minor keys.
+			void Key()
+			{
+				int off = 0;
+				for (int i = 0; i < NC; i++) { re[i] = buf[off + i] * winC[i]; im[i] = 0f; }
+				Fft(re, im, NC);
+				var frame = new double[12];
+				double total = 0.0;
+				int lo = (int)(100.0 * NC / Rate), hi = Math.Min(NC / 2, (int)(4000.0 * NC / Rate));
+				for (int k = Math.Max(1, lo); k <= hi; k++)
+				{
+					double f = (double)k * Rate / NC;
+					double midi = 69.0 + 12.0 * Math.Log(f / 440.0, 2.0);
+					double near = Math.Round(midi);
+					double tune = 1.0 - 2.0 * Math.Abs(midi - near);
+					if (tune <= 0.0) continue;
+					double mag = Math.Sqrt(re[k] * re[k] + im[k] * im[k]) * tune;
+					int pc = (((int)near % 12) + 12) % 12;
+					frame[pc] += mag;
+					total += mag;
+				}
+				if (total <= 1e-9) return;
+				double keep = Math.Exp(-0.1 / 6.0);
+				for (int i = 0; i < 12; i++) chroma[i] = chroma[i] * keep + frame[i] / total * (1.0 - keep);
+				double bestMaj = -2.0, bestMin = -2.0;
+				int kMaj = 0, kMin = 0;
+				for (int t = 0; t < 12; t++)
+				{
+					double cm = Corr(Major, t), cn = Corr(Minor, t);
+					if (cm > bestMaj) { bestMaj = cm; kMaj = t; }
+					if (cn > bestMin) { bestMin = cn; kMin = t; }
+				}
+				mode = Math.Max(-1.0, Math.Min(1.0, (bestMaj - bestMin) * 5.0));
+				key = bestMaj >= bestMin ? kMaj : kMin;
+				keyClarity = Math.Max(0.0, Math.Max(bestMaj, bestMin));
+			}
+
+			double Corr(double[] profile, int tonic)
+			{
+				double ma = 0.0, mb = 0.0;
+				for (int i = 0; i < 12; i++) { ma += chroma[(tonic + i) % 12]; mb += profile[i]; }
+				ma /= 12.0;
+				mb /= 12.0;
+				double num = 0.0, da = 0.0, db = 0.0;
+				for (int i = 0; i < 12; i++)
+				{
+					double x = chroma[(tonic + i) % 12] - ma, y = profile[i] - mb;
+					num += x * y;
+					da += x * x;
+					db += y * y;
+				}
+				return da <= 0.0 ? 0.0 : num / Math.Sqrt(da * db);
+			}
 		}
 	}
 }

@@ -22,6 +22,81 @@ boot_splash/show_image=false
 config/icon="res://assets/icon.png"
 config/windows_native_icon="res://assets/icon.ico"
 
+[shader_globals]
+
+music_bands0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_bands1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_bands2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_bands3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_slow0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_slow1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_slow2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_slow3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_level={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_beat={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_rings={
+"type": "vec4",
+"value": Vector4(9, 9, 9, 9)
+}
+music_ring_power={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_phase={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+music_base={
+"type": "vec4",
+"value": Vector4(0.03, 0.04, 0.08, 1)
+}
+music_a={
+"type": "vec4",
+"value": Vector4(0.1, 0.25, 0.4, 1)
+}
+music_b={
+"type": "vec4",
+"value": Vector4(0.08, 0.35, 0.38, 1)
+}
+music_c={
+"type": "vec4",
+"value": Vector4(0.5, 0.4, 0.35, 1)
+}
+music_glow={
+"type": "vec4",
+"value": Vector4(0.9, 0.95, 1, 1)
+}
+
 [autoload]
 
 App="*res://scripts/autoload/app.gd"
@@ -31,6 +106,7 @@ Library="*res://scripts/autoload/library.gd"
 Art="*res://scripts/autoload/art.gd"
 Updater="*res://scripts/autoload/updater.gd"
 Host="*res://scripts/autoload/host.gd"
+Music="*res://scripts/autoload/music.gd"
 Catalog="*res://scripts/autoload/catalog.gd"
 Weather="*res://scripts/autoload/weather.gd"
 Network="*res://scripts/autoload/network.gd"

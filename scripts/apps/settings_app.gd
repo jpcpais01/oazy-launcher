@@ -44,6 +44,7 @@ var _scan_btn: FxButton
 var _swatches: Array[Button] = []
 var _effects := {}
 var _lights := {}
+var _music_sources := {}
 var _units := {}
 var _fav_sizes := {}
 var _hotkey_status: Label
@@ -169,6 +170,8 @@ func _on_setting(key: String, value: Variant) -> void:
 			_sync_units()
 		"wallpaper_light":
 			_sync_lights()
+		"music_source":
+			_select(_music_sources, str(value))
 		"effects":
 			_sync_effects()
 		"accent":
@@ -578,6 +581,11 @@ func _build_personalise() -> void:
 	_swatch_row(look)
 	_wallpaper_rows(look)
 	_light_row(look)
+	_toggle_row(look, "Music wallpaper", "Lights the desktop with what's playing: it moves with the beat, and its colours follow the song's mood. Also on the taskbar.", "music_wallpaper", Callable(), "visualiser visualizer audio sound song spectrum beat")
+	_chips_row(look, "Music listens to", "Chrome alone, so YouTube Music works even minimised and nothing else joins in (everything while Chrome is closed), or all sound.",
+		[["chrome", "Chrome"], ["all", "All sound"]], _music_sources,
+		func(v: String) -> void: Settings.set_value("music_source", v), "visualiser visualizer audio youtube chrome sound")
+	_select(_music_sources, str(Settings.get_value("music_source")))
 
 	var you := _group("personalise", "Pointer and icons")
 	_pointer_rows(you)

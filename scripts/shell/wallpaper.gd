@@ -22,6 +22,8 @@ const STYLES := {
 	"bloom": ["Bloom", 5],
 	"shallows": ["Shallows", 6],
 }
+## The music wallpaper's style (see Music); not one of the picked ones.
+const MUSIC_STYLE := 7
 const PARAMS := ["wall_base", "wall_a", "wall_b", "wall_c", "wall_glow"]
 ## Hour -> palette keyframes for "auto".
 const KEYS := [[0.0, "night"], [5.0, "night"], [7.0, "dawn"], [9.5, "day"], [16.5, "day"], [19.0, "dusk"], [21.0, "night"], [24.0, "night"]]
@@ -51,6 +53,7 @@ func _ready() -> void:
 			_publish()
 	)
 	App.accent_changed.connect(_tween_accent)
+	Music.toggled.connect(func(_on: bool) -> void: apply_style())
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		if key == "effects":
 			apply_effects()
@@ -76,9 +79,10 @@ func apply_effects() -> void:
 	_publish()
 
 
-## Switches to the style picked in Settings, crossfading from the old one.
+## Switches to the style picked in Settings (or the music wallpaper while
+## it's on), crossfading from the old one.
 func apply_style() -> void:
-	var to := style_index(str(Settings.get_value("wallpaper")))
+	var to := MUSIC_STYLE if Music.on else style_index(str(Settings.get_value("wallpaper")))
 	if _fade_tween and _fade_tween.is_valid():
 		_fade_tween.kill()
 	if not is_inside_tree() or not mat.get_shader_parameter("wall_style") is int or to == mat.get_shader_parameter("wall_style"):
@@ -92,7 +96,11 @@ func apply_style() -> void:
 	_fade_tween.tween_method(func(k: float) -> void:
 		_param("wall_fade", k)
 		_publish()
-	, 0.0, 1.0, 0.9)
+	, 0.0, 1.0, 1.4 if to == MUSIC_STYLE or _from_music() else 0.9)
+
+
+func _from_music() -> bool:
+	return mat.get_shader_parameter("wall_from") == MUSIC_STYLE
 
 
 static func style_index(id: String) -> int:
