@@ -330,12 +330,12 @@ func _vibe_palette() -> Array:
 	# A celestial sky, its hue pulled toward the violet of night, and three
 	# lights behind the glass: the mood's own, a neighbour, and a soft
 	# counter-light from across the wheel.
-	var sky_h := lerp_angle(TAU * h, TAU * 0.7, 0.55) / TAU
+	var sky_h := lerp_angle(TAU * h, TAU * 0.68, 0.75) / TAU
 	var bright := float(_frame.get("c", 0.5)) if not _frame.is_empty() else 0.5
 	var glow := Color.from_hsv(fposmod(h + 0.03, 1.0), 0.1, 1.0)
 	glow = glow.lerp(Color(1.0, 0.9, 0.8), 0.25 * (1.0 - bright)).lerp(Color(0.88, 0.94, 1.0), 0.25 * bright)
 	var vibe := [
-		Color.from_hsv(fposmod(sky_h, 1.0), 0.55, 0.26 + 0.05 * arousal),
+		Color.from_hsv(fposmod(sky_h, 1.0), 0.5, 0.32 + 0.05 * arousal),
 		Color.from_hsv(_tidy(h), 0.42 + 0.25 * arousal, 1.0),
 		Color.from_hsv(_tidy(h - 0.17), 0.48 + 0.2 * arousal, 0.95),
 		Color.from_hsv(_tidy(h + 0.33), 0.45, 0.97).lerp(App.accent.lightened(0.4), 0.08),
