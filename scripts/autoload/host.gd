@@ -113,7 +113,7 @@ static func build_media() -> Dictionary:
 			continue
 		var fw: String = csc.get_base_dir()
 		var args := ["/nologo", "/optimize+", "/target:library"]
-		for facade in ["System.Runtime.dll", "System.Runtime.WindowsRuntime.dll", "System.Threading.Tasks.dll"]:
+		for facade in ["System.Runtime.dll"]:
 			if FileAccess.file_exists(fw.path_join(facade)):
 				args.append("/r:" + fw.path_join(facade).replace("/", "\\"))
 		for md in DirAccess.get_files_at(meta):

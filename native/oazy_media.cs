@@ -12,6 +12,7 @@
 using System;
 using System.Text;
 using System.Threading;
+using Windows.Foundation;
 using Windows.Media.Control;
 
 namespace OazyMedia
@@ -29,14 +30,30 @@ namespace OazyMedia
 		public static string Start(Action<string> emit)
 		{
 			Emit = emit;
-			Manager = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().Result;
+			Manager = Wait(GlobalSystemMediaTransportControlsSessionManager.RequestAsync());
 			Thread t = new Thread(Loop);
 			t.IsBackground = true;
 			t.Start();
 			return "\"ok\":true";
 		}
 
+		// Runs on a thread-pool (MTA) thread: the companion calls from its STA
+		// input loop, and WinRT calls shouldn't block there.
 		public static string Command(string cmd, string arg)
+		{
+			string result = "\"ok\":false,\"error\":\"timed out\"";
+			var done = new ManualResetEvent(false);
+			ThreadPool.QueueUserWorkItem(delegate(object state)
+			{
+				try { result = Run(cmd, arg); }
+				catch (Exception ex) { result = "\"ok\":false,\"error\":" + Str(ex.Message); }
+				done.Set();
+			});
+			done.WaitOne(6000);
+			return result;
+		}
+
+		static string Run(string cmd, string arg)
 		{
 			GlobalSystemMediaTransportControlsSession s;
 			lock (Lock) s = Session;
@@ -54,15 +71,15 @@ namespace OazyMedia
 			bool done = false;
 			switch (cmd)
 			{
-				case "toggle": done = s.TryTogglePlayPauseAsync().AsTask().Result; break;
-				case "play": done = s.TryPlayAsync().AsTask().Result; break;
-				case "pause": done = s.TryPauseAsync().AsTask().Result; break;
-				case "next": done = s.TrySkipNextAsync().AsTask().Result; break;
-				case "prev": done = s.TrySkipPreviousAsync().AsTask().Result; break;
+				case "toggle": done = Wait(s.TryTogglePlayPauseAsync()); break;
+				case "play": done = Wait(s.TryPlayAsync()); break;
+				case "pause": done = Wait(s.TryPauseAsync()); break;
+				case "next": done = Wait(s.TrySkipNextAsync()); break;
+				case "prev": done = Wait(s.TrySkipPreviousAsync()); break;
 				case "seek":
 					double sec;
 					if (double.TryParse(arg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out sec))
-						done = s.TryChangePlaybackPositionAsync((long)(sec * 10000000.0)).AsTask().Result;
+						done = Wait(s.TryChangePlaybackPositionAsync((long)(sec * 10000000.0)));
 					break;
 			}
 			Last = "";
@@ -113,7 +130,7 @@ namespace OazyMedia
 				Last = "none";
 				return;
 			}
-			var props = s.TryGetMediaPropertiesAsync().AsTask().Result;
+			var props = Wait(s.TryGetMediaPropertiesAsync());
 			var info = s.GetPlaybackInfo();
 			var tl = s.GetTimelineProperties();
 			bool playing = info != null && info.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
@@ -152,6 +169,20 @@ namespace OazyMedia
 			if (!changed && now - LastSent < 3000) return;
 			LastSent = now;
 			if (Emit != null) Emit(json);
+		}
+
+		// Waits out a WinRT async call. (AsTask would need the Windows SDK's
+		// contract assembly, which plain Windows doesn't have.)
+		static T Wait<T>(IAsyncOperation<T> op)
+		{
+			int waited = 0;
+			while (op.Status == AsyncStatus.Started && waited < 5000)
+			{
+				Thread.Sleep(5);
+				waited += 5;
+			}
+			if (op.Status != AsyncStatus.Completed) throw new InvalidOperationException("media call " + op.Status);
+			return op.GetResults();
 		}
 
 		static string Str(string s)
