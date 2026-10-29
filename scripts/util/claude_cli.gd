@@ -102,9 +102,9 @@ func start() -> String:
 	return ""
 
 
-## Sends what you typed.
-func send_text(text: String) -> void:
-	_write({"type": "user", "message": {"role": "user", "content": text}, "parent_tool_use_id": null, "session_id": session if session != "" else "default"})
+## Sends what you typed: a string, or content blocks (text and images).
+func send_text(content: Variant) -> void:
+	_write({"type": "user", "message": {"role": "user", "content": content}, "parent_tool_use_id": null, "session_id": session if session != "" else "default"})
 
 
 ## Stops the reply that's running (claude stays up for the next message).

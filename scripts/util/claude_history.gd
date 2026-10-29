@@ -124,10 +124,34 @@ static func user_text(u: Dictionary) -> String:
 	var hidden := text.find(CONTEXT_TAG)
 	if hidden > 0:
 		text = text.left(hidden)
-	text = text.strip_edges()
+	text = str(ClaudeAttach.split(text)[0])
 	if text.begins_with("<") or text.begins_with("Caveat:") or text.begins_with("[Request interrupted"):
 		return ""
 	return text
+
+
+## The files and pictures you sent with a transcript's user line:
+## {files: PackedStringArray, images: Array[Image]}.
+static func user_attachments(u: Dictionary) -> Dictionary:
+	var out := {"files": PackedStringArray(), "images": [] as Array[Image]}
+	var msg: Variant = u.get("message")
+	if not msg is Dictionary:
+		return out
+	var c: Variant = msg.get("content")
+	var text := ""
+	if c is String:
+		text = c
+	elif c is Array:
+		out["images"] = ClaudeAttach.images_in(c)
+		for b in c:
+			if b is Dictionary and str(b.get("type", "")) == "text":
+				text = str(b.get("text", ""))
+				break
+	var hidden := text.find(CONTEXT_TAG)
+	if hidden >= 0:
+		text = text.left(hidden)
+	out["files"] = ClaudeAttach.split(text)[1]
+	return out
 
 
 ## A conversation's user and assistant lines (not its helpers'), the last

@@ -1432,6 +1432,33 @@ namespace OazyClaude
 						Reply(m, Json.Obj("path", picked ?? ""));
 					}
 					break;
+				case "pickFiles":
+					using (OpenFileDialog d = new OpenFileDialog { Title = "Add pictures or files", Filter = "All files|*.*|Pictures|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp", Multiselect = true, CheckFileExists = true })
+					{
+						string from = Json.Str(m, "from");
+						d.InitialDirectory = from != "" && Directory.Exists(from) ? from : App.Home();
+						string[] picked = d.ShowDialog(this) == DialogResult.OK ? d.FileNames : new string[0];
+						ReadAttachments(m, picked);
+					}
+					break;
+				case "dropFiles":
+					{
+						// Files dropped on the page: WebView2 hands them over with
+						// their paths (postMessageWithAdditionalObjects).
+						List<string> paths = new List<string>();
+						try
+						{
+							object extra = e.GetType().GetProperty("AdditionalObjects").GetValue(e, null);
+							foreach (object o in (System.Collections.IEnumerable)extra)
+							{
+								System.Reflection.PropertyInfo pp = o == null ? null : o.GetType().GetProperty("Path");
+								if (pp != null) paths.Add(Convert.ToString(pp.GetValue(o, null)));
+							}
+						}
+						catch { }
+						ReadAttachments(m, paths.ToArray());
+					}
+					break;
 				case "folderExists":
 					Reply(m, Json.Obj("ok", Json.Str(m, "path") != "" && Directory.Exists(Json.Str(m, "path"))));
 					break;
@@ -1521,6 +1548,88 @@ namespace OazyClaude
 				using (FolderBrowserDialog f = new FolderBrowserDialog { Description = "Choose a folder for Claude to work in", SelectedPath = from })
 					return f.ShowDialog(this) == DialogResult.OK ? f.SelectedPath : null;
 			}
+		}
+
+		// Pictures and files for the next message, read off the UI thread:
+		// pictures inline (shrunk for the API), anything else by its path, the
+		// same as the Start orb's assistant (scripts/util/claude_attach.gd).
+		void ReadAttachments(Dictionary<string, object> m, string[] paths)
+		{
+			ThreadPool.QueueUserWorkItem(delegate
+			{
+				List<object> list = new List<object>();
+				foreach (string p in paths)
+				{
+					if (string.IsNullOrEmpty(p)) continue;
+					try { list.Add(Attachment(p)); } catch { }
+				}
+				App.Sync.Post(delegate { Reply(m, Json.Obj("files", list.ToArray())); }, null);
+			});
+		}
+
+		const int MaxSide = 1568, MaxRaw = 3500000;
+
+		static Dictionary<string, object> Attachment(string path)
+		{
+			string name = Path.GetFileName(path.TrimEnd('\\'));
+			if (Directory.Exists(path)) return Json.Obj("kind", "file", "name", name, "path", path, "folder", true);
+			string ext = Path.GetExtension(path).ToLowerInvariant();
+			string type = ext == ".png" ? "image/png" : ext == ".jpg" || ext == ".jpeg" ? "image/jpeg" : ext == ".webp" ? "image/webp" : ext == ".gif" ? "image/gif" : ext == ".bmp" ? "image/bmp" : "";
+			if (type != "" && new FileInfo(path).Length < 60000000)
+			{
+				byte[] bytes = File.ReadAllBytes(path);
+				int w = 0, h = 0;
+				bool alpha = false;
+				Image img = null;
+				try
+				{
+					img = Image.FromStream(new MemoryStream(bytes));
+					w = img.Width; h = img.Height;
+					alpha = Image.IsAlphaPixelFormat(img.PixelFormat);
+				}
+				catch { }
+				// Small enough and a kind the API takes: as it is. (WebP has no
+				// decoder in GDI+; it's sent as it is if it's small.)
+				if (type != "image/bmp" && bytes.Length <= MaxRaw && (img == null ? type == "image/webp" : Math.Max(w, h) <= MaxSide))
+				{
+					if (img != null) img.Dispose();
+					return Json.Obj("kind", "image", "name", name, "path", path, "type", type, "data", Convert.ToBase64String(bytes));
+				}
+				if (img != null)
+				{
+					using (img)
+					{
+						double k = Math.Min(1.0, (double)MaxSide / Math.Max(w, h));
+						int nw = Math.Max(1, (int)Math.Round(w * k)), nh = Math.Max(1, (int)Math.Round(h * k));
+						using (Bitmap b = new Bitmap(nw, nh, alpha ? System.Drawing.Imaging.PixelFormat.Format32bppArgb : System.Drawing.Imaging.PixelFormat.Format24bppRgb))
+						{
+							using (Graphics g = Graphics.FromImage(b))
+							{
+								g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+								g.DrawImage(img, 0, 0, nw, nh);
+							}
+							using (MemoryStream ms = new MemoryStream())
+							{
+								string outType = "image/png";
+								if (alpha) b.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+								if (!alpha || ms.Length > MaxRaw)
+								{
+									ms.SetLength(0);
+									System.Drawing.Imaging.ImageCodecInfo jpg = null;
+									foreach (System.Drawing.Imaging.ImageCodecInfo c in System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders())
+										if (c.MimeType == "image/jpeg") jpg = c;
+									System.Drawing.Imaging.EncoderParameters q = new System.Drawing.Imaging.EncoderParameters(1);
+									q.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 88L);
+									b.Save(ms, jpg, q);
+									outType = "image/jpeg";
+								}
+								return Json.Obj("kind", "image", "name", name, "path", path, "type", outType, "data", Convert.ToBase64String(ms.ToArray()));
+							}
+						}
+					}
+				}
+			}
+			return Json.Obj("kind", "file", "name", name, "path", path);
 		}
 
 		// The whole session in a terminal: Oazy Terminal when Oazy handed us one,
