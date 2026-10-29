@@ -22,6 +22,9 @@ var step_s := 3600
 var empty_text := "Loading chart…"
 ## [{px, text, color}] drawn as quiet lines with a label, when in view.
 var marks: Array = []
+## When above 0, every row is shown from the left edge, with room kept for
+## this many candles (the Today view fills toward the close).
+var session_slots := 0
 
 var _hover := Vector2(-1, -1)
 
@@ -54,6 +57,8 @@ func _font(weight: int = 500) -> Font:
 ## How many candles fit, and how wide each slot is.
 func _fit(plot_w: float) -> Array:
 	var n := rows.size()
+	if session_slots > 0:
+		return [n, plot_w / maxf(n, session_slots)]
 	var slot := clampf(plot_w / 110.0, 6.0, 18.0)
 	var count := mini(n, floori(plot_w / slot))
 	if count > 0 and count == n:
@@ -71,7 +76,7 @@ func _draw() -> void:
 	var count: int = fit[0]
 	var slot: float = fit[1]
 	var first := rows.size() - count
-	var x0 := plot.end.x - count * slot
+	var x0 := plot.position.x if session_slots > 0 else plot.end.x - count * slot
 	var lo := INF
 	var hi := -INF
 	var vmax := 0.0
