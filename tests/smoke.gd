@@ -481,6 +481,8 @@ func _logic_tests() -> void:
 		and Hyperliquid.session_open(ut.call(2026, 10, 31, 12)) == ut.call(2026, 10, 30, 13, 30)
 		and Hyperliquid.session_open(ut.call(2026, 11, 2, 14)) == ut.call(2026, 10, 30, 13, 30)
 		and Hyperliquid.session_open(ut.call(2026, 11, 2, 15)) == ut.call(2026, 11, 2, 14, 30), "hyperliquid: today starts at the 9:30 New York open")
+	check(Hyperliquid.session_close_before(ut.call(2026, 10, 29, 13, 30)) == ut.call(2026, 10, 28, 20)
+		and Hyperliquid.session_close_before(ut.call(2026, 11, 2, 14, 30)) == ut.call(2026, 10, 30, 20), "hyperliquid: last trading day's 4pm close")
 	check(Hyperliquid.has_session("xyz:TSLA") and not Hyperliquid.has_session("BTC"), "hyperliquid: Today only for stocks and ETFs")
 	var ico := CoinIcons.decode('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#f7931a"/></svg>'.to_utf8_buffer(), true)
 	check(ico != null and ico.get_width() == CoinIcons.SIZE and ico.get_pixel(CoinIcons.SIZE / 2, CoinIcons.SIZE / 2).a > 0.9 and ico.get_pixel(1, 1).a < 0.05

@@ -640,6 +640,7 @@ func _update_market() -> void:
 	var dec := hl.sz_decimals(c)
 	var step := int(Hyperliquid.INTERVALS[Hyperliquid.interval()])
 	_chart.session_slots = 0
+	_chart.ref_px = hl.prev_close if Hyperliquid.view() == Hyperliquid.TODAY else 0.0
 	if Hyperliquid.view() == Hyperliquid.TODAY:
 		# Room up to the 4pm close, or for everything since the open if longer.
 		var since := int(Time.get_unix_time_from_system()) - Hyperliquid.session_open(int(Time.get_unix_time_from_system()))
