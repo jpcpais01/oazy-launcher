@@ -27,6 +27,8 @@ const DIM_SCALE := 0.97
 const SPRING := 10.5
 ## Wheel notch inside the second screen, once it's taller than one.
 const STEP := 120.0
+## After a wheel notch pages, further notches wait at least this long (ms).
+const HOLD_MS := 420
 const CLOCK := preload("res://shaders/clock.gdshader")
 const SHADE := preload("res://shaders/hero_shade.gdshader")
 
@@ -46,6 +48,10 @@ var _goal := 0.0
 var _vel := 0.0
 var _pan_timer: Timer
 var _pan_dir := 0.0
+## One gesture, one page: page jumps are held off until this time (ticks ms),
+## and a touchpad swipe can't run past the page next to where it started.
+var _hold_until := 0
+var _pan_from := -1
 var _greeting: Label
 var _time: Label
 var _date: Label
@@ -897,7 +903,12 @@ func _input(event: InputEvent) -> void:
 		if absf(d) < 0.01:
 			return
 		_pan_dir = signf(d)
-		_goal = clampf(_goal + d, 0.0, max_scroll())
+		var pages := _pages()
+		if _pan_from < 0:
+			_pan_from = _page_at(_scroll)
+		var lo := float(pages[maxi(_pan_from - 1, 0)][0])
+		var hi := float(pages[mini(_pan_from + 1, pages.size() - 1)][1])
+		_goal = clampf(_goal + d, maxf(lo, 0.0), minf(hi, max_scroll()))
 		_sync_active()
 		set_process(true)
 		_pan_timer.start()
@@ -911,10 +922,13 @@ func _wheel(dir: float, factor: float) -> void:
 	var i := _page_at(_goal)
 	var start := float(pages[i][0])
 	var last := float(pages[i][1])
+	var was := _goal
 	if dir > 0.0:
 		if _goal >= start - 1.0 and _goal < last - 1.0:
 			_goal = minf(_goal + STEP * factor, last)
 		elif i + 1 < pages.size():
+			if _holding():
+				return
 			_goal = float(pages[i + 1][0])
 	else:
 		if _goal > last + 1.0:
@@ -922,15 +936,29 @@ func _wheel(dir: float, factor: float) -> void:
 		elif _goal > start + 1.0:
 			_goal = maxf(_goal - STEP * factor, start)
 		elif i > 0:
+			if _holding():
+				return
 			_goal = float(pages[i - 1][1])
 		else:
 			_goal = 0.0
+	if absf(_goal - was) > size.y * 0.5:
+		# A whole page: the rest of this flick (and a free-spinning wheel's
+		# tail) is swallowed until the glide has mostly landed.
+		_hold_until = Time.get_ticks_msec() + HOLD_MS
 	_sync_active()
 	set_process(true)
 
 
+## Still landing from the last page jump: the wheel waits.
+func _holding() -> bool:
+	if Time.get_ticks_msec() < _hold_until:
+		return true
+	return absf(_scroll - _goal) > size.y * 0.12
+
+
 ## A touchpad let go between two screens: finish the trip it started.
 func _settle() -> void:
+	_pan_from = -1
 	var pages := _pages()
 	var i := _page_at(_goal)
 	var last := float(pages[i][1])

@@ -1,9 +1,11 @@
 class_name DesktopTrade
 extends Control
 ## The desktop's third screen, two scrolls down: a trading desk on Hyperliquid.
-## A row of the coins you follow, then the chart, the order book and the latest
-## trades for the one you picked, and your open positions with their P&L along
-## the bottom. View-only for now (see HlExchange).
+## A row of the markets you follow (crypto, and the stocks and indices on its
+## builder exchanges), then a big chart of the one you picked with your
+## positions and orders under it, the order book, and the order ticket over
+## the latest trades. Orders go through HlExchange, behind an Armed switch
+## and a confirm step.
 ##
 ## Prices and positions keep updating in the background, so they're current
 ## the moment you arrive; the book, trades and live candles only stream while
@@ -23,10 +25,12 @@ const COIN_COLORS := {
 	"DOGE": "d8b44a", "BNB": "f0b90b", "AVAX": "e84142", "LINK": "4f7bf0", "SUI": "6fbcf0",
 }
 ## Column widths in the positions table (stretch ratios), and their names.
-const POS_COLS := [["Coin", 1.5], ["Size", 1.15], ["Value", 1.0], ["Entry", 0.9], ["Price", 0.9], ["Liq. price", 0.9], ["Margin", 0.85], ["P&L (ROE)", 1.25]]
+const POS_COLS := [["Market", 1.5], ["Size", 1.15], ["Entry", 0.9], ["Price", 0.9], ["Liq. price", 0.9], ["Margin", 0.85], ["P&L (ROE)", 1.7]]
+const ORDER_COLS := [["Market", 1.5], ["Side", 0.8], ["Price", 1.0], ["Size", 1.1], ["Filled", 0.8], ["Type", 0.9], ["Placed", 0.9]]
 
 var main: Node
 var hl: Hyperliquid
+var ex: HlExchange
 ## The height this screen wants (it may be taller than one screen).
 var wanted_height := 0.0
 
@@ -57,6 +61,12 @@ var _book_panel: GlassPanel
 var _book: OrderBookView
 var _trades_panel: GlassPanel
 var _tape: TradeTape
+var _ticket_panel: GlassPanel
+var _ticket: TradeTicket
+var _approval_in := 0.0
+var _pos_tab := "positions"
+var _tab_pos: Button
+var _tab_orders: Button
 
 var _pos_panel: GlassPanel
 var _pos_count: Label
@@ -68,6 +78,7 @@ var _pos_rows: VBoxContainer
 var _pos_more: Label
 var _pos_sig := ""
 var _pos_live := []
+var _mode: Label
 var _addr_box: VBoxContainer
 var _addr_edit: LineEdit
 var _addr_note: Label
@@ -78,9 +89,12 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hl = Hyperliquid.new()
 	add_child(hl)
+	ex = HlExchange.new(hl)
+	add_child(ex)
 	_build_strip()
 	_build_chart()
 	_build_book()
+	_build_ticket()
 	_build_trades()
 	_build_positions()
 
@@ -94,6 +108,13 @@ func _ready() -> void:
 	hl.market_changed.connect(func() -> void: _dirty["market"] = true)
 	hl.account_changed.connect(func() -> void: _dirty["account"] = true)
 	hl.status_changed.connect(func() -> void: _dirty["prices"] = true)
+	ex.changed.connect(func() -> void:
+		_sync_mode()
+		_pos_sig = "-"
+		_dirty["account"] = true
+		if _active:
+			_flush.call_deferred()
+	)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		match key:
 			"hl_coins", "hl_coin":
@@ -121,8 +142,11 @@ func set_active(on: bool) -> void:
 	hl.set_focus(on)
 	if on:
 		_timer.start()
+		_approval_in = 0.0
 		_flush()
 	else:
+		# Leaving the desk always makes it safe again.
+		ex.disarm()
 		_timer.stop()
 		if _coins_box.visible:
 			_close_coins_edit()
@@ -140,6 +164,7 @@ func _flush() -> void:
 		_update_tickers()
 		_update_header()
 		_update_live_pnl()
+		_ticket.refresh_quote()
 	if _dirty.get("market", false) or _dirty.get("coins", false):
 		_update_market()
 	if _dirty.get("account", false):
@@ -148,6 +173,12 @@ func _flush() -> void:
 	_dirty.clear()
 	if relayout:
 		_layout()
+	# Until the trading key is approved, look for the approval now and then.
+	_approval_in -= _timer.wait_time
+	if _approval_in <= 0.0:
+		_approval_in = 6.0
+		if ex.agent != "" and not ex.approved:
+			ex.check_approval()
 
 
 # --- Shared pieces ------------------------------------------------------------------------------
@@ -172,14 +203,15 @@ static func _pct(v: float) -> String:
 
 ## A round coin badge: the coin's colour with its first letter.
 static func coin_badge(c: String, px: float) -> Control:
-	var col := Color(COIN_COLORS[c]) if COIN_COLORS.has(c) else Kit.cover_colors(c)[0].lightened(0.15)
+	var short := Hyperliquid.display(c)
+	var col := Color(COIN_COLORS[short]) if COIN_COLORS.has(short) else Kit.cover_colors(short)[0].lightened(0.15)
 	var dot := Panel.new()
 	dot.custom_minimum_size = Vector2(px, px)
 	dot.size = Vector2(px, px)
 	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dot.add_theme_stylebox_override("panel", Kit.box(Color(col, 0.95), int(px)))
-	var letter := c.trim_prefix("k").substr(0, 1).to_upper()
+	var letter := Hyperliquid.display(c).trim_prefix("k").substr(0, 1).to_upper()
 	var l := Kit.label(letter, int(px * 0.46), 700, Color(0.04, 0.06, 0.08) if col.get_luminance() > 0.55 else Color.WHITE)
 	l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -226,10 +258,10 @@ func _build_strip() -> void:
 	_status = Kit.label("", 13, 600, App.TEXT_DIM)
 	_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_strip_side.add_child(_status)
-	var view := _quiet("·  View only", 13)
-	view.tooltip_text = "Prices and your positions, straight from Hyperliquid. Trading comes later."
-	view.mouse_filter = Control.MOUSE_FILTER_PASS
-	_strip_side.add_child(view)
+	_mode = _quiet("", 13)
+	_mode.mouse_filter = Control.MOUSE_FILTER_PASS
+	_strip_side.add_child(_mode)
+	_sync_mode()
 	_coins_btn = FxButton.icon_only("edit", "Choose your coins", 14, 30)
 	_coins_btn.variant = FxButton.Style.PLAIN
 	_coins_btn._apply_style()
@@ -303,7 +335,7 @@ func _ticker(c: String) -> Control:
 	card.set_shadow_strength(0.16, 20, 8.0)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	card.tooltip_text = "%s perpetual" % c
+	card.tooltip_text = "%s perpetual" % Hyperliquid.display(c) + (" on %s" % Hyperliquid.dex_of(c) if Hyperliquid.dex_of(c) != "" else "")
 	var wash := Panel.new()
 	wash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -324,10 +356,12 @@ func _ticker(c: String) -> Control:
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(top)
 	top.add_child(coin_badge(c, 24))
-	var name := Kit.label(c, 15, 700, App.TEXT if on else App.TEXT_DIM)
+	var name := Kit.label(Hyperliquid.display(c), 15, 700, App.TEXT if on else App.TEXT_DIM)
+	name.clip_text = true
+	name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(name)
-	top.add_child(Kit.spacer(0, 0, true))
 	var price := DesktopBelow._num("—", 16, 600, App.TEXT)
 	price.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(price)
@@ -465,12 +499,14 @@ func _sync_intervals() -> void:
 
 func _update_header() -> void:
 	var c := Hyperliquid.coin()
-	if _coin_name.text != c:
-		_coin_name.text = c
+	if _coin_name.get_meta("coin", "") != c:
+		_coin_name.set_meta("coin", c)
+		_coin_name.text = Hyperliquid.display(c)
 		DesktopBelow._clear(_badge)
 		_badge.add_child(coin_badge(c, 36))
 	var lev := int((hl.meta.get(c, {}) as Dictionary).get("lev", 0))
-	_coin_sub.text = "%s-USD perpetual" % c + ("  ·  up to %d×" % lev if lev > 0 else "")
+	var dex := Hyperliquid.dex_of(c)
+	_coin_sub.text = ("%s-USD perpetual" % c if dex == "" else "Perpetual on %s" % dex) + ("  ·  up to %d×" % lev if lev > 0 else "")
 	var p := hl.price(c)
 	_big_price.text = Hyperliquid.fmt_px(p) if p > 0.0 else "—"
 	var ch := hl.change_pct(c)
@@ -522,6 +558,19 @@ func _build_trades() -> void:
 	(parts[1] as VBoxContainer).add_child(_tape)
 
 
+func _build_ticket() -> void:
+	var parts := _panel()
+	_ticket_panel = parts[0]
+	var col: VBoxContainer = parts[1]
+	(parts[2] as Control).get_parent().remove_child(parts[2])
+	(parts[2] as Control).queue_free()
+	_ticket = TradeTicket.new()
+	_ticket.setup(hl, ex, main)
+	_ticket.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(_ticket)
+	_ticket.minimum_size_changed.connect(_layout.call_deferred)
+
+
 static func _panel_title(text: String) -> Label:
 	var l := Kit.label(text, 16, 700, App.TEXT, true)
 	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -533,8 +582,8 @@ func _update_market() -> void:
 	var dec := hl.sz_decimals(c)
 	_chart.set_rows(hl.candles, int(Hyperliquid.INTERVALS[Hyperliquid.interval()]))
 	_book.last_dir = 0 if hl.trades.is_empty() else (1 if str(hl.trades[0]["side"]) == "B" else -1)
-	_book.set_book(hl.book, dec, c)
-	_tape.set_trades(hl.trades, dec, c)
+	_book.set_book(hl.book, dec, Hyperliquid.display(c))
+	_tape.set_trades(hl.trades, dec, Hyperliquid.display(c))
 	_update_header()
 
 
@@ -546,8 +595,17 @@ func _build_positions() -> void:
 	var col: VBoxContainer = parts[1]
 	var head: HBoxContainer = parts[2]
 	head.custom_minimum_size.y = 40
-	head.add_child(_panel_title("Positions"))
+	head.add_theme_constant_override("separation", 4)
+	_tab_pos = _tab("Positions")
+	_tab_orders = _tab("Orders")
+	for t in [_tab_pos, _tab_orders]:
+		t.add_theme_font_size_override("font_size", 15)
+		t.add_theme_font_override("font", Kit.font(700, true))
+		head.add_child(t)
+	_tab_pos.pressed.connect(func() -> void: _show_tab("positions"))
+	_tab_orders.pressed.connect(func() -> void: _show_tab("orders"))
 	_pos_count = _quiet("")
+	_pos_count.visible = false
 	head.add_child(_pos_count)
 	head.add_child(Kit.spacer(0, 0, true))
 	_summary = Kit.hbox(30)
@@ -592,6 +650,16 @@ func _build_positions() -> void:
 	_pos_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(_pos_body)
 	_build_address_box()
+
+
+func _show_tab(id: String) -> void:
+	if id == _pos_tab:
+		return
+	Sfx.play(&"move", 1.1)
+	_pos_tab = id
+	_pos_sig = "-"
+	_fill_positions()
+	_layout()
 
 
 func _build_address_box() -> void:
@@ -668,8 +736,16 @@ func _fill_positions() -> void:
 	_addr_btn.visible = not asking
 	_addr_btn.text = Hyperliquid.short_address(addr)
 	var positions: Array = acct.get("positions", [])
-	_pos_count.text = str(positions.size()) if not asking and positions.size() > 0 else ""
+	var orders := hl.orders
+	_tab_pos.text = "Positions" + ("  %d" % positions.size() if not asking and positions.size() > 0 else "")
+	_tab_orders.text = "Orders" + ("  %d" % orders.size() if not asking and orders.size() > 0 else "")
+	_tab_orders.visible = not asking
+	_tab_style(_tab_pos, _pos_tab == "positions" or asking)
+	_tab_style(_tab_orders, _pos_tab == "orders" and not asking)
 	var sig := "ask" if asking else ("wait" if acct.is_empty() else ",".join(positions.map(func(p: Dictionary) -> String: return "%s:%s" % [p["coin"], p["szi"]])))
+	if not asking and _pos_tab == "orders":
+		sig = "orders:" + ",".join(orders.map(func(o: Dictionary) -> String: return "%d:%s" % [o["oid"], o["sz"]]))
+	sig += ":armed" if ex.armed else ""
 	if sig != _pos_sig:
 		_pos_sig = sig
 		if _addr_box.get_parent():
@@ -681,6 +757,11 @@ func _fill_positions() -> void:
 			_pos_body.add_child(_addr_box)
 			_addr_edit.text = addr
 			_addr_note.text = ""
+		elif _pos_tab == "orders":
+			if orders.is_empty():
+				_pos_body.add_child(_centered("No open orders."))
+			else:
+				_build_orders(orders)
 		elif acct.is_empty():
 			_pos_body.add_child(_centered("Looking up %s…" % Hyperliquid.short_address(addr)))
 		elif positions.is_empty():
@@ -698,12 +779,12 @@ func _centered(text: String) -> Label:
 	return l
 
 
-func _cells(parent: HBoxContainer) -> Array:
+func _cells(parent: HBoxContainer, cols: Array = POS_COLS) -> Array:
 	var out := []
-	for i in POS_COLS.size():
+	for i in cols.size():
 		var l := DesktopBelow._num("", 14, 500, App.TEXT_DIM)
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		l.size_flags_stretch_ratio = POS_COLS[i][1]
+		l.size_flags_stretch_ratio = cols[i][1]
 		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if i == 0 else HORIZONTAL_ALIGNMENT_RIGHT
 		l.clip_text = true
@@ -723,6 +804,10 @@ func _build_table(positions: Array) -> void:
 	head_m.add_child(head)
 	_pos_body.add_child(head_m)
 	var hc := _cells(head)
+	if ex.armed:
+		# Room for the Close buttons; margin is still in the summary above.
+		(hc[5] as Label).visible = false
+		head.add_child(Kit.spacer(72, 0))
 	for i in hc.size():
 		(hc[i] as Label).text = POS_COLS[i][0]
 		(hc[i] as Label).add_theme_font_size_override("font_size", 11)
@@ -744,13 +829,17 @@ func _build_table(positions: Array) -> void:
 	_pos_more.custom_minimum_size.y = 22
 	_pos_rows.add_child(_pos_more)
 	_fit_rows()
+	_fit_rows.call_deferred()
 
 
 ## Shows the biggest positions that fit, and says how many more there are.
 func _fit_rows() -> void:
 	if _pos_rows == null or not is_instance_valid(_pos_rows):
 		return
-	var room := _pos_panel.size.y - 18.0 - 16.0 - 40.0 - 12.0 - 26.0
+	# From where the rows actually start down to the panel's inner edge.
+	var room := _pos_panel.get_global_rect().end.y - _pos_rows.get_global_rect().position.y - 20.0
+	if _pos_rows.get_global_rect().position.y <= _pos_panel.get_global_rect().position.y:
+		room = _pos_panel.size.y - 190.0
 	var total := (_pos_rows.get_child_count() - 1) / 2
 	var fit := clampi(floori(room / (ROW_H + 1.0)), 1, total)
 	if fit < total:
@@ -759,7 +848,7 @@ func _fit_rows() -> void:
 		_pos_rows.get_child(i * 2).visible = i < fit
 		_pos_rows.get_child(i * 2 + 1).visible = i < fit
 	_pos_more.visible = fit < total
-	_pos_more.text = "+%d smaller position%s" % [total - fit, "" if total - fit == 1 else "s"]
+	_pos_more.text = ("+%d more order%s" if _pos_tab == "orders" else "+%d smaller position%s") % [total - fit, "" if total - fit == 1 else "s"]
 
 
 func _position_row(p: Dictionary) -> Control:
@@ -803,7 +892,7 @@ func _position_row(p: Dictionary) -> Control:
 	row.move_child(coin_box, 0)
 	first.queue_free()
 	coin_box.add_child(coin_badge(c, 26))
-	var nm := Kit.label(c, 15, 700, App.TEXT)
+	var nm := Kit.label(Hyperliquid.display(c), 15, 700, App.TEXT)
 	nm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	coin_box.add_child(nm)
 	var tone := UP if long else DOWN
@@ -814,15 +903,141 @@ func _position_row(p: Dictionary) -> Control:
 	chip.mouse_filter = Control.MOUSE_FILTER_PASS
 	coin_box.add_child(chip)
 	var dec := hl.sz_decimals(c)
-	(cells[1] as Label).text = Hyperliquid.fmt_sz(absf(float(p["szi"])), dec) + " " + c
+	(cells[1] as Label).text = Hyperliquid.fmt_sz(absf(float(p["szi"])), dec) + " " + Hyperliquid.display(c)
 	(cells[1] as Label).add_theme_color_override("font_color", App.TEXT)
-	(cells[3] as Label).text = Hyperliquid.fmt_px(float(p["entry"]))
-	(cells[5] as Label).text = Hyperliquid.fmt_px(float(p["liq"])) if float(p["liq"]) > 0.0 else "—"
-	(cells[5] as Label).add_theme_color_override("font_color", Color(DOWN, 0.8) if float(p["liq"]) > 0.0 else App.TEXT_MUTE)
-	(cells[6] as Label).text = Hyperliquid.fmt_usd(float(p["margin"]))
-	(cells[7] as Label).add_theme_font_override("font", DesktopBelow._num_font(600))
-	_pos_live.append({"p": p, "value": cells[2], "price": cells[4], "pnl": cells[7]})
+	(cells[1] as Label).tooltip_text = "Worth " + Hyperliquid.fmt_usd(float(p["value"]))
+	(cells[1] as Label).mouse_filter = Control.MOUSE_FILTER_PASS
+	(cells[2] as Label).text = Hyperliquid.fmt_px(float(p["entry"]))
+	(cells[4] as Label).text = Hyperliquid.fmt_px(float(p["liq"])) if float(p["liq"]) > 0.0 else "—"
+	(cells[4] as Label).add_theme_color_override("font_color", Color(DOWN, 0.8) if float(p["liq"]) > 0.0 else App.TEXT_MUTE)
+	(cells[5] as Label).text = Hyperliquid.fmt_usd(float(p["margin"]))
+	(cells[6] as Label).add_theme_font_override("font", DesktopBelow._num_font(600))
+	_pos_live.append({"p": p, "price": cells[3], "pnl": cells[6]})
+	if ex.armed:
+		(cells[5] as Label).visible = false
+		var close := _small_button("Close", DOWN)
+		close.tooltip_text = "Close the whole position at market"
+		close.pressed.connect(func() -> void: _confirm_close(p))
+		row.add_child(close)
 	return b
+
+
+func _small_button(text: String, tone: Color) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.custom_minimum_size = Vector2(72, 30)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.add_theme_font_override("font", Kit.font(700))
+	b.add_theme_font_size_override("font_size", 12)
+	b.add_theme_color_override("font_color", tone)
+	b.add_theme_color_override("font_hover_color", tone.lightened(0.2))
+	b.add_theme_stylebox_override("normal", Kit.box(Color(tone, 0.1), 10, Color(tone, 0.25), 1))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(tone, 0.18), 10, Color(tone, 0.35), 1))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(tone, 0.24), 10, Color(tone, 0.35), 1))
+	return b
+
+
+func _confirm_close(p: Dictionary) -> void:
+	if main == null or not ex.armed:
+		return
+	var c := str(p["coin"])
+	var name := Hyperliquid.display(c)
+	var long := float(p["szi"]) > 0.0
+	var size := absf(float(p["szi"]))
+	var dec := hl.sz_decimals(c)
+	var pnl := hl.live_pnl(p)
+	var d := OrderConfirm.new()
+	d.title = "Close your %s %s?" % [name, "long" if long else "short"]
+	d.message = "A real market order on Hyperliquid. It's reduce-only, so it can only close this position, never flip it."
+	d.tone = DOWN if long else UP
+	d.rows = [
+		["Order", "%s %s %s at market" % ["Sell" if long else "Buy", Hyperliquid.fmt_sz(size, dec), name]],
+		["Value now", Hyperliquid.fmt_usd(size * hl.price(c))],
+		["P&L (estimate)", Hyperliquid.fmt_usd(pnl, true), _tone(pnl)],
+		["Fee (estimate)", Hyperliquid.fmt_usd(size * hl.price(c) * HlExchange.TAKER_FEE)],
+	]
+	d.confirm_text = "Close %s" % name
+	d.on_confirm = func() -> void:
+		var r := await ex.close_position(p)
+		TradeTicket.report(r, "Closed with", name, dec)
+	main.overlay_layer.add_child(d)
+
+
+func _build_orders(orders: Array) -> void:
+	var head := Kit.hbox(16)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.custom_minimum_size.y = 26
+	var head_m := MarginContainer.new()
+	head_m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right"]:
+		head_m.add_theme_constant_override("margin_" + side, 10)
+	head_m.add_child(head)
+	_pos_body.add_child(head_m)
+	var hc := _cells(head, ORDER_COLS)
+	if ex.armed:
+		head.add_child(Kit.spacer(72, 0))
+	for i in hc.size():
+		(hc[i] as Label).text = ORDER_COLS[i][0]
+		(hc[i] as Label).add_theme_font_size_override("font_size", 11)
+		(hc[i] as Label).add_theme_font_override("font", DesktopBelow._num_font(600))
+		(hc[i] as Label).add_theme_color_override("font_color", App.TEXT_MUTE)
+	_pos_rows = Kit.vbox(0)
+	_pos_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pos_rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pos_body.add_child(_pos_rows)
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	for o in orders:
+		var line := ColorRect.new()
+		line.color = Color(1, 1, 1, 0.055)
+		line.custom_minimum_size.y = 1
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_pos_rows.add_child(line)
+		var c := str(o["coin"])
+		var dec := hl.sz_decimals(c)
+		var row_m := MarginContainer.new()
+		row_m.custom_minimum_size.y = ROW_H
+		row_m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		for side in ["left", "right"]:
+			row_m.add_theme_constant_override("margin_" + side, 10)
+		_pos_rows.add_child(row_m)
+		var row := Kit.hbox(16)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row_m.add_child(row)
+		var cells := _cells(row, ORDER_COLS)
+		var tone := UP if o["buy"] else DOWN
+		(cells[0] as Label).text = Hyperliquid.display(c)
+		(cells[0] as Label).add_theme_color_override("font_color", App.TEXT)
+		(cells[0] as Label).add_theme_font_override("font", Kit.font(700))
+		(cells[1] as Label).text = ("Buy" if o["buy"] else "Sell") + (" · reduce" if o["reduce"] else "")
+		(cells[1] as Label).add_theme_color_override("font_color", tone)
+		(cells[2] as Label).text = Hyperliquid.fmt_px(float(o["px"]))
+		(cells[2] as Label).add_theme_color_override("font_color", App.TEXT)
+		(cells[3] as Label).text = Hyperliquid.fmt_sz(float(o["sz"]), dec) + " " + Hyperliquid.display(c)
+		var filled := float(o["orig"]) - float(o["sz"])
+		(cells[4] as Label).text = Hyperliquid.fmt_sz(filled, dec) if filled > 0.0 else "—"
+		(cells[5] as Label).text = str(o["kind"])
+		var t := Time.get_datetime_dict_from_unix_time(int(o["time"]) / 1000 + bias)
+		(cells[6] as Label).text = "%02d:%02d" % [int(t["hour"]), int(t["minute"])]
+		if ex.armed:
+			var cancel := _small_button("Cancel", App.TEXT_DIM)
+			cancel.pressed.connect(func() -> void:
+				cancel.disabled = true
+				var r := await ex.cancel(c, int(o["oid"]))
+				if r.get("ok", false):
+					App.toast("Order cancelled", &"success")
+				else:
+					cancel.disabled = false
+					App.toast("Couldn't cancel: " + str(r.get("error", "")), &"error")
+			)
+			row.add_child(cancel)
+	_pos_more = _quiet("", 12)
+	_pos_more.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pos_more.custom_minimum_size.y = 22
+	_pos_rows.add_child(_pos_more)
+	_fit_rows()
+	_fit_rows.call_deferred()
 
 
 ## Marks every position, and the account, at the live price.
@@ -838,7 +1053,6 @@ func _update_live_pnl() -> void:
 		var c := str(p["coin"])
 		var px := hl.price(c)
 		var pnl := hl.live_pnl(p)
-		(r["value"] as Label).text = Hyperliquid.fmt_usd(absf(float(p["szi"])) * px)
 		(r["price"] as Label).text = Hyperliquid.fmt_px(px)
 		var margin := float(p["margin"])
 		var pl: Label = r["pnl"]
@@ -889,28 +1103,48 @@ func _layout() -> void:
 	_coins_box.position = Vector2(left, top + (STRIP_H - 42.0) * 0.5)
 	_coins_box.size = Vector2(inner, 42.0)
 
-	# Chart, book and trades side by side; positions underneath.
+	# The chart leads: wide and tall, with your positions under it. The book
+	# runs the full height beside it, then the ticket over the latest trades.
 	var y := top + STRIP_H + GAP
-	var pos_h := clampf(roundf(h * 0.25), 236.0, 330.0)
-	var main_h := maxf(400.0, h - y - GAP - pos_h - 34.0)
-	var book_w := clampf(roundf(inner * 0.165), 300.0, 400.0)
-	var trades_w := clampf(roundf(inner * 0.135), 260.0, 330.0)
-	var chart_w := inner - book_w - trades_w - GAP * 2.0
+	var full_h := maxf(600.0, h - y - 34.0)
+	var pos_h := clampf(roundf(h * 0.25), 262.0, 320.0)
+	var main_h := full_h - GAP - pos_h
+	var book_w := clampf(roundf(inner * 0.15), 290.0, 370.0)
+	var col_w := clampf(roundf(inner * 0.15), 300.0, 370.0)
+	var chart_w := inner - book_w - col_w - GAP * 2.0
 	_chart_panel.position = Vector2(left, y)
 	_chart_panel.size = Vector2(chart_w, main_h)
-	_book_panel.position = Vector2(left + chart_w + GAP, y)
-	_book_panel.size = Vector2(book_w, main_h)
-	_trades_panel.position = Vector2(left + chart_w + book_w + GAP * 2.0, y)
-	_trades_panel.size = Vector2(trades_w, main_h)
 	_pos_panel.position = Vector2(left, y + main_h + GAP)
-	_pos_panel.size = Vector2(inner, pos_h)
+	_pos_panel.size = Vector2(chart_w, pos_h)
+	_book_panel.position = Vector2(left + chart_w + GAP, y)
+	_book_panel.size = Vector2(book_w, full_h)
+	var ticket_h := clampf(maxf(_ticket.get_combined_minimum_size().y + 36.0, _ticket_panel.get_combined_minimum_size().y), 300.0, full_h - GAP - 170.0)
+	_ticket_panel.position = Vector2(left + chart_w + book_w + GAP * 2.0, y)
+	_ticket_panel.size = Vector2(col_w, ticket_h)
+	_trades_panel.position = Vector2(_ticket_panel.position.x, y + ticket_h + GAP)
+	_trades_panel.size = Vector2(col_w, full_h - ticket_h - GAP)
 	_fit_rows()
-	wanted_height = y + main_h + GAP + pos_h + 34.0
+	wanted_height = y + full_h + 34.0
+
+
+## View only, ready, or armed: always in sight beside the feed's status.
+func _sync_mode() -> void:
+	if _mode == null:
+		return
+	if ex.armed:
+		_mode.text = "·  Trading armed"
+		_mode.add_theme_color_override("font_color", TradeTicket.ARMED)
+		_mode.tooltip_text = "Orders go to Hyperliquid with real money. Switch off in the Trade panel."
+	else:
+		_mode.text = "·  " + ("Trading off" if ex.ready_to_trade() else "View only")
+		_mode.add_theme_color_override("font_color", App.TEXT_MUTE)
+		_mode.tooltip_text = "Arm trading in the Trade panel when you want to place orders." if ex.ready_to_trade() else "Prices and your positions, straight from Hyperliquid."
+	_layout.call_deferred()
 
 
 ## The panels and cards that make up this screen, for fades.
 func parts() -> Array[Control]:
-	var out: Array[Control] = [_chart_panel, _book_panel, _trades_panel, _pos_panel]
+	var out: Array[Control] = [_chart_panel, _book_panel, _ticket_panel, _trades_panel, _pos_panel]
 	for c in _strip.get_children():
 		out.append(c as Control)
 	return out
