@@ -21,6 +21,8 @@ const WS_URL := "wss://api.hyperliquid.xyz/ws"
 const INTERVALS := {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 ## The chart view for stocks and ETFs: from the open of the US trading day.
 const TODAY := "today"
+## The chart view from January 1st, on daily candles.
+const YTD := "ytd"
 ## The regular session: 9:30 to 16:00 New York time.
 const SESSION_OPEN_S := 34200
 const SESSION_LEN_S := 23400
@@ -150,6 +152,8 @@ static func view() -> String:
 	var i := str(Settings.get_value("hl_interval"))
 	if i == TODAY:
 		return TODAY if has_session(coin()) else "1h"
+	if i == YTD:
+		return YTD
 	return i if INTERVALS.has(i) else "1h"
 
 
@@ -157,6 +161,8 @@ static func view() -> String:
 ## span gets long (the weekend, before Monday's open).
 static func interval() -> String:
 	var v := view()
+	if v == YTD:
+		return "1d"
 	if v != TODAY:
 		return v
 	var now := int(Time.get_unix_time_from_system())
@@ -182,6 +188,12 @@ static func _nth_sunday(y: int, m: int, n: int) -> int:
 	var first := Time.get_unix_time_from_datetime_dict({"year": y, "month": m, "day": 1, "hour": 0, "minute": 0, "second": 0})
 	var wd := int(Time.get_datetime_dict_from_unix_time(first)["weekday"])
 	return first + (((7 - wd) % 7) + 7 * (n - 1)) * 86400
+
+
+## Midnight UTC on January 1st of `now`'s year.
+static func year_start(now: int) -> int:
+	var y := int(Time.get_datetime_dict_from_unix_time(now)["year"])
+	return Time.get_unix_time_from_datetime_dict({"year": y, "month": 1, "day": 1, "hour": 0, "minute": 0, "second": 0})
 
 
 ## The 4pm New York close of the trading day before the one opening at `open`.
@@ -493,7 +505,7 @@ func _merge_candle(d: Dictionary) -> void:
 		candles[candles.size() - 1] = row
 	elif int(row[0]) > int(last[0]):
 		candles.append(row)
-		if candles.size() > CANDLES + 40 and view() != TODAY:
+		if candles.size() > CANDLES + 40 and view() != TODAY and view() != YTD:
 			candles = candles.slice(candles.size() - CANDLES)
 
 
@@ -594,6 +606,8 @@ func _fetch_candles() -> void:
 	var start := end - int(INTERVALS[iv]) * 1000 * CANDLES
 	if view() == TODAY:
 		start = session_open(_now()) * 1000
+	elif view() == YTD:
+		start = year_start(_now()) * 1000
 	var j: Variant = await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": iv, "startTime": start, "endTime": end}})
 	var ref := 0.0
 	if view() == TODAY:

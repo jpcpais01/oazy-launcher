@@ -563,6 +563,17 @@ func _trade(main: Node) -> void:
 	hl.set_mock(xyz)
 	await _wait(0.6)
 	await shot("01t6-desktop-trade-xyz")
+	# YTD: daily candles from January 1st.
+	Settings.set_value("hl_coin", "BTC")
+	Settings.set_value("hl_interval", "ytd")
+	var ytd := _mock_hl("BTC")
+	var yc: Array = ytd["candles"]
+	var y0 := Hyperliquid.year_start(int(Time.get_unix_time_from_system()))
+	for i in yc.size():
+		yc[i][0] = y0 + i * 86400
+	hl.set_mock(ytd)
+	await _wait(0.6)
+	await shot("01t10-desktop-trade-ytd")
 	Settings.set_value("hl_interval", "1h")
 	Settings.set_value("hl_coin", "ETH")
 	hl.set_mock(_mock_hl("ETH"))

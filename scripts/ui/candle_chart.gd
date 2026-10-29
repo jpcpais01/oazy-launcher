@@ -123,15 +123,23 @@ func _draw() -> void:
 			label_s = c
 			break
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	# Daily candles are UTC days: label them by date, on month starts once
+	# a month or more passes between labels.
+	var daily := step_s >= 86400
+	var months := ceili(gap_s / (30.0 * 86400.0))
 	for i in range(first, rows.size()):
 		var t := int(rows[i][0])
-		if (t + bias) % label_s != 0:
+		if daily and gap_s > 14 * 86400:
+			var dd := Time.get_datetime_dict_from_unix_time(t)
+			if int(dd["day"]) != 1 or (int(dd["month"]) - 1) % months != 0:
+				continue
+		elif (t + (0 if daily else bias)) % label_s != 0:
 			continue
 		var x := x0 + (i - first + 0.5) * slot
 		if x < 30.0 or x > plot.end.x - 30.0:
 			continue
 		draw_line(Vector2(roundf(x) + 0.5, plot.position.y), Vector2(roundf(x) + 0.5, plot.end.y), Color(1, 1, 1, 0.025), 1.0)
-		draw_string(f12, Vector2(x - 50.0, size.y - 6.0), _time_label(t + bias), HORIZONTAL_ALIGNMENT_CENTER, 100.0, 12, App.TEXT_MUTE)
+		draw_string(f12, Vector2(x - 50.0, size.y - 6.0), _time_label(t + (0 if daily else bias)), HORIZONTAL_ALIGNMENT_CENTER, 100.0, 12, App.TEXT_MUTE)
 
 	# Volume, low along the bottom.
 	var vol_h := plot.size.y * VOL_SHARE
@@ -201,7 +209,7 @@ func _draw() -> void:
 		var hv := hi - (_hover.y - plot.position.y) / price_h * (hi - lo)
 		if _hover.y - plot.position.y <= price_h:
 			_tag(Vector2(plot.end.x + 4.0, hy), Hyperliquid.fmt_px(hv), Color(0.85, 0.9, 0.95, 0.92), Color(0.03, 0.05, 0.07))
-		var tl := _time_label(int(shown[0]) + bias, true)
+		var tl := _time_label(int(shown[0]) + (0 if step_s >= 86400 else bias), true)
 		var tw := f12.get_string_size(tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 16.0
 		var tr := Rect2(clampf(cx - tw * 0.5, 0.0, plot.end.x - tw), size.y - TIME_H + 2.0, tw, 22.0)
 		draw_style_box(Kit.box(Color(0.85, 0.9, 0.95, 0.92), 6), tr)
