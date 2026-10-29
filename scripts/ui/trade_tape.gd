@@ -3,7 +3,7 @@ extends Control
 ## The latest trades, newest on top: price in the buyer's or seller's colour,
 ## size and time. A new trade lights its row for a moment, then settles.
 
-const ROW_H := 25.0
+const ROW_H := 23.0
 const HEAD_H := 26.0
 const FLASH_MS := 700.0
 
@@ -72,7 +72,7 @@ func _draw() -> void:
 			draw_style_box(Kit.box(Color(tone, 0.14 * k * k), 6), Rect2(-6, y, w + 12.0, ROW_H))
 		var base := y + ROW_H * 0.5 + 5.0
 		var heavy := float(t["px"]) * float(t["sz"]) >= big
-		draw_string(fb, Vector2(0, base), Hyperliquid.fmt_px(float(t["px"])), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, tone)
-		draw_string(fb if heavy else f, Vector2(0, base), Hyperliquid.fmt_sz(float(t["sz"]), sz_decimals), HORIZONTAL_ALIGNMENT_RIGHT, c2, 13, App.TEXT if heavy else App.TEXT_DIM)
+		draw_string(fb, Vector2(0, base), Hyperliquid.fmt_px(float(t["px"])), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tone)
+		draw_string(fb if heavy else f, Vector2(0, base), Hyperliquid.fmt_sz(float(t["sz"]), sz_decimals), HORIZONTAL_ALIGNMENT_RIGHT, c2, 12, App.TEXT if heavy else App.TEXT_DIM)
 		var d := Time.get_datetime_dict_from_unix_time(int(t["time"]) / 1000 + bias)
-		draw_string(f, Vector2(0, base), "%02d:%02d:%02d" % [int(d["hour"]), int(d["minute"]), int(d["second"])], HORIZONTAL_ALIGNMENT_RIGHT, w, 13, App.TEXT_MUTE)
+		draw_string(f, Vector2(0, base), "%02d:%02d:%02d" % [int(d["hour"]), int(d["minute"]), int(d["second"])], HORIZONTAL_ALIGNMENT_RIGHT, w, 12, App.TEXT_MUTE)

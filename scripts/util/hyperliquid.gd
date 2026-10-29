@@ -49,8 +49,14 @@ var candles: Array = []
 var book := {}
 ## Newest first: {px, sz, side ("B" buy / "A" sell), time (ms), tid, seen (ticks ms)}.
 var trades: Array = []
-## parse_account() of your wallet, {} until it's known.
+## compose_account() of your wallet, {} until it's known: perps on every
+## exchange plus your spot balances, counted the way your account mode does.
 var account := {}
+## Your account mode from userAbstraction: "unifiedAccount", "portfolioMargin",
+## "disabled" (standard), "dexAbstraction" or "" until known.
+var mode := ""
+## Spot token -> USD price, for valuing balances.
+var spot_px := {}
 ## True while the WebSocket feed is open.
 var live := false
 var focused := false
@@ -73,6 +79,8 @@ var _spark_at := 0
 var _candle_key := ""
 var _candle_at := 0
 var _dexes_at := 0
+var _mode_addr := ""
+var _spot_px_at := 0
 
 
 func _ready() -> void:
@@ -91,6 +99,8 @@ func _ready() -> void:
 			"hl_address":
 				account = {}
 				orders = []
+				mode = ""
+				_mode_addr = ""
 				account_changed.emit()
 				_acct_in = 0.0
 			"hl_coins":
@@ -476,6 +486,18 @@ func _fetch_account() -> void:
 	if _acct_busy or _mock or addr == "":
 		return
 	_acct_busy = true
+	if _mode_addr != addr:
+		var m: Variant = await _post({"type": "userAbstraction", "user": addr})
+		if m is String:
+			mode = m
+			_mode_addr = addr
+	if _now() - _spot_px_at > CTX_EVERY:
+		var px := parse_spot_prices(await _post({"type": "spotMetaAndAssetCtxs"}))
+		if not px.is_empty():
+			spot_px = px
+			_spot_px_at = _now()
+	var spot_j: Variant = await _post({"type": "spotClearinghouseState", "user": addr})
+	var spot := parse_spot_balances(spot_j)
 	# Each exchange keeps its own margin: add them up.
 	var total := {}
 	var open := []
@@ -494,8 +516,9 @@ func _fetch_account() -> void:
 		return
 	if focused:
 		orders = open
-	if not total.is_empty():
-		account = total
+	# A unified account's money is all in spot: without that answer, keep the last numbers.
+	if (not total.is_empty() or not spot.is_empty()) and (spot_j is Dictionary or not unified(mode)):
+		account = compose_account(total, spot, spot_px, unified(mode))
 		account_changed.emit()
 		_sync_subs()
 
@@ -537,7 +560,6 @@ func _fetch_sparks() -> void:
 
 # --- Parsing (static, so tests can feed it answers) --------------------------------------------------
 
-## metaAndAssetCtxs -> fills `meta_out` and `ctx_out`. False if it wasn't one.
 ## perpDexs -> ["", "xyz", ...] (index = the exchange's number in asset ids).
 static func parse_dexes(j: Variant) -> Array:
 	if not (j is Array) or j.is_empty():
@@ -559,7 +581,100 @@ static func merge_accounts(a: Dictionary, b: Dictionary) -> Dictionary:
 	return out
 
 
-## frontendOpenOrders -> [{coin, buy, px, sz, orig, oid, reduce, kind, time}]
+## Unified and portfolio-margin accounts keep all their money in the spot
+## balances; the perp exchanges' own summaries then only show what's in use.
+static func unified(account_mode: String) -> bool:
+	return account_mode in ["unifiedAccount", "portfolioMargin"]
+
+
+## spotClearinghouseState -> [{coin, total, hold, entry}], biggest holdings first.
+static func parse_spot_balances(j: Variant) -> Array:
+	var out := []
+	if not (j is Dictionary) or not (j.get("balances") is Array):
+		return out
+	for b in j["balances"]:
+		if b is Dictionary and _f(b.get("total")) != 0.0:
+			out.append({"coin": str(b.get("coin", "")), "total": _f(b.get("total")), "hold": _f(b.get("hold")), "entry": _f(b.get("entryNtl"))})
+	return out
+
+
+## spotMetaAndAssetCtxs -> token -> USD price, from each token's pair against
+## USDC (token 0). Dollar stablecoins without a pair count as $1.
+static func parse_spot_prices(j: Variant) -> Dictionary:
+	var out := {"USDC": 1.0}
+	if not (j is Array) or j.size() < 2 or not (j[0] is Dictionary) or not (j[1] is Array):
+		return {}
+	var names := {}
+	for t in j[0].get("tokens", []):
+		if t is Dictionary:
+			names[int(t.get("index", -1))] = str(t.get("name", ""))
+	var ctx_by_coin := {}
+	for x in j[1]:
+		if x is Dictionary:
+			ctx_by_coin[str(x.get("coin", ""))] = x
+	for u in j[0].get("universe", []):
+		if not (u is Dictionary) or not (u.get("tokens") is Array) or (u["tokens"] as Array).size() < 2:
+			continue
+		if int(u["tokens"][1]) != 0:
+			continue
+		var x: Variant = ctx_by_coin.get(str(u.get("name", "")))
+		if not (x is Dictionary):
+			continue
+		var px := _f(x.get("midPx")) if x.get("midPx") != null else _f(x.get("markPx"))
+		var nm := str(names.get(int(u["tokens"][0]), ""))
+		if nm != "" and px > 0.0 and not out.has(nm):
+			out[nm] = px
+	for nm in names.values():
+		if str(nm).begins_with("USD") and not out.has(nm):
+			out[nm] = 1.0
+	return out
+
+
+## Perps (merged parse_account) + spot balances -> the account the desk shows:
+## {value, perps, spot, margin, withdrawable, ntl, upnl, positions, balances,
+## unified}. In a unified account the spot balances are the money and the
+## positions' unrealised P&L sits on top; otherwise the perp accounts and the
+## spot balances are separate pots and both count.
+static func compose_account(perp: Dictionary, balances: Array, prices: Dictionary, is_unified: bool) -> Dictionary:
+	var positions: Array = perp.get("positions", [])
+	var upnl := 0.0
+	var pos_margin := 0.0
+	for p in positions:
+		upnl += float(p["upnl"])
+		pos_margin += float(p["margin"])
+	var spot_usd := 0.0
+	var usdc_free := 0.0
+	var rows := []
+	for b in balances:
+		var px := float(prices.get(b["coin"], 0.0))
+		var usd := float(b["total"]) * px if px > 0.0 else float(b["entry"])
+		spot_usd += usd
+		if str(b["coin"]) == "USDC":
+			usdc_free = maxf(0.0, float(b["total"]) - float(b["hold"]))
+		var row: Dictionary = b.duplicate()
+		row["usd"] = usd
+		rows.append(row)
+	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["usd"]) > float(b["usd"]))
+	var perps := float(perp.get("value", 0.0))
+	var out := {
+		"positions": positions, "balances": rows, "unified": is_unified, "upnl": upnl,
+		"ntl": float(perp.get("ntl", 0.0)), "spot": spot_usd,
+		"margin": maxf(float(perp.get("margin", 0.0)), pos_margin),
+		"at": int(Time.get_unix_time_from_system()),
+	}
+	if is_unified:
+		out["value"] = spot_usd + upnl
+		out["perps"] = perps
+		out["withdrawable"] = usdc_free
+	else:
+		out["value"] = perps + spot_usd
+		out["perps"] = perps
+		out["withdrawable"] = float(perp.get("withdrawable", 0.0)) + usdc_free
+	return out
+
+
+## frontendOpenOrders -> [{coin, buy, px, sz, orig, oid, reduce, kind, time,
+## trigger (px, 0 if none), tpsl ("tp", "sl" or ""), position (whole-position TP/SL)}]
 static func parse_orders(j: Variant, dex: String = "") -> Array:
 	var out := []
 	if not (j is Array):
@@ -572,8 +687,19 @@ static func parse_orders(j: Variant, dex: String = "") -> Array:
 			c = dex + ":" + c
 		out.append({"coin": c, "buy": str(o.get("side", "B")) == "B", "px": _f(o.get("limitPx")), "sz": _f(o.get("sz")),
 			"orig": _f(o.get("origSz", o.get("sz"))), "oid": int(o.get("oid", 0)), "reduce": bool(o.get("reduceOnly", false)),
-			"kind": str(o.get("orderType", "Limit")), "time": int(o.get("timestamp", 0))})
+			"kind": str(o.get("orderType", "Limit")), "time": int(o.get("timestamp", 0)),
+			"trigger": _f(o.get("triggerPx")) if bool(o.get("isTrigger", false)) else 0.0,
+			"tpsl": tpsl_of(str(o.get("orderType", ""))), "position": bool(o.get("isPositionTpsl", false))})
 	return out
+
+
+## "Take Profit Market" -> "tp", "Stop Limit" -> "sl", anything else -> "".
+static func tpsl_of(kind: String) -> String:
+	if kind.begins_with("Take Profit"):
+		return "tp"
+	if kind.begins_with("Stop"):
+		return "sl"
+	return ""
 
 
 ## metaAndAssetCtxs -> fills `meta_out` and `ctx_out`. False if it wasn't one.

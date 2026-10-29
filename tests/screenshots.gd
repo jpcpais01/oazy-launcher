@@ -517,7 +517,7 @@ func _trade(main: Node) -> void:
 	await shot("01t1-desktop-trade-no-wallet")
 	Settings.set_value("hl_coins", ["BTC", "ETH", "xyz:XYZ100", "SOL", "HYPE"])
 	Settings.set_value("hl_address", "0x" + "5e9ee1089755c3435139848e47e6635505d5a13a".substr(0, 40))
-	hl.set_mock({"account": _mock_hl()["account"]})
+	hl.set_mock({"account": _mock_hl()["account"], "orders": _mock_hl()["orders"]})
 	await _wait(0.6)
 	await shot("01t4-desktop-trade-setup")
 	trade.ex.set_mock("0x2c7536e3605d9c16a7a3d7b1898e529396a65c23")
@@ -530,6 +530,25 @@ func _trade(main: Node) -> void:
 	trade.ex.changed.emit()
 	await _wait(0.5)
 	await shot("01t5-desktop-trade-armed")
+	trade._ticket._usd.text = "2500"
+	trade._ticket._tpsl.button_pressed = true
+	trade._ticket.refresh_quote()
+	trade._show_tab("orders")
+	await _wait(0.5)
+	await shot("01t7-desktop-trade-tpsl-ticket")
+	trade._show_tab("balances")
+	await _wait(0.4)
+	await shot("01t8-desktop-trade-balances")
+	trade._show_tab("positions")
+	trade._open_tpsl(hl.account["positions"][0])
+	await _wait(0.6)
+	await shot("01t9-desktop-trade-tpsl-dialog")
+	for d in main.overlay_layer.get_children():
+		if d is TpslDialog:
+			d.close()
+	await _wait(0.4)
+	trade._ticket._tpsl.button_pressed = false
+	trade._ticket._usd.text = ""
 	trade.ex.armed = false
 	trade.ex.changed.emit()
 	Settings.set_value("hl_coin", "xyz:XYZ100")
@@ -596,13 +615,20 @@ static func _mock_hl(c: String = "BTC") -> Dictionary:
 			"time": t_ms, "tid": i, "seen": tick_now - 200 if i < 2 else 0})
 	var acct := {
 		"value": 48210.55, "ntl": 92000.0, "margin": 9120.4, "withdrawable": 36120.0, "at": 0,
+		"unified": true, "spot": 46765.8, "perps": 9120.4, "upnl": 1444.75,
+		"balances": [{"coin": "USDC", "total": 41240.12, "hold": 9120.4, "entry": 0.0, "usd": 41240.12}, {"coin": "HYPE", "total": 118.4, "hold": 0.0, "entry": 5200.0, "usd": 5471.7}, {"coin": "UBTC", "total": 0.00048, "hold": 0.0, "entry": 50.0, "usd": 53.7}],
 		"positions": [
 			{"coin": "BTC", "szi": 0.42, "entry": 108420.0, "value": 46973.6, "upnl": 1437.2, "roe": 0.31, "liq": 79310.0, "margin": 4697.4, "lev": 10, "cross": true},
 			{"coin": "ETH", "szi": -6.5, "entry": 4122.3, "value": 25684.1, "upnl": 1110.85, "roe": 0.43, "liq": 4890.5, "margin": 2568.4, "lev": 10, "cross": true},
 			{"coin": "HYPE", "szi": 410.0, "entry": 48.905, "value": 18947.7, "upnl": -1103.3, "roe": -0.59, "liq": 31.22, "margin": 1854.6, "lev": 10, "cross": false},
 		],
 	}
-	return {"ctxs": ctxs, "meta": meta, "mids": mids, "sparks": sparks, "candles": candles, "book": {"bids": bids, "asks": asks, "time": 0}, "trades": trades, "account": acct}
+	var orders := [
+		{"coin": "BTC", "buy": false, "px": 100000.0, "sz": 0.42, "orig": 0.42, "oid": 1, "reduce": true, "kind": "Take Profit Market", "time": t_ms, "trigger": 112300.0, "tpsl": "tp", "position": true},
+		{"coin": "BTC", "buy": false, "px": 94000.0, "sz": 0.42, "orig": 0.42, "oid": 2, "reduce": true, "kind": "Stop Market", "time": t_ms, "trigger": 104500.0, "tpsl": "sl", "position": true},
+		{"coin": "ETH", "buy": true, "px": 3880.0, "sz": 1.5, "orig": 2.0, "oid": 3, "reduce": false, "kind": "Limit", "time": t_ms, "trigger": 0.0, "tpsl": "", "position": false},
+	]
+	return {"ctxs": ctxs, "meta": meta, "mids": mids, "sparks": sparks, "candles": candles, "book": {"bids": bids, "asks": asks, "time": 0}, "trades": trades, "account": acct, "orders": orders}
 
 
 static func _mock_quotes() -> Dictionary:

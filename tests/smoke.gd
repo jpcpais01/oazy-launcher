@@ -465,6 +465,26 @@ func _logic_tests() -> void:
 	var act := HlExchange.order_action({"asset": 110003, "buy": true, "px": 81250.0, "sz": 0.0123, "reduce": false, "tif": "Gtc"})
 	check(MsgPack.pack(act).hex_encode() == "83a474797065a56f72646572a66f72646572739186a161ce0001adb3a162c3a170a53831323530a173a6302e30313233a172c2a17481a56c696d697481a3746966a3477463a867726f7570696e67a26e61", "trading: order packs like the SDK")
 	check(MsgPack.pack({"type": "cancel", "cancels": [{"a": 5, "o": 123456789012}]}).hex_encode() == "82a474797065a663616e63656ca763616e63656c739182a16105a16fcf0000001cbe991a14", "trading: cancel packs like the SDK")
+	# Take profit / stop loss: trigger orders, packed like the SDK.
+	var tp_act := HlExchange.orders_action([{"asset": 0, "buy": false, "px": 100000.0, "sz": 0.001, "reduce": true, "trigger": 110000.0, "tpsl": "tp"}], "positionTpsl")
+	check(MsgPack.pack(tp_act).hex_encode() == "83a474797065a56f72646572a66f72646572739186a16100a162c2a170a6313030303030a173a5302e303031a172c3a17481a77472696767657283a869734d61726b6574c3a9747269676765725078a6313130303030a47470736ca27470a867726f7570696e67ac706f736974696f6e5470736c", "trading: take profit packs like the SDK")
+	var sl_o := HlExchange.tpsl_order(3, true, 0.5, 2000.0, "sl", 4)
+	check(not bool(sl_o["buy"]) and bool(sl_o["reduce"]) and is_equal_approx(float(sl_o["px"]), 1800.0) and is_equal_approx(float(sl_o["trigger"]), 2000.0), "trading: a long's stop loss sells, reduce-only, with room to fill")
+	check(HlExchange.tpsl_problem(true, 100.0, 110.0, 95.0) == "" and HlExchange.tpsl_problem(true, 100.0, 90.0, 0.0) != "" and HlExchange.tpsl_problem(false, 100.0, 90.0, 105.0) == "" and HlExchange.tpsl_problem(false, 100.0, 0.0, 95.0) != "", "trading: TP / SL must sit on the right side of the price")
+	check(Hyperliquid.tpsl_of("Take Profit Market") == "tp" and Hyperliquid.tpsl_of("Stop Market") == "sl" and Hyperliquid.tpsl_of("Limit") == "", "hyperliquid: TP / SL orders recognised")
+	var tord := Hyperliquid.parse_orders([{"coin": "BTC", "side": "A", "limitPx": "99000", "sz": "0.1", "oid": 9, "timestamp": 1, "orderType": "Stop Market", "isTrigger": true, "triggerPx": "100000", "reduceOnly": true, "isPositionTpsl": true}])
+	check(tord.size() == 1 and str(tord[0]["tpsl"]) == "sl" and is_equal_approx(float(tord[0]["trigger"]), 100000.0) and bool(tord[0]["position"]), "hyperliquid: trigger orders keep their trigger price")
+	# Your money: spot balances valued in dollars; unified accounts count them as the account.
+	var spx := Hyperliquid.parse_spot_prices([{"tokens": [{"name": "USDC", "index": 0}, {"name": "HYPE", "index": 150}, {"name": "USDT0", "index": 268}],
+		"universe": [{"name": "@107", "tokens": [150, 0], "index": 107}]}, [{"coin": "@107", "markPx": "40.0", "midPx": "40.5"}]])
+	check(is_equal_approx(float(spx["HYPE"]), 40.5) and is_equal_approx(float(spx["USDC"]), 1.0) and is_equal_approx(float(spx["USDT0"]), 1.0), "hyperliquid: spot prices in dollars")
+	var sbal := Hyperliquid.parse_spot_balances({"balances": [{"coin": "USDC", "token": 0, "total": "5000.0", "hold": "800.0", "entryNtl": "0.0"}, {"coin": "HYPE", "token": 150, "total": "10.0", "hold": "0.0", "entryNtl": "300.0"}, {"coin": "PURR", "total": "0.0", "hold": "0.0"}]})
+	check(sbal.size() == 2, "hyperliquid: spot balances, empty ones skipped")
+	var uni := Hyperliquid.compose_account(hacct, sbal, spx, true)
+	check(is_equal_approx(float(uni["value"]), 5000.0 + 405.0 + 200.0) and is_equal_approx(float(uni["withdrawable"]), 4200.0) and is_equal_approx(float(uni["margin"]), 800.0), "hyperliquid: a unified account is its spot money plus open P&L")
+	var std := Hyperliquid.compose_account(hacct, sbal, spx, false)
+	check(is_equal_approx(float(std["value"]), 1000.0 + 5405.0) and is_equal_approx(float(std["withdrawable"]), 900.0 + 4200.0), "hyperliquid: a standard account adds perps and spot")
+	check(Hyperliquid.unified("unifiedAccount") and Hyperliquid.unified("portfolioMargin") and not Hyperliquid.unified("disabled"), "hyperliquid: account modes")
 	check(HlExchange.wire(81250.0) == "81250" and HlExchange.wire(0.0123) == "0.0123" and HlExchange.wire(100.0) == "100" and HlExchange.wire(-0.0) == "0", "trading: number format")
 	check(is_equal_approx(HlExchange.round_px(81253.7, 5), 81254.0) and is_equal_approx(HlExchange.round_px(3951.437, 4), 3951.4) and is_equal_approx(HlExchange.round_px(0.0123456, 0), 0.012346) and is_equal_approx(HlExchange.round_sz(0.01239, 4), 0.0123), "trading: prices and sizes round the exchange's way")
 	check(HlExchange.parse_response({"status": "ok", "response": {"type": "order", "data": {"statuses": [{"filled": {"totalSz": "0.02", "avgPx": "1891.4", "oid": 77}}]}}}).get("filled") == 0.02

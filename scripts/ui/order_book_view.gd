@@ -3,9 +3,11 @@ extends Control
 ## The order book, drawn in one pass so it can redraw every update for free:
 ## asks above (worst on top, best nearest the middle), the mid price and the
 ## spread across the middle, bids below. A soft bar behind each level shows
-## the depth piled up to it.
+## the depth piled up to it. Clicking a level offers its price (`picked`).
 
-const ROW_H := 25.0
+signal picked(price: float)
+
+const ROW_H := 23.0
 const HEAD_H := 26.0
 const MID_H := 48.0
 
@@ -19,6 +21,8 @@ var coin := ""
 var last_dir := 0
 
 var _hover := -1.0
+## [top y, price] of each level drawn, for clicks.
+var _levels: Array = []
 
 
 func _init() -> void:
@@ -42,6 +46,13 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		_hover = (event as InputEventMouseMotion).position.y
 		queue_redraw()
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var y := (event as InputEventMouseButton).position.y
+		for l in _levels:
+			if y >= float(l[0]) and y < float(l[0]) + ROW_H:
+				picked.emit(float(l[1]))
+				accept_event()
+				return
 
 
 ## Levels shown on each side at this height.
@@ -61,6 +72,7 @@ func _draw() -> void:
 	if bids.is_empty() or asks.is_empty():
 		draw_string(f, Vector2(0, size.y * 0.5), "Loading the book…", HORIZONTAL_ALIGNMENT_CENTER, w, 14, App.TEXT_MUTE)
 		return
+	_levels.clear()
 	var n := per_side()
 	var a := asks.slice(0, n)
 	var b := bids.slice(0, n)
@@ -87,7 +99,7 @@ func _draw() -> void:
 	draw_line(Vector2(0, mid_y + 0.5), Vector2(w, mid_y + 0.5), Color(1, 1, 1, 0.05), 1.0)
 	draw_line(Vector2(0, mid_y + MID_H - 0.5), Vector2(w, mid_y + MID_H - 0.5), Color(1, 1, 1, 0.05), 1.0)
 	var mid_c := App.TEXT if last_dir == 0 else (up if last_dir > 0 else down)
-	draw_string(DesktopBelow._num_font(600), Vector2(0, mid_y + MID_H * 0.5 + 7.0), Hyperliquid.fmt_px(mid), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, mid_c)
+	draw_string(DesktopBelow._num_font(600), Vector2(0, mid_y + MID_H * 0.5 + 7.0), Hyperliquid.fmt_px(mid), HORIZONTAL_ALIGNMENT_LEFT, -1, 17, mid_c)
 	var spread := best_ask - best_bid
 	var spread_t := "Spread  %s  ·  %.3f%%" % [Hyperliquid.group(spread, Hyperliquid.px_digits(mid)), spread / mid * 100.0 if mid > 0.0 else 0.0]
 	draw_string(f, Vector2(0, mid_y + MID_H * 0.5 + 5.0), spread_t, HORIZONTAL_ALIGNMENT_RIGHT, w, 12, App.TEXT_MUTE)
@@ -97,11 +109,12 @@ func _draw() -> void:
 
 func _row(y: float, level: Array, cum: float, most: float, tone: Color, f: Font, fb: Font, _c1: float, c2: float) -> void:
 	var w := size.x
+	_levels.append([y, float(level[0])])
 	var bar := roundf(cum / most * w) if most > 0.0 else 0.0
 	draw_style_box(Kit.box(Color(tone, 0.085), 4), Rect2(w - bar, y + 2.0, bar, ROW_H - 4.0))
 	if _hover >= y and _hover < y + ROW_H:
 		draw_style_box(Kit.box(Color(1, 1, 1, 0.045), 6), Rect2(-6, y, w + 12.0, ROW_H))
 	var base := y + ROW_H * 0.5 + 5.0
-	draw_string(fb, Vector2(0, base), Hyperliquid.fmt_px(float(level[0])), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, tone)
-	draw_string(f, Vector2(0, base), Hyperliquid.fmt_sz(float(level[1]), sz_decimals), HORIZONTAL_ALIGNMENT_RIGHT, c2 - 4.0, 13, App.TEXT_DIM)
-	draw_string(f, Vector2(0, base), Hyperliquid.fmt_sz(cum, sz_decimals), HORIZONTAL_ALIGNMENT_RIGHT, w, 13, Color(App.TEXT_DIM, 0.75))
+	draw_string(fb, Vector2(0, base), Hyperliquid.fmt_px(float(level[0])), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tone)
+	draw_string(f, Vector2(0, base), Hyperliquid.fmt_sz(float(level[1]), sz_decimals), HORIZONTAL_ALIGNMENT_RIGHT, c2 - 4.0, 12, App.TEXT_DIM)
+	draw_string(f, Vector2(0, base), Hyperliquid.fmt_sz(cum, sz_decimals), HORIZONTAL_ALIGNMENT_RIGHT, w, 12, Color(App.TEXT_DIM, 0.75))

@@ -21,6 +21,9 @@ const APPROVE_URL := "https://app.hyperliquid.xyz/API"
 ## A market order is an IOC limit this far past the price, so a thin book
 ## can't fill it somewhere silly.
 const SLIPPAGE := 0.03
+## How far a triggered take profit / stop loss may fill from its trigger
+## (what Hyperliquid's own app allows).
+const TPSL_SLIPPAGE := 0.1
 ## Hyperliquid's base taker fee, for the estimate in the confirm step.
 const TAKER_FEE := 0.00045
 const ARM_IDLE := 300.0
@@ -207,12 +210,44 @@ static func wire(x: float) -> String:
 	return "0" if s == "-0" or s == "" else s
 
 
-## The action for one order. `o` is {asset, buy, px, sz, reduce, tif}.
+## One order on the wire. `o` is {asset, buy, px, sz, reduce, tif}, or for a
+## take profit / stop loss {asset, buy, px, sz, trigger, tpsl} (a market order
+## when it triggers; `px` is its worst fill). Key order matters: it's hashed.
+static func order_wire(o: Dictionary) -> Dictionary:
+	var t := {"limit": {"tif": str(o.get("tif", "Gtc"))}}
+	if float(o.get("trigger", 0.0)) > 0.0:
+		t = {"trigger": {"isMarket": true, "triggerPx": wire(float(o["trigger"])), "tpsl": str(o["tpsl"])}}
+	return {"a": int(o["asset"]), "b": bool(o["buy"]), "p": wire(float(o["px"])), "s": wire(float(o["sz"])),
+		"r": bool(o.get("reduce", false)), "t": t}
+
+
+## The action for one order.
 static func order_action(o: Dictionary) -> Dictionary:
-	return {"type": "order", "orders": [{
-		"a": int(o["asset"]), "b": bool(o["buy"]), "p": wire(float(o["px"])), "s": wire(float(o["sz"])),
-		"r": bool(o.get("reduce", false)), "t": {"limit": {"tif": str(o.get("tif", "Gtc"))}},
-	}], "grouping": "na"}
+	return orders_action([o])
+
+
+## Several orders at once. "normalTpsl" ties a TP / SL to the order before it;
+## "positionTpsl" ties them to the whole position.
+static func orders_action(list: Array, grouping: String = "na") -> Dictionary:
+	return {"type": "order", "orders": list.map(func(o: Dictionary) -> Dictionary: return order_wire(o)), "grouping": grouping}
+
+
+## A take profit or stop loss that closes `sz` of a position (long when
+## `long`) at market once the price touches `trigger`.
+static func tpsl_order(asset: int, long: bool, sz: float, trigger: float, kind: String, sz_decimals: int) -> Dictionary:
+	var px := round_px(trigger, sz_decimals)
+	return {"asset": asset, "buy": not long, "sz": sz, "trigger": px, "tpsl": kind, "reduce": true,
+		"px": round_px(px * (1.0 + TPSL_SLIPPAGE if not long else 1.0 - TPSL_SLIPPAGE), sz_decimals)}
+
+
+## Checks a take profit / stop loss against the price it's measured from:
+## "" when it makes sense, else why not.
+static func tpsl_problem(long: bool, ref_px: float, tp: float, sl: float) -> String:
+	if tp > 0.0 and (tp <= ref_px if long else tp >= ref_px):
+		return "Take profit should be %s the price." % ("above" if long else "below")
+	if sl > 0.0 and (sl >= ref_px if long else sl <= ref_px):
+		return "Stop loss should be %s the price." % ("below" if long else "above")
+	return ""
 
 
 func asset_of(c: String) -> int:
@@ -246,7 +281,19 @@ func quote(t: Dictionary) -> Dictionary:
 	if notional < 10.0 and not bool(t.get("reduce", false)):
 		return {"error": "Hyperliquid's smallest order is $10."}
 	var lev := clampi(int(t.get("lev", 1)), 1, maxi(1, int(m.get("lev", 1))))
+	var tp := round_px(float(t.get("tp", 0.0)), dec)
+	var sl := round_px(float(t.get("sl", 0.0)), dec)
+	if not bool(t.get("reduce", false)):
+		var why := tpsl_problem(buy, ref_px, tp, sl)
+		if why != "":
+			return {"error": why}
+	else:
+		tp = 0.0
+		sl = 0.0
 	return {
+		"tp": tp, "sl": sl,
+		"tp_pnl": sz * (tp - ref_px) * (1.0 if buy else -1.0) if tp > 0.0 else 0.0,
+		"sl_pnl": sz * (sl - ref_px) * (1.0 if buy else -1.0) if sl > 0.0 else 0.0,
 		"coin": c, "asset": asset_of(c), "buy": buy, "market": market, "sz": sz, "px": px, "ref_px": ref_px,
 		"notional": notional, "lev": lev, "margin": notional / lev, "fee": notional * TAKER_FEE,
 		"reduce": bool(t.get("reduce", false)), "tif": "Ioc" if market else "Gtc",
@@ -261,7 +308,42 @@ func place(q: Dictionary) -> Dictionary:
 		if not lv.get("ok", false):
 			return lv
 		_lev_cache[str(q["coin"])] = int(q["lev"])
-	return await send(order_action(q))
+	var list := [q]
+	for kind in ["tp", "sl"]:
+		if float(q.get(kind, 0.0)) > 0.0:
+			list.append(tpsl_order(int(q["asset"]), bool(q["buy"]), float(q["sz"]), float(q[kind]), kind, int(q["decimals"])))
+	return await send(orders_action(list, "normalTpsl" if list.size() > 1 else "na"))
+
+
+## Sets (or replaces) the take profit and stop loss on a whole position. A
+## price of 0 leaves that side as it is; -1 removes it.
+func set_tpsl(p: Dictionary, tp: float, sl: float) -> Dictionary:
+	var c := str(p["coin"])
+	var dec := hl.sz_decimals(c)
+	if asset_of(c) < 0:
+		return {"ok": false, "error": "%s isn't tradable right now." % Hyperliquid.display(c)}
+	var long := float(p["szi"]) > 0.0
+	var why := tpsl_problem(long, hl.price(c), maxf(tp, 0.0), maxf(sl, 0.0))
+	if why != "":
+		return {"ok": false, "error": why}
+	# The old ones go first, so there's only ever one of each.
+	var old := []
+	for o in hl.orders:
+		if str(o["coin"]) == c and bool(o["reduce"]) and str(o["tpsl"]) != "":
+			if (str(o["tpsl"]) == "tp" and tp != 0.0) or (str(o["tpsl"]) == "sl" and sl != 0.0):
+				old.append({"a": asset_of(c), "o": int(o["oid"])})
+	if not old.is_empty():
+		var gone := await send({"type": "cancel", "cancels": old})
+		if not gone.get("ok", false):
+			return gone
+	var list := []
+	if tp > 0.0:
+		list.append(tpsl_order(asset_of(c), long, absf(float(p["szi"])), tp, "tp", dec))
+	if sl > 0.0:
+		list.append(tpsl_order(asset_of(c), long, absf(float(p["szi"])), sl, "sl", dec))
+	if list.is_empty():
+		return {"ok": true}
+	return await send(orders_action(list, "positionTpsl"))
 
 
 ## Closes a whole position at market (reduce-only, so it can't flip it).
@@ -325,7 +407,8 @@ func send(action: Dictionary) -> Dictionary:
 	return out
 
 
-## /exchange's answer -> {ok, error, filled, resting, avg, oid}.
+## /exchange's answer -> {ok, error, filled, resting, avg, oid}. With several
+## orders the first one (the main order) sets filled / resting.
 static func parse_response(j: Variant, raw: String = "") -> Dictionary:
 	if not (j is Dictionary):
 		return {"ok": false, "error": raw.substr(0, 200) if raw != "" else "Unexpected answer."}
@@ -338,11 +421,11 @@ static func parse_response(j: Variant, raw: String = "") -> Dictionary:
 			if st is Dictionary:
 				if st.has("error"):
 					return {"ok": false, "error": str(st["error"])}
-				if st.get("filled") is Dictionary:
+				if st.get("filled") is Dictionary and not out.has("filled"):
 					out["filled"] = float(st["filled"].get("totalSz", 0))
 					out["avg"] = float(st["filled"].get("avgPx", 0))
 					out["oid"] = int(st["filled"].get("oid", 0))
-				if st.get("resting") is Dictionary:
+				if st.get("resting") is Dictionary and not out.has("resting") and not out.has("filled"):
 					out["resting"] = true
 					out["oid"] = int(st["resting"].get("oid", 0))
 	return out
