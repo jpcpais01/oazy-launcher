@@ -28,6 +28,12 @@ var _px_box: VBoxContainer
 var _lev: HSlider
 var _lev_label: Label
 var _reduce: CheckBox
+var _tpsl: CheckBox
+var _tpsl_box: HBoxContainer
+var _tp: LineEdit
+var _sl: LineEdit
+var _avail: Label
+var _quick: HBoxContainer
 var _est: Label
 var _note: Label
 var _go: Button
@@ -192,9 +198,34 @@ func _build_form() -> void:
 
 	var size_box := Kit.vbox(5)
 	_form.add_child(size_box)
-	size_box.add_child(_field_label("Size (USD)"))
+	var size_head := Kit.hbox(6)
+	size_box.add_child(size_head)
+	var sl_ := _field_label("Size (USD)")
+	sl_.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_head.add_child(sl_)
+	_avail = DesktopBelow._num("", 11, 600, App.TEXT_MUTE)
+	_avail.tooltip_text = "Free to trade with, times your leverage, is what you can open."
+	_avail.mouse_filter = Control.MOUSE_FILTER_PASS
+	size_head.add_child(_avail)
 	_usd = _field(120, "100")
 	size_box.add_child(_usd)
+	# Quick sizes: a share of what you can open at this leverage.
+	var quick := Kit.hbox(5)
+	_quick = quick
+	size_box.add_child(quick)
+	for pct in [0.1, 0.25, 0.5, 1.0]:
+		var qb := _chip("Max" if pct == 1.0 else "%d%%" % roundi(pct * 100.0))
+		qb.pressed.connect(func() -> void:
+			var power := _buying_power()
+			if power <= 0.0:
+				return
+			Sfx.play(&"move", 1.1)
+			# A hair under, so fees and rounding never push it over.
+			_usd.text = HlExchange.wire(floorf(power * pct * (0.98 if pct == 1.0 else 1.0)))
+			ex.touch()
+			refresh_quote()
+		)
+		quick.add_child(qb)
 
 	_px_box = Kit.vbox(5)
 	_form.add_child(_px_box)
@@ -234,23 +265,44 @@ func _build_form() -> void:
 	)
 	lev_box.add_child(_lev)
 
-	_reduce = CheckBox.new()
-	_reduce.text = "Reduce only"
-	_reduce.focus_mode = Control.FOCUS_NONE
-	_reduce.tooltip_text = "Can only shrink or close a position, never open or flip one."
-	_reduce.add_theme_font_override("font", Kit.font(600))
-	_reduce.add_theme_font_size_override("font_size", 13)
-	_reduce.toggled.connect(func(_on: bool) -> void:
-		ex.touch()
-		refresh_quote()
+	var opts := Kit.hbox(6)
+	_form.add_child(opts)
+	_tpsl = _check("TP / SL", "Add a take profit and a stop loss: market orders that close this position when the price gets there.")
+	opts.add_child(_tpsl)
+	_reduce = _check("Reduce only", "Can only shrink or close a position, never open or flip one.")
+	opts.add_child(_reduce)
+	_tpsl.toggled.connect(func(on: bool) -> void:
+		_tpsl_box.visible = on and not _reduce.button_pressed
+		if on and _tp.text == "" and _sl.text == "":
+			_suggest_tpsl()
 	)
-	_form.add_child(_reduce)
+	_reduce.toggled.connect(func(on: bool) -> void:
+		_tpsl.disabled = on or not ex.armed
+		_tpsl_box.visible = _tpsl.button_pressed and not on
+	)
+	_tpsl_box = Kit.hbox(8)
+	_tpsl_box.visible = false
+	_form.add_child(_tpsl_box)
+	for spec in [["Take profit", "tp"], ["Stop loss", "sl"]]:
+		var b := Kit.vbox(5)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_tpsl_box.add_child(b)
+		b.add_child(_field_label(spec[0]))
+		var e := _field(60, "Price")
+		b.add_child(e)
+		if spec[1] == "tp":
+			_tp = e
+		else:
+			_sl = e
 
 	_est = DesktopBelow._num("", 12, 500, App.TEXT_MUTE)
 	_est.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_est.custom_minimum_size.x = 120
 	_form.add_child(_est)
-	_form.add_child(Kit.spacer(0, 0, false))
+	# The send button sits at the bottom of the panel, under everything else.
+	var push := Kit.spacer(0, 0)
+	push.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_form.add_child(push)
 	_go = Button.new()
 	_go.focus_mode = Control.FOCUS_NONE
 	_go.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -277,6 +329,75 @@ func _build_form() -> void:
 	_paint_choices()
 
 
+func _check(text: String, tip: String) -> CheckBox:
+	var c := CheckBox.new()
+	c.text = text
+	c.focus_mode = Control.FOCUS_NONE
+	c.tooltip_text = tip
+	c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	c.add_theme_font_override("font", Kit.font(600))
+	c.add_theme_font_size_override("font_size", 13)
+	c.toggled.connect(func(_on: bool) -> void:
+		ex.touch()
+		refresh_quote()
+	)
+	return c
+
+
+func _chip(text: String) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size.y = 26
+	b.add_theme_font_override("font", DesktopBelow._num_font(600))
+	b.add_theme_font_size_override("font_size", 11)
+	b.add_theme_color_override("font_color", App.TEXT_DIM)
+	b.add_theme_color_override("font_hover_color", App.TEXT)
+	b.add_theme_color_override("font_disabled_color", App.TEXT_MUTE)
+	b.add_theme_stylebox_override("normal", Kit.box(Color(1, 1, 1, 0.04), 8, Color(1, 1, 1, 0.06), 1))
+	b.add_theme_stylebox_override("hover", Kit.box(Color(1, 1, 1, 0.09), 8, Color(1, 1, 1, 0.1), 1))
+	b.add_theme_stylebox_override("pressed", Kit.box(Color(1, 1, 1, 0.12), 8, Color(1, 1, 1, 0.1), 1))
+	b.add_theme_stylebox_override("disabled", Kit.box(Color(1, 1, 1, 0.03), 8, Color(1, 1, 1, 0.04), 1))
+	return b
+
+
+## What you're free to trade with: the account's available money.
+func _free() -> float:
+	return float(hl.account.get("withdrawable", 0.0))
+
+
+## The most you can open at the leverage picked.
+func _buying_power() -> float:
+	return _free() * int(_lev.value)
+
+
+## A starting point when TP / SL is ticked: 2 % and 1 % of price either way.
+func _suggest_tpsl() -> void:
+	var ref := _ref_px()
+	if ref <= 0.0:
+		return
+	var sign := 1.0 if _buy else -1.0
+	_tp.text = _px_text(ref * (1.0 + 0.02 * sign))
+	_sl.text = _px_text(ref * (1.0 - 0.01 * sign))
+	refresh_quote()
+
+
+func _ref_px() -> float:
+	return hl.price(_coin) if _market else _px.text.replace(",", "").to_float()
+
+
+## A price picked elsewhere (a level in the book): a limit order there.
+func use_price(px: float) -> void:
+	if px <= 0.0:
+		return
+	_market = false
+	_px.text = _px_text(px)
+	_paint_choices()
+	refresh_quote()
+
+
 func _px_text(v: float) -> String:
 	return HlExchange.wire(HlExchange.round_px(v, hl.sz_decimals(_coin))) if v > 0.0 else ""
 
@@ -298,15 +419,21 @@ func _on_coin() -> void:
 	_lev.value = clampi(now if now > 0 else mini(5, top), 1, top)
 	_lev_label.text = "%d×" % int(_lev.value)
 	_px.text = ""
+	_tp.text = ""
+	_sl.text = ""
 	if not _market:
 		_px.text = _px_text(hl.price(_coin))
+	if _tpsl.button_pressed:
+		_suggest_tpsl()
 	refresh_quote()
 
 
 ## The order the ticket describes, as HlExchange.quote() works it out.
 func _ticket() -> Dictionary:
 	return {"coin": _coin, "buy": _buy, "market": _market, "usd": _usd.text.replace(",", "").replace("$", "").to_float(),
-		"px": _px.text.replace(",", "").to_float(), "lev": int(_lev.value), "reduce": _reduce.button_pressed}
+		"px": _px.text.replace(",", "").to_float(), "lev": int(_lev.value), "reduce": _reduce.button_pressed,
+		"tp": _tp.text.replace(",", "").to_float() if _tpsl_box.visible else 0.0,
+		"sl": _sl.text.replace(",", "").to_float() if _tpsl_box.visible else 0.0}
 
 
 func refresh_quote() -> void:
@@ -323,8 +450,18 @@ func refresh_quote() -> void:
 		if q.is_empty():
 			_est.text = "Up to %d× on %s." % [int(_lev.max_value), name]
 		else:
-			_est.text = "≈ %s %s  ·  margin %s  ·  fee ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name,
+			_est.text = "≈ %s %s  ·  margin %s\nFee ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name,
 				Hyperliquid.fmt_usd(float(q["margin"])), Hyperliquid.fmt_usd(float(q["fee"]))]
+			if float(q["tp"]) > 0.0 or float(q["sl"]) > 0.0:
+				var bits := [""]
+				if float(q["tp"]) > 0.0:
+					bits.append("TP %s" % Hyperliquid.fmt_usd(float(q["tp_pnl"]), true))
+				if float(q["sl"]) > 0.0:
+					bits.append("SL %s" % Hyperliquid.fmt_usd(float(q["sl_pnl"]), true))
+				_est.text += "  ·  ".join(bits)
+			if not bool(q["reduce"]) and _free() > 0.0 and float(q["margin"]) > _free():
+				_note.text = "That needs more margin than you have free (%s)." % Hyperliquid.fmt_usd(_free())
+	_avail.text = ("%s free" % Hyperliquid.fmt_usd(_free())) if not hl.account.is_empty() else ""
 	_go.text = ("Review buy" if _buy else "Review sell") + " " + name
 	if _sending:
 		_go.text = "Sending…"
@@ -366,6 +503,10 @@ func _review() -> void:
 		["Margin used", Hyperliquid.fmt_usd(float(q["margin"]))],
 		["Fee (estimate)", Hyperliquid.fmt_usd(float(q["fee"]))],
 	]
+	if float(q["tp"]) > 0.0:
+		d.rows.append(["Take profit", "%s  (%s)" % [Hyperliquid.fmt_px(float(q["tp"])), Hyperliquid.fmt_usd(float(q["tp_pnl"]), true)], UP])
+	if float(q["sl"]) > 0.0:
+		d.rows.append(["Stop loss", "%s  (%s)" % [Hyperliquid.fmt_px(float(q["sl"])), Hyperliquid.fmt_usd(float(q["sl_pnl"]), true)], DOWN])
 	d.confirm_text = "%s %s" % ["Buy" if q["buy"] else "Sell", name]
 	d.on_confirm = func() -> void: _submit(q)
 	main.overlay_layer.add_child(d)
@@ -418,21 +559,58 @@ func _sync() -> void:
 			"unsupported":
 				_setup.add_child(_text("Trading runs through Oazy's Windows helper, which isn't running here."))
 			"wallet":
-				_setup.add_child(_text("Add the wallet you trade from (under Positions) first. Oazy reads it to find your account."))
+				_build_wallet_step()
 			"key":
 				_build_key_step()
 			"approve":
 				_build_approve_step()
 	var editable := ex.armed and not _sending
-	for e in [_usd, _px]:
+	for e in [_usd, _px, _tp, _sl]:
 		(e as LineEdit).editable = editable
 	_lev.editable = editable
 	_reduce.disabled = not editable
+	_tpsl.disabled = not editable or _reduce.button_pressed
+	for qb in _quick.get_children():
+		(qb as Button).disabled = not editable
 	for b in _side + _types:
 		(b as Button).disabled = not editable
 	_form.modulate.a = 1.0 if ex.armed else 0.62
 	_foot_label.text = "API wallet %s%s" % [Hyperliquid.short_address(ex.agent), (" · " + ex.approved_name) if ex.approved_name != "" else ""]
 	refresh_quote()
+
+
+## Step one: which account is yours. Same field as under Positions, here too.
+func _build_wallet_step() -> void:
+	_setup.add_child(Kit.label("Add your wallet", 15, 700, App.TEXT))
+	_setup.add_child(_text("Paste the public address of the wallet you trade with on Hyperliquid (0x and 40 characters, shown at the top right of Hyperliquid's site). Never a private key or seed phrase."))
+	var e := LineEdit.new()
+	e.placeholder_text = "0x…"
+	e.custom_minimum_size.y = 40
+	e.add_theme_font_override("font", DesktopBelow._num_font(500))
+	e.add_theme_font_size_override("font_size", 14)
+	_setup.add_child(e)
+	var note := _text("", 12, DOWN)
+	_setup.add_child(note)
+	var save := func() -> void:
+		var t := e.text.strip_edges()
+		var hex := t.trim_prefix("0x")
+		if hex.length() == 64 and hex.is_valid_hex_number():
+			e.text = ""
+			note.text = "That looks like a private key, so Oazy wiped it. Only the public address goes here."
+		elif Hyperliquid.is_address(t):
+			Sfx.play(&"select")
+			Settings.set_value("hl_address", t.to_lower())
+		else:
+			note.text = "A wallet address is 0x followed by 40 letters and digits."
+	e.text_submitted.connect(func(_t: String) -> void: save.call())
+	e.text_changed.connect(func(t: String) -> void:
+		var hex := t.strip_edges().trim_prefix("0x")
+		if hex.length() == 64 and hex.is_valid_hex_number():
+			save.call()
+	)
+	var go := FxButton.make("Use this wallet", "", FxButton.Style.PRIMARY, 40)
+	go.pressed.connect(save)
+	_setup.add_child(go)
 
 
 func _build_key_step() -> void:

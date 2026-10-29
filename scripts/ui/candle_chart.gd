@@ -3,10 +3,12 @@ extends Control
 ## A candlestick chart, drawn in one pass: quiet price grid on the right, the
 ## times along the bottom, volume as a low tide under the candles and a dashed
 ## line at the latest price with its tag on the axis. Hovering shows a
-## crosshair and that candle's open, high, low and close.
+## crosshair and that candle's open, high, low and close. `marks` lay your own
+## prices over it: entry, liquidation, take profit, stop loss, open orders.
 
 const AXIS_W := 84.0
 const TIME_H := 26.0
+const READOUT_H := 30.0
 const VOL_SHARE := 0.16
 const GRID := Color(1, 1, 1, 0.045)
 ## Round spans between time labels: 15m up to four weeks.
@@ -19,6 +21,8 @@ var rows: Array = []
 ## Seconds per candle (for the time labels).
 var step_s := 3600
 var empty_text := "Loading chart…"
+## [{px, text, color}] drawn as quiet lines with a label, when in view.
+var marks: Array = []
 
 var _hover := Vector2(-1, -1)
 
@@ -59,7 +63,8 @@ func _fit(plot_w: float) -> Array:
 
 
 func _draw() -> void:
-	var plot := Rect2(0, 6, size.x - AXIS_W, size.y - TIME_H - 6)
+	# The open / high / low / close readout gets its own line above the plot.
+	var plot := Rect2(0, READOUT_H, size.x - AXIS_W, size.y - TIME_H - READOUT_H)
 	if rows.size() < 2 or plot.size.x < 40.0 or plot.size.y < 40.0:
 		var f := _font(500)
 		draw_string(f, Vector2(0, size.y * 0.5), empty_text, HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, App.TEXT_MUTE)
@@ -85,12 +90,18 @@ func _draw() -> void:
 
 	# Grid and the price axis.
 	var f12 := _font(500)
+	# Where the axis tags will sit, so grid labels don't hide behind them.
+	var tag_ys := [y_of.call(float(rows[rows.size() - 1][4]))]
+	for m in marks:
+		if float(m["px"]) > lo and float(m["px"]) < hi:
+			tag_ys.append(y_of.call(float(m["px"])))
 	var tick := _nice_step((hi - lo) / 5.0)
 	var v := ceilf(lo / tick) * tick
 	while v < hi:
 		var y := roundf(y_of.call(v)) + 0.5
 		draw_line(Vector2(0, y), Vector2(plot.end.x, y), GRID, 1.0)
-		draw_string(f12, Vector2(plot.end.x + 12.0, y + 4.0), Hyperliquid.fmt_px(v), HORIZONTAL_ALIGNMENT_LEFT, AXIS_W - 12.0, 12, App.TEXT_MUTE)
+		if not tag_ys.any(func(ty: float) -> bool: return absf(ty - y) < 16.0):
+			draw_string(f12, Vector2(plot.end.x + 12.0, y + 4.0), Hyperliquid.fmt_px(v), HORIZONTAL_ALIGNMENT_LEFT, AXIS_W - 12.0, 12, App.TEXT_MUTE)
 		v += tick
 
 	# Time labels, about every 150 px, on round clock times.
@@ -133,6 +144,25 @@ func _draw() -> void:
 		var top: float = y_of.call(maxf(o, c))
 		var bot: float = y_of.call(minf(o, c))
 		draw_rect(Rect2(roundf(cx - body_w * 0.5), roundf(top), body_w, maxf(1.0, roundf(bot - top))), Color(tone, 0.92))
+
+	# Your prices: a fine line, a label at the left, a tag on the axis.
+	for m in marks:
+		var px := float(m["px"])
+		if px <= lo or px >= hi:
+			continue
+		var my := roundf(y_of.call(px)) + 0.5
+		if my > plot.position.y + price_h:
+			continue
+		var mc: Color = m["color"]
+		draw_dashed_line(Vector2(0, my), Vector2(plot.end.x, my), Color(mc, 0.55), 1.0, 6.0)
+		var label := str(m["text"])
+		var lw := f12.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 14.0
+		var lr := Rect2(8.0, my - 10.0, lw, 20.0)
+		draw_style_box(Kit.box(Color(0.04, 0.06, 0.09, 0.88), 6, Color(mc, 0.6), 1), lr)
+		draw_string(f12, Vector2(lr.position.x, lr.position.y + 14.0), label, HORIZONTAL_ALIGNMENT_CENTER, lw, 11, mc)
+		# The latest price's tag wins when the two would overlap.
+		if absf(my - float(tag_ys[0])) >= 22.0:
+			_tag(Vector2(plot.end.x + 4.0, my), Hyperliquid.fmt_px(px), Color(mc, 0.9), Color(0.02, 0.04, 0.06))
 
 	# The latest price: a dashed line and its tag on the axis.
 	var last: Array = rows[rows.size() - 1]
