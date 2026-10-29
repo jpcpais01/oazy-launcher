@@ -172,6 +172,7 @@ func _flush() -> void:
 		_update_market()
 	if _dirty.get("account", false):
 		_fill_positions()
+		_ticket.refresh_quote()
 		_sync_chart_marks()
 		relayout = true
 	_dirty.clear()
@@ -487,7 +488,9 @@ func _build_chart() -> void:
 		s.name = spec[0]
 		_stats.add_child(s)
 
-	col.add_child(Kit.spacer(0, 2))
+	# The stats stay out of the way (the chart wants the room); they show as
+	# the price's tooltip instead.
+	_stats.visible = false
 	_chart = CandleChart.new()
 	_chart.up = UP
 	_chart.down = DOWN
@@ -553,6 +556,11 @@ func _update_header() -> void:
 		_stat("funding", "%s%.4f%%" % ["+" if fr >= 0.0 else "−", absf(fr)], _tone(fr))
 	else:
 		_stat("funding", "—")
+	var tip := []
+	for s_ in _stats.get_children():
+		tip.append("%s  %s" % [(s_.get_child(0) as Label).text, (s_.get_meta("value") as Label).text])
+	_big_price.tooltip_text = "\n".join(tip)
+	_big_price.mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 func _stat(id: String, text: String, color: Color = App.TEXT_DIM) -> void:
@@ -1277,7 +1285,7 @@ func _layout() -> void:
 	var pos_h := clampf(roundf(h * 0.2), 214.0, 250.0)
 	var main_h := full_h - GAP - pos_h
 	var book_w := clampf(roundf(inner * 0.135), 240.0, 300.0)
-	var col_w := clampf(roundf(inner * 0.165), 290.0, 340.0)
+	var col_w := clampf(roundf(inner * 0.17), 300.0, 350.0)
 	var chart_w := inner - book_w - col_w - GAP * 2.0
 	_chart_panel.position = Vector2(left, y)
 	_chart_panel.size = Vector2(chart_w, main_h)

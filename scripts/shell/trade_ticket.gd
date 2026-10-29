@@ -35,6 +35,15 @@ var _sl: LineEdit
 var _avail: Label
 var _quick: HBoxContainer
 var _est: Label
+var _acct_card: PanelContainer
+var _acct_total: Label
+var _bar: MarginBar
+var _leg_used: Label
+var _leg_order: Label
+var _leg_order_dot: Control
+var _leg_free: Label
+var _sum_box: PanelContainer
+var _sum := {}
 var _note: Label
 var _go: Button
 var _foot: HBoxContainer
@@ -130,7 +139,7 @@ static func _field_label(t: String) -> Label:
 func _field(px_w: float, placeholder: String) -> LineEdit:
 	var e := LineEdit.new()
 	e.placeholder_text = placeholder
-	e.custom_minimum_size = Vector2(px_w, 40)
+	e.custom_minimum_size = Vector2(px_w, 38)
 	e.add_theme_font_override("font", DesktopBelow._num_font(600))
 	e.add_theme_font_size_override("font_size", 15)
 	e.text_changed.connect(func(_t: String) -> void:
@@ -141,19 +150,23 @@ func _field(px_w: float, placeholder: String) -> LineEdit:
 
 
 ## Two or more buttons acting as one choice.
-func _segment(labels: Array, on_pick: Callable) -> Array:
-	var row := Kit.hbox(6)
-	_form.add_child(row)
+## `into` defaults to the form; `h` is the button height.
+func _segment(labels: Array, on_pick: Callable, into: Container = null, h: int = 34) -> Array:
+	var row := Kit.hbox(6 if into == null else 4)
+	(into if into != null else _form).add_child(row)
 	var out := []
 	for i in labels.size():
 		var b := Button.new()
 		b.text = labels[i]
 		b.focus_mode = Control.FOCUS_NONE
 		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size.y = 36
+		if into == null:
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		else:
+			b.custom_minimum_size.x = 64
+		b.custom_minimum_size.y = h
 		b.add_theme_font_override("font", Kit.font(700))
-		b.add_theme_font_size_override("font_size", 14)
+		b.add_theme_font_size_override("font_size", 14 if into == null else 12)
 		b.pressed.connect(func() -> void:
 			Sfx.play(&"move", 1.1)
 			ex.touch()
@@ -179,19 +192,13 @@ static func _paint(b: Button, on: bool, tone: Color) -> void:
 # --- The form ---------------------------------------------------------------------------------
 
 func _build_form() -> void:
-	_form = Kit.vbox(9)
+	_form = Kit.vbox(8)
 	_form.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_form.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_form)
+	_build_account_card()
 	_side = _segment(["Buy / Long", "Sell / Short"], func(i: int) -> void:
 		_buy = i == 0
-		_paint_choices()
-		refresh_quote()
-	)
-	_types = _segment(["Market", "Limit"], func(i: int) -> void:
-		_market = i == 0
-		if not _market and _px.text.strip_edges() == "":
-			_px.text = _px_text(hl.price(_coin))
 		_paint_choices()
 		refresh_quote()
 	)
@@ -200,14 +207,21 @@ func _build_form() -> void:
 	_form.add_child(size_box)
 	var size_head := Kit.hbox(6)
 	size_box.add_child(size_head)
-	var sl_ := _field_label("Size (USD)")
-	sl_.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	size_head.add_child(sl_)
+	# Market / Limit as small pills on the size row: one less row in the box.
+	_types = _segment(["Market", "Limit"], func(i: int) -> void:
+		_market = i == 0
+		if not _market and _px.text.strip_edges() == "":
+			_px.text = _px_text(hl.price(_coin))
+		_paint_choices()
+		refresh_quote()
+	, size_head, 26)
+	size_head.add_child(Kit.spacer(0, 0, true))
 	_avail = DesktopBelow._num("", 11, 600, App.TEXT_MUTE)
-	_avail.tooltip_text = "Free to trade with, times your leverage, is what you can open."
+	_avail.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_avail.tooltip_text = "Your free money times your leverage: the biggest position you can open."
 	_avail.mouse_filter = Control.MOUSE_FILTER_PASS
 	size_head.add_child(_avail)
-	_usd = _field(120, "100")
+	_usd = _field(120, "Size in USD")
 	size_box.add_child(_usd)
 	# Quick sizes: a share of what you can open at this leverage.
 	var quick := Kit.hbox(5)
@@ -287,8 +301,8 @@ func _build_form() -> void:
 		var b := Kit.vbox(5)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_tpsl_box.add_child(b)
-		b.add_child(_field_label(spec[0]))
-		var e := _field(60, "Price")
+		var e := _field(60, spec[0])
+		e.tooltip_text = spec[0] + " price"
 		b.add_child(e)
 		if spec[1] == "tp":
 			_tp = e
@@ -299,6 +313,7 @@ func _build_form() -> void:
 	_est.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_est.custom_minimum_size.x = 120
 	_form.add_child(_est)
+	_build_summary()
 	# The send button sits at the bottom of the panel, under everything else.
 	var push := Kit.spacer(0, 0)
 	push.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -327,6 +342,132 @@ func _build_form() -> void:
 	forget.pressed.connect(_confirm_forget)
 	_foot.add_child(forget)
 	_paint_choices()
+
+
+# --- Your money, at a glance ------------------------------------------------------------------
+
+func _soft_box() -> PanelContainer:
+	var box := PanelContainer.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.035), 14, Color(1, 1, 1, 0.06), 1, 14, 11))
+	return box
+
+
+## Total value on top; under it one bar of what's in use, what this order
+## would take and what's free.
+func _build_account_card() -> void:
+	_acct_card = _soft_box()
+	_form.add_child(_acct_card)
+	var col := Kit.vbox(7)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_acct_card.add_child(col)
+	var top := Kit.hbox(6)
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(top)
+	var k := Kit.label("Your account", 12, 600, App.TEXT_MUTE)
+	k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	k.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(k)
+	_acct_total = DesktopBelow._num("—", 20, 700, App.TEXT)
+	_acct_total.tooltip_text = "Everything on Hyperliquid, with open positions at the live price"
+	_acct_total.mouse_filter = Control.MOUSE_FILTER_PASS
+	top.add_child(_acct_total)
+	_bar = MarginBar.new()
+	_bar.order_color = UP
+	_bar.over_color = DOWN
+	col.add_child(_bar)
+	var legend := Kit.hbox(8)
+	legend.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(legend)
+	var used := _legend(legend, Color(1, 1, 1, 0.42), "Positions use the margin held for them")
+	_leg_used = used[1]
+	var order := _legend(legend, UP, "What this order would take")
+	_leg_order_dot = order[0]
+	_leg_order = order[1]
+	legend.add_child(Kit.spacer(0, 0, true))
+	var free := _legend(legend, Color(1, 1, 1, 0.12), "Free to open new trades with (or withdraw)")
+	_leg_free = free[1]
+
+
+## Money in a few characters: $950, $9.1K, $1.25M.
+static func _compact(v: float) -> String:
+	var a := absf(v)
+	if a >= 1000000.0:
+		return "$%.2fM" % (v / 1000000.0)
+	if a >= 1000.0:
+		return "$%.1fK" % (v / 1000.0)
+	return "$%d" % roundi(v)
+
+
+## A dot and a label; answers [the dot's row, the label].
+func _legend(row: HBoxContainer, color: Color, tip: String) -> Array:
+	var box := Kit.hbox(5)
+	box.mouse_filter = Control.MOUSE_FILTER_PASS
+	box.tooltip_text = tip
+	row.add_child(box)
+	var dot := Panel.new()
+	dot.custom_minimum_size = Vector2(7, 7)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.add_theme_stylebox_override("panel", Kit.box(color, 4))
+	box.add_child(dot)
+	var l := DesktopBelow._num("", 11, 600, App.TEXT_DIM)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(l)
+	return [box, l]
+
+
+## The order in plain words, a line each: what you get, what it ties up, the fee.
+func _build_summary() -> void:
+	_sum_box = _soft_box()
+	_sum_box.visible = false
+	_form.add_child(_sum_box)
+	var col := Kit.vbox(5)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sum_box.add_child(col)
+	for spec in [["get", "You get"], ["margin", "Uses"], ["tpsl", "If TP / SL hit"]]:
+		var row := Kit.hbox(8)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		col.add_child(row)
+		var k := Kit.label(spec[1], 12, 500, App.TEXT_MUTE)
+		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(k)
+		var v := DesktopBelow._num("", 12, 600, App.TEXT)
+		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		v.clip_text = true
+		v.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		v.size_flags_stretch_ratio = 2.6
+		row.add_child(v)
+		_sum[spec[0]] = v
+
+
+func _set_sum(id: String, text: String, color: Color = App.TEXT) -> void:
+	var v: Label = _sum[id]
+	v.text = text
+	v.add_theme_color_override("font_color", color)
+	v.get_parent().visible = text != ""
+
+
+## The account card, with the order being typed (`q`, may be {}) folded in.
+func _sync_account(q: Dictionary) -> void:
+	var acct := hl.account
+	_acct_card.visible = not acct.is_empty()
+	if acct.is_empty():
+		return
+	var total := hl.live_value()
+	var used := float(acct.get("margin", 0.0))
+	var order := float(q.get("margin", 0.0)) if not q.is_empty() and not q.has("error") and not bool(q.get("reduce", false)) else 0.0
+	var free := _free()
+	_acct_total.text = Hyperliquid.fmt_usd(total)
+	_bar.set_values(maxf(total, used + free), used, order)
+	_leg_used.text = "Used %s" % _compact(used)
+	_leg_order_dot.visible = order > 0.0
+	_leg_order.text = "Order %s" % _compact(order)
+	var left := free - order
+	_leg_free.text = ("Free %s" if order <= 0.0 else "Left %s") % _compact(maxf(0.0, left))
+	_leg_free.add_theme_color_override("font_color", DOWN if left < 0.0 else App.TEXT_DIM)
+	(_leg_order_dot.get_child(0) as Panel).add_theme_stylebox_override("panel", Kit.box(DOWN if left < 0.0 else UP, 4))
 
 
 func _check(text: String, tip: String) -> CheckBox:
@@ -442,26 +583,27 @@ func refresh_quote() -> void:
 	var name := Hyperliquid.display(_coin)
 	var tone := UP if _buy else DOWN
 	var q := ex.quote(_ticket()) if _usd.text.strip_edges() != "" else {}
-	if q.has("error"):
-		_est.text = ""
-		_note.text = str(q["error"])
-	else:
-		_note.text = ""
-		if q.is_empty():
-			_est.text = "Up to %d× on %s." % [int(_lev.max_value), name]
-		else:
-			_est.text = "≈ %s %s  ·  margin %s\nFee ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name,
-				Hyperliquid.fmt_usd(float(q["margin"])), Hyperliquid.fmt_usd(float(q["fee"]))]
-			if float(q["tp"]) > 0.0 or float(q["sl"]) > 0.0:
-				var bits := [""]
-				if float(q["tp"]) > 0.0:
-					bits.append("TP %s" % Hyperliquid.fmt_usd(float(q["tp_pnl"]), true))
-				if float(q["sl"]) > 0.0:
-					bits.append("SL %s" % Hyperliquid.fmt_usd(float(q["sl_pnl"]), true))
-				_est.text += "  ·  ".join(bits)
-			if not bool(q["reduce"]) and _free() > 0.0 and float(q["margin"]) > _free():
-				_note.text = "That needs more margin than you have free (%s)." % Hyperliquid.fmt_usd(_free())
-	_avail.text = ("%s free" % Hyperliquid.fmt_usd(_free())) if not hl.account.is_empty() else ""
+	var ok := not q.is_empty() and not q.has("error")
+	_est.text = ""
+	_note.text = str(q["error"]) if q.has("error") else ""
+	if q.is_empty():
+		_est.text = "Type an amount, or pick a quick size. Up to %d× on %s." % [int(_lev.max_value), name]
+	if ok:
+		_set_sum("get", "%s %s  ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name, Hyperliquid.fmt_usd(float(q["notional"]))])
+		_set_sum("margin", ("%s  +  fee %s" % [Hyperliquid.fmt_usd(float(q["margin"])), Hyperliquid.fmt_usd(float(q["fee"]))]) if not bool(q["reduce"]) else "Fee %s" % Hyperliquid.fmt_usd(float(q["fee"])))
+		(_sum["margin"] as Label).tooltip_text = "Margin is the part of your money this position holds (its size ÷ %d× leverage)." % int(q["lev"])
+		(_sum["margin"] as Label).mouse_filter = Control.MOUSE_FILTER_PASS
+		var bits := []
+		if float(q["tp"]) > 0.0:
+			bits.append(Hyperliquid.fmt_usd(float(q["tp_pnl"]), true))
+		if float(q["sl"]) > 0.0:
+			bits.append(Hyperliquid.fmt_usd(float(q["sl_pnl"]), true))
+		_set_sum("tpsl", "  /  ".join(bits), App.TEXT)
+		if not bool(q["reduce"]) and not hl.account.is_empty() and float(q["margin"]) > _free():
+			_note.text = "That needs %s of margin, but only %s is free. Lower the size or raise the leverage." % [Hyperliquid.fmt_usd(float(q["margin"])), Hyperliquid.fmt_usd(_free())]
+	_sum_box.visible = ok
+	_sync_account(q)
+	_avail.text = ("Up to %s" % _compact(_buying_power())) if not hl.account.is_empty() and _buying_power() > 0.0 else ""
 	_go.text = ("Review buy" if _buy else "Review sell") + " " + name
 	if _sending:
 		_go.text = "Sending…"
