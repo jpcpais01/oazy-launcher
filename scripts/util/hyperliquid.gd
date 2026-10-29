@@ -19,6 +19,11 @@ signal status_changed
 const INFO := "https://api.hyperliquid.xyz/info"
 const WS_URL := "wss://api.hyperliquid.xyz/ws"
 const INTERVALS := {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+## The chart view for stocks and ETFs: from the open of the US trading day.
+const TODAY := "today"
+## The regular session: 9:30 to 16:00 New York time.
+const SESSION_OPEN_S := 34200
+const SESSION_LEN_S := 23400
 const CANDLES := 160
 const MAX_TRADES := 80
 ## Seconds between REST polls: every coin's 24h stats, your account (in the
@@ -136,9 +141,56 @@ static func coin() -> String:
 	return c if c != "" else "BTC"
 
 
-static func interval() -> String:
+## The chart view picked: an interval, or TODAY on a stock / ETF market.
+static func view() -> String:
 	var i := str(Settings.get_value("hl_interval"))
+	if i == TODAY:
+		return TODAY if has_session(coin()) else "1h"
 	return i if INTERVALS.has(i) else "1h"
+
+
+## The candle size behind the view. Today uses 5m candles, or 15m once the
+## span gets long (the weekend, before Monday's open).
+static func interval() -> String:
+	var v := view()
+	if v != TODAY:
+		return v
+	var now := int(Time.get_unix_time_from_system())
+	return "5m" if now - session_open(now) <= 10 * 3600 else "15m"
+
+
+## Stocks, ETFs and indices: the markets on builder exchanges (HIP-3).
+static func has_session(c: String) -> bool:
+	return dex_of(c) != ""
+
+
+## New York's offset from UTC at `utc`, in seconds: −4h in summer time
+## (second Sunday of March to first Sunday of November, 2am local), else −5h.
+static func ny_offset(utc: int) -> int:
+	var y := int(Time.get_datetime_dict_from_unix_time(utc)["year"])
+	var start := _nth_sunday(y, 3, 2) + 7 * 3600
+	var end := _nth_sunday(y, 11, 1) + 6 * 3600
+	return -4 * 3600 if utc >= start and utc < end else -5 * 3600
+
+
+## Midnight UTC of the n-th Sunday of a month.
+static func _nth_sunday(y: int, m: int, n: int) -> int:
+	var first := Time.get_unix_time_from_datetime_dict({"year": y, "month": m, "day": 1, "hour": 0, "minute": 0, "second": 0})
+	var wd := int(Time.get_datetime_dict_from_unix_time(first)["weekday"])
+	return first + (((7 - wd) % 7) + 7 * (n - 1)) * 86400
+
+
+## When the latest US trading day opened (9:30 New York), as a UTC unix time:
+## today's open once it has passed, else the last weekday's.
+static func session_open(now: int) -> int:
+	var local := now + ny_offset(now)
+	var open := local - posmod(local, 86400) + SESSION_OPEN_S
+	if local < open:
+		open -= 86400
+	while int(Time.get_datetime_dict_from_unix_time(open)["weekday"]) in [0, 6]:
+		open -= 86400
+	# Never a Sunday 2am, so the offset 5h later is the one that applied.
+	return open - ny_offset(open + 5 * 3600)
 
 
 static func address() -> String:
@@ -246,7 +298,7 @@ func set_focus(on: bool) -> void:
 	if on:
 		start()
 		_acct_in = 0.0
-		if candles.is_empty() or _candle_key != coin() + "|" + interval() or _now() - _candle_at > 60:
+		if candles.is_empty() or _candle_key != coin() + "|" + view() or _now() - _candle_at > 60:
 			_fetch_candles()
 		if _now() - _spark_at > SPARK_EVERY:
 			_fetch_sparks()
@@ -432,7 +484,7 @@ func _merge_candle(d: Dictionary) -> void:
 		candles[candles.size() - 1] = row
 	elif int(row[0]) > int(last[0]):
 		candles.append(row)
-		if candles.size() > CANDLES + 40:
+		if candles.size() > CANDLES + 40 and view() != TODAY:
 			candles = candles.slice(candles.size() - CANDLES)
 
 
@@ -528,10 +580,13 @@ func _fetch_candles() -> void:
 		return
 	var c := coin()
 	var iv := interval()
-	var key := c + "|" + iv
+	var key := c + "|" + view()
 	var end := _now() * 1000
-	var j: Variant = await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": iv, "startTime": end - int(INTERVALS[iv]) * 1000 * CANDLES, "endTime": end}})
-	if key != coin() + "|" + interval():
+	var start := end - int(INTERVALS[iv]) * 1000 * CANDLES
+	if view() == TODAY:
+		start = session_open(_now()) * 1000
+	var j: Variant = await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": iv, "startTime": start, "endTime": end}})
+	if key != coin() + "|" + view():
 		return
 	var rows := parse_candles(j)
 	if not rows.is_empty():

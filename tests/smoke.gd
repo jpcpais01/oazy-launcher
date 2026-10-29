@@ -472,6 +472,20 @@ func _logic_tests() -> void:
 	check(not bool(sl_o["buy"]) and bool(sl_o["reduce"]) and is_equal_approx(float(sl_o["px"]), 1800.0) and is_equal_approx(float(sl_o["trigger"]), 2000.0), "trading: a long's stop loss sells, reduce-only, with room to fill")
 	check(HlExchange.tpsl_problem(true, 100.0, 110.0, 95.0) == "" and HlExchange.tpsl_problem(true, 100.0, 90.0, 0.0) != "" and HlExchange.tpsl_problem(false, 100.0, 90.0, 105.0) == "" and HlExchange.tpsl_problem(false, 100.0, 0.0, 95.0) != "", "trading: TP / SL must sit on the right side of the price")
 	check(Hyperliquid.tpsl_of("Take Profit Market") == "tp" and Hyperliquid.tpsl_of("Stop Market") == "sl" and Hyperliquid.tpsl_of("Limit") == "", "hyperliquid: TP / SL orders recognised")
+	var ut := func(y: int, mo: int, d: int, h: int, mi: int = 0) -> int:
+		return Time.get_unix_time_from_datetime_dict({"year": y, "month": mo, "day": d, "hour": h, "minute": mi, "second": 0})
+	check(Hyperliquid.ny_offset(ut.call(2026, 10, 29, 14)) == -4 * 3600 and Hyperliquid.ny_offset(ut.call(2026, 11, 2, 14)) == -5 * 3600
+		and Hyperliquid.ny_offset(ut.call(2026, 3, 8, 6, 59)) == -5 * 3600 and Hyperliquid.ny_offset(ut.call(2026, 3, 8, 7)) == -4 * 3600, "hyperliquid: New York summer time")
+	check(Hyperliquid.session_open(ut.call(2026, 10, 29, 14)) == ut.call(2026, 10, 29, 13, 30)
+		and Hyperliquid.session_open(ut.call(2026, 10, 29, 13, 29)) == ut.call(2026, 10, 28, 13, 30)
+		and Hyperliquid.session_open(ut.call(2026, 10, 31, 12)) == ut.call(2026, 10, 30, 13, 30)
+		and Hyperliquid.session_open(ut.call(2026, 11, 2, 14)) == ut.call(2026, 10, 30, 13, 30)
+		and Hyperliquid.session_open(ut.call(2026, 11, 2, 15)) == ut.call(2026, 11, 2, 14, 30), "hyperliquid: today starts at the 9:30 New York open")
+	check(Hyperliquid.has_session("xyz:TSLA") and not Hyperliquid.has_session("BTC"), "hyperliquid: Today only for stocks and ETFs")
+	var ico := CoinIcons.decode('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#f7931a"/></svg>'.to_utf8_buffer(), true)
+	check(ico != null and ico.get_width() == CoinIcons.SIZE and ico.get_pixel(CoinIcons.SIZE / 2, CoinIcons.SIZE / 2).a > 0.9 and ico.get_pixel(1, 1).a < 0.05
+		and CoinIcons.decode("<!doctype html><html></html>".to_utf8_buffer(), true) == null, "coin icons: logos decode round, web pages don't")
+	check(CoinIcons.urls("xyz:TSLA")[0].ends_with("/coins/xyz:TSLA.svg") and CoinIcons.urls("kPEPE")[1].ends_with("/color/pepe.svg"), "coin icons: where logos come from")
 	var tord := Hyperliquid.parse_orders([{"coin": "BTC", "side": "A", "limitPx": "99000", "sz": "0.1", "oid": 9, "timestamp": 1, "orderType": "Stop Market", "isTrigger": true, "triggerPx": "100000", "reduceOnly": true, "isPositionTpsl": true}])
 	check(tord.size() == 1 and str(tord[0]["tpsl"]) == "sl" and is_equal_approx(float(tord[0]["trigger"]), 100000.0) and bool(tord[0]["position"]), "hyperliquid: trigger orders keep their trigger price")
 	# Your money: spot balances valued in dollars; unified accounts count them as the account.

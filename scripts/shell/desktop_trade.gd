@@ -18,7 +18,7 @@ const STRIP_H := 86.0
 const TICKER_MAX_W := 300.0
 ## A position's row in the table.
 const ROW_H := 38.0
-const INTERVAL_LABELS := {"5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D"}
+const INTERVAL_LABELS := {"today": "Today", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D"}
 ## Coins Hyperliquid people know by colour.
 const COIN_COLORS := {
 	"BTC": "f7931a", "ETH": "8a9cf0", "SOL": "a77bf3", "HYPE": "97fce4", "XRP": "b8c4cc",
@@ -206,7 +206,8 @@ static func _pct(v: float) -> String:
 	return "%s%.2f%%" % ["+" if v >= 0.0 else "−", absf(v)]
 
 
-## A round coin badge: the coin's colour with its first letter.
+## A round coin badge: the coin's logo once it's loaded; till then (or
+## without one) its colour with its first letter.
 static func coin_badge(c: String, px: float) -> Control:
 	var short := Hyperliquid.display(c)
 	var col := Color(COIN_COLORS[short]) if COIN_COLORS.has(short) else Kit.cover_colors(short)[0].lightened(0.15)
@@ -222,6 +223,7 @@ static func coin_badge(c: String, px: float) -> Control:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	dot.add_child(l)
+	CoinIcons.apply(dot, c)
 	return dot
 
 
@@ -526,7 +528,10 @@ func _sync_chart_marks() -> void:
 
 func _sync_intervals() -> void:
 	for t in _intervals.get_children():
-		_tab_style(t as Button, str(t.get_meta("interval")) == Hyperliquid.interval())
+		var id := str(t.get_meta("interval"))
+		_tab_style(t as Button, id == Hyperliquid.view())
+		if id == Hyperliquid.TODAY:
+			t.visible = Hyperliquid.has_session(Hyperliquid.coin())
 
 
 func _update_header() -> void:
@@ -633,7 +638,13 @@ static func _panel_title(text: String) -> Label:
 func _update_market() -> void:
 	var c := Hyperliquid.coin()
 	var dec := hl.sz_decimals(c)
-	_chart.set_rows(hl.candles, int(Hyperliquid.INTERVALS[Hyperliquid.interval()]))
+	var step := int(Hyperliquid.INTERVALS[Hyperliquid.interval()])
+	_chart.session_slots = 0
+	if Hyperliquid.view() == Hyperliquid.TODAY:
+		# Room up to the 4pm close, or for everything since the open if longer.
+		var since := int(Time.get_unix_time_from_system()) - Hyperliquid.session_open(int(Time.get_unix_time_from_system()))
+		_chart.session_slots = ceili(maxf(Hyperliquid.SESSION_LEN_S, since) / float(step))
+	_chart.set_rows(hl.candles, step)
 	_book.last_dir = 0 if hl.trades.is_empty() else (1 if str(hl.trades[0]["side"]) == "B" else -1)
 	_book.set_book(hl.book, dec, Hyperliquid.display(c))
 	_tape.set_trades(hl.trades, dec, Hyperliquid.display(c))
