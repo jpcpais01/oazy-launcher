@@ -4,7 +4,7 @@
 // real application windows (like Alt+Tab does), focusing / minimising /
 // closing them, live DWM thumbnails drawn into Oazy's window, app icons,
 // the list of installed apps, system stats and sensors, speaker volume, media keys,
-// what's playing (for the music wallpaper),
+// what's playing (for the music wallpaper), the Hyperliquid trading key (HlWallet),
 // Oazy's mouse pointers and the global "home" hotkey.
 //
 // Oazy compiles this file on first run with the C# compiler that ships with
@@ -672,6 +672,18 @@ namespace Oazy
 					return MediaBridge.Load(Arg(p, 2));
 				case "now_playing":
 					return MediaBridge.Command(Arg(p, 2), Arg(p, 3));
+				case "hl_key_new":
+					return HlWallet.New(Arg(p, 2));
+				case "hl_key_import":
+					return HlWallet.Import(Arg(p, 2), Arg(p, 3));
+				case "hl_key_address":
+					return HlWallet.AddressOf(Arg(p, 2));
+				case "hl_key_forget":
+					return HlWallet.Forget(Arg(p, 2));
+				case "hl_sign":
+					return HlWallet.Sign(Arg(p, 2), Arg(p, 3), Arg(p, 4), Arg(p, 5) != "0");
+				case "hl_selftest":
+					return HlWallet.SelfTest();
 				case "webview2":
 					return "\"ok\":true,\"version\":" + Json.Str(WebView2Version());
 			}
@@ -4533,4 +4545,363 @@ namespace Oazy
 			}
 		}
 	}
+
+	// --- HlWallet begin ---------------------------------------------------------
+	// The trading key for Oazy's Hyperliquid desk: an *agent* (API) wallet that
+	// can place and cancel orders but can never withdraw. The key is made here,
+	// kept on disk only wrapped by Windows (DPAPI, this Windows user), unwrapped
+	// just long enough to sign, then wiped. It never goes back to Oazy, never
+	// into a log. Signing follows Hyperliquid's L1 action scheme: keccak of the
+	// msgpack'd action + nonce, wrapped in an EIP-712 "Agent" message, signed
+	// with secp256k1 (RFC 6979 deterministic k, low s).
+	static class HlWallet
+	{
+		static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Oazy Hyperliquid agent wallet v1");
+		static readonly System.Numerics.BigInteger P = Hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
+		static readonly System.Numerics.BigInteger N = Hex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+		static readonly System.Numerics.BigInteger Gx = Hex("79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+		static readonly System.Numerics.BigInteger Gy = Hex("483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8");
+
+		// "hl_key_new <file>": a fresh key, wrapped and saved. Answers its address.
+		public static string New(string file)
+		{
+			byte[] key = new byte[32];
+			using (var rng = new System.Security.Cryptography.RNGCryptoServiceProvider())
+			{
+				do { rng.GetBytes(key); } while (!Valid(key));
+			}
+			return Save(file, key);
+		}
+
+		// "hl_key_import <file> <hex>": a key made on Hyperliquid's API page.
+		public static string Import(string file, string hex)
+		{
+			byte[] key = Bytes(hex);
+			if (key == null || key.Length != 32 || !Valid(key)) return "\"ok\":false,\"error\":\"That isn't a valid private key.\"";
+			return Save(file, key);
+		}
+
+		static string Save(string file, byte[] key)
+		{
+			try
+			{
+				string addr = Address(key);
+				byte[] blob = System.Security.Cryptography.ProtectedData.Protect(key, Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+				Directory.CreateDirectory(Path.GetDirectoryName(file));
+				File.WriteAllBytes(file, blob);
+				return "\"ok\":true,\"address\":" + Json.Str(addr);
+			}
+			catch (Exception e) { return "\"ok\":false,\"error\":" + Json.Str(e.Message); }
+			finally { Array.Clear(key, 0, key.Length); }
+		}
+
+		// "hl_key_address <file>": the agent's address, "" when there's no key.
+		public static string AddressOf(string file)
+		{
+			byte[] key = Load(file);
+			if (key == null) return "\"ok\":true,\"address\":\"\"";
+			try { return "\"ok\":true,\"address\":" + Json.Str(Address(key)); }
+			finally { Array.Clear(key, 0, key.Length); }
+		}
+
+		// "hl_key_forget <file>"
+		public static string Forget(string file)
+		{
+			try
+			{
+				if (File.Exists(file))
+				{
+					File.WriteAllBytes(file, new byte[new FileInfo(file).Length]);
+					File.Delete(file);
+				}
+				return "\"ok\":true";
+			}
+			catch (Exception e) { return "\"ok\":false,\"error\":" + Json.Str(e.Message); }
+		}
+
+		// "hl_sign <file> <msgpack hex> <nonce> <mainnet 1|0>": signs one L1 action.
+		public static string Sign(string file, string actionHex, string nonce, bool mainnet)
+		{
+			byte[] key = Load(file);
+			if (key == null) return "\"ok\":false,\"error\":\"No trading key on this PC.\"";
+			try { return SignWith(key, actionHex, nonce, mainnet); }
+			catch (Exception e) { return "\"ok\":false,\"error\":" + Json.Str(e.Message); }
+			finally { Array.Clear(key, 0, key.Length); }
+		}
+
+		// A known key and action, so tests can check the maths on real Windows.
+		public static string SelfTest()
+		{
+			byte[] key = Bytes("4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318");
+			return SignWith(key, "83a474797065a56f72646572a66f72646572739186a161ce0001adb3a162c3a170a53831323530a173a6302e30313233a172c2a17481a56c696d697481a3746966a3477463a867726f7570696e67a26e61", "1793230000123", true);
+		}
+
+		static string SignWith(byte[] key, string actionHex, string nonceText, bool mainnet)
+		{
+			byte[] action = Bytes(actionHex);
+			ulong nonce;
+			if (action == null || !ulong.TryParse(nonceText, out nonce)) return "\"ok\":false,\"error\":\"bad action\"";
+			byte[] data = new byte[action.Length + 9];
+			Buffer.BlockCopy(action, 0, data, 0, action.Length);
+			for (int i = 0; i < 8; i++) data[action.Length + i] = (byte)(nonce >> (56 - 8 * i));
+			data[action.Length + 8] = 0; // no vault
+			byte[] connection = Keccak(data);
+			byte[] domainType = Keccak(Encoding.ASCII.GetBytes("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
+			byte[] domain = Keccak(Concat(domainType, Keccak(Encoding.ASCII.GetBytes("Exchange")), Keccak(Encoding.ASCII.GetBytes("1")), Word(1337), new byte[32]));
+			byte[] agentType = Keccak(Encoding.ASCII.GetBytes("Agent(string source,bytes32 connectionId)"));
+			byte[] msg = Keccak(Concat(agentType, Keccak(Encoding.ASCII.GetBytes(mainnet ? "a" : "b")), connection));
+			byte[] digest = Keccak(Concat(new byte[] { 0x19, 0x01 }, domain, msg));
+			System.Numerics.BigInteger r, s;
+			int rec;
+			Ecdsa(key, digest, out r, out s, out rec);
+			return "\"ok\":true,\"r\":" + Json.Str("0x" + HexOf(r)) + ",\"s\":" + Json.Str("0x" + HexOf(s)) + ",\"v\":" + (27 + rec) + ",\"address\":" + Json.Str(Address(key));
+		}
+
+		static byte[] Load(string file)
+		{
+			try
+			{
+				if (!File.Exists(file)) return null;
+				return System.Security.Cryptography.ProtectedData.Unprotect(File.ReadAllBytes(file), Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+			}
+			catch (Exception) { return null; }
+		}
+
+		// --- secp256k1 ---
+
+		static bool Valid(byte[] key)
+		{
+			var d = Num(key);
+			return d > 0 && d < N;
+		}
+
+		public static string Address(byte[] key)
+		{
+			var q = Mul(Num(key), Gx, Gy);
+			byte[] pub = Concat(Pad(q[0]), Pad(q[1]));
+			byte[] h = Keccak(pub);
+			var sb = new StringBuilder("0x");
+			for (int i = 12; i < 32; i++) sb.Append(h[i].ToString("x2"));
+			return sb.ToString();
+		}
+
+		static void Ecdsa(byte[] key, byte[] digest, out System.Numerics.BigInteger r, out System.Numerics.BigInteger s, out int rec)
+		{
+			var d = Num(key);
+			var z = Num(digest);
+			// RFC 6979 with HMAC-SHA256.
+			byte[] x = Pad(d), h1 = Pad(z % N);
+			byte[] v = new byte[32], k = new byte[32];
+			for (int i = 0; i < 32; i++) v[i] = 1;
+			k = Hmac(k, Concat(v, new byte[] { 0 }, x, h1));
+			v = Hmac(k, v);
+			k = Hmac(k, Concat(v, new byte[] { 1 }, x, h1));
+			v = Hmac(k, v);
+			while (true)
+			{
+				v = Hmac(k, v);
+				var kk = Num(v);
+				if (kk > 0 && kk < N)
+				{
+					var R = Mul(kk, Gx, Gy);
+					r = R[0] % N;
+					if (r != 0)
+					{
+						s = ModInv(kk, N) * (z + r * d) % N;
+						if (s != 0)
+						{
+							rec = (R[1].IsEven ? 0 : 1) | (R[0] >= N ? 2 : 0);
+							if (s > N / 2) { s = N - s; rec ^= 1; }
+							Array.Clear(x, 0, x.Length);
+							return;
+						}
+					}
+				}
+				k = Hmac(k, Concat(v, new byte[] { 0 }));
+				v = Hmac(k, v);
+			}
+		}
+
+		static byte[] Hmac(byte[] key, byte[] data)
+		{
+			using (var h = new System.Security.Cryptography.HMACSHA256(key)) return h.ComputeHash(data);
+		}
+
+		// Double-and-add in Jacobian coordinates; answers affine [x, y].
+		static System.Numerics.BigInteger[] Mul(System.Numerics.BigInteger k, System.Numerics.BigInteger x, System.Numerics.BigInteger y)
+		{
+			System.Numerics.BigInteger[] acc = null;
+			System.Numerics.BigInteger[] add = { x, y, 1 };
+			while (k > 0)
+			{
+				if (!k.IsEven) acc = acc == null ? add : JAdd(acc, add);
+				add = JDouble(add);
+				k >>= 1;
+			}
+			var zi = ModInv(acc[2], P);
+			var zi2 = zi * zi % P;
+			return new[] { acc[0] * zi2 % P, acc[1] * zi2 % P * zi % P };
+		}
+
+		static System.Numerics.BigInteger M(System.Numerics.BigInteger a) { a %= P; return a.Sign < 0 ? a + P : a; }
+
+		static System.Numerics.BigInteger[] JDouble(System.Numerics.BigInteger[] p)
+		{
+			var ysq = M(p[1] * p[1]);
+			var s = M(4 * p[0] * ysq);
+			var m = M(3 * p[0] * p[0]);
+			var nx = M(m * m - 2 * s);
+			var ny = M(m * (s - nx) - 8 * ysq * ysq);
+			var nz = M(2 * p[1] * p[2]);
+			return new[] { nx, ny, nz };
+		}
+
+		static System.Numerics.BigInteger[] JAdd(System.Numerics.BigInteger[] p, System.Numerics.BigInteger[] q)
+		{
+			var z1 = M(p[2] * p[2]);
+			var z2 = M(q[2] * q[2]);
+			var u1 = M(p[0] * z2);
+			var u2 = M(q[0] * z1);
+			var s1 = M(p[1] * z2 * q[2]);
+			var s2 = M(q[1] * z1 * p[2]);
+			if (u1 == u2) return s1 == s2 ? JDouble(p) : new System.Numerics.BigInteger[] { 0, 1, 0 };
+			var h = M(u2 - u1);
+			var r = M(s2 - s1);
+			var h2 = M(h * h);
+			var h3 = M(h * h2);
+			var u1h2 = M(u1 * h2);
+			var nx = M(r * r - h3 - 2 * u1h2);
+			var ny = M(r * (u1h2 - nx) - s1 * h3);
+			var nz = M(h * p[2] * q[2]);
+			return new[] { nx, ny, nz };
+		}
+
+		static System.Numerics.BigInteger ModInv(System.Numerics.BigInteger a, System.Numerics.BigInteger m)
+		{
+			return System.Numerics.BigInteger.ModPow(((a % m) + m) % m, m - 2, m);
+		}
+
+		// --- Bytes ---
+
+		static System.Numerics.BigInteger Num(byte[] be)
+		{
+			byte[] le = new byte[be.Length + 1];
+			for (int i = 0; i < be.Length; i++) le[i] = be[be.Length - 1 - i];
+			return new System.Numerics.BigInteger(le);
+		}
+
+		static System.Numerics.BigInteger Hex(string h) { return Num(Bytes(h)); }
+
+		static byte[] Pad(System.Numerics.BigInteger v)
+		{
+			byte[] le = v.ToByteArray();
+			byte[] be = new byte[32];
+			for (int i = 0; i < 32 && i < le.Length; i++) be[31 - i] = le[i];
+			return be;
+		}
+
+		static string HexOf(System.Numerics.BigInteger v)
+		{
+			var sb = new StringBuilder();
+			foreach (byte b in Pad(v)) sb.Append(b.ToString("x2"));
+			string t = sb.ToString().TrimStart('0');
+			return t == "" ? "0" : t;
+		}
+
+		static byte[] Word(long v)
+		{
+			byte[] w = new byte[32];
+			for (int i = 0; i < 8; i++) w[31 - i] = (byte)(v >> (8 * i));
+			return w;
+		}
+
+		static byte[] Bytes(string hex)
+		{
+			if (hex == null) return null;
+			hex = hex.Trim();
+			if (hex.StartsWith("0x")) hex = hex.Substring(2);
+			if (hex.Length % 2 != 0) return null;
+			byte[] b = new byte[hex.Length / 2];
+			for (int i = 0; i < b.Length; i++)
+			{
+				int hi = Nib(hex[2 * i]), lo = Nib(hex[2 * i + 1]);
+				if (hi < 0 || lo < 0) return null;
+				b[i] = (byte)(hi * 16 + lo);
+			}
+			return b;
+		}
+
+		static int Nib(char c)
+		{
+			if (c >= '0' && c <= '9') return c - '0';
+			if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+			if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+			return -1;
+		}
+
+		static byte[] Concat(params byte[][] parts)
+		{
+			int n = 0;
+			foreach (var p in parts) n += p.Length;
+			byte[] o = new byte[n];
+			int at = 0;
+			foreach (var p in parts) { Buffer.BlockCopy(p, 0, o, at, p.Length); at += p.Length; }
+			return o;
+		}
+
+		// --- Keccak-256 (Ethereum's, not SHA3: 0x01 padding) ---
+
+		static readonly ulong[] RC = {
+			0x0000000000000001UL, 0x0000000000008082UL, 0x800000000000808aUL, 0x8000000080008000UL,
+			0x000000000000808bUL, 0x0000000080000001UL, 0x8000000080008081UL, 0x8000000000008009UL,
+			0x000000000000008aUL, 0x0000000000000088UL, 0x0000000080008009UL, 0x000000008000000aUL,
+			0x000000008000808bUL, 0x800000000000008bUL, 0x8000000000008089UL, 0x8000000000008003UL,
+			0x8000000000008002UL, 0x8000000000000080UL, 0x000000000000800aUL, 0x800000008000000aUL,
+			0x8000000080008081UL, 0x8000000000008080UL, 0x0000000080000001UL, 0x8000000080008008UL,
+		};
+		static readonly int[] Rot = { 0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14 };
+
+		public static byte[] Keccak(byte[] input)
+		{
+			const int rate = 136;
+			int padded = (input.Length / rate + 1) * rate;
+			byte[] msg = new byte[padded];
+			Buffer.BlockCopy(input, 0, msg, 0, input.Length);
+			msg[input.Length] ^= 0x01;
+			msg[padded - 1] ^= 0x80;
+			ulong[] st = new ulong[25];
+			for (int off = 0; off < padded; off += rate)
+			{
+				for (int i = 0; i < rate / 8; i++) st[i] ^= BitConverter.ToUInt64(msg, off + i * 8);
+				Permute(st);
+			}
+			byte[] o = new byte[32];
+			for (int i = 0; i < 4; i++) Buffer.BlockCopy(BitConverter.GetBytes(st[i]), 0, o, i * 8, 8);
+			return o;
+		}
+
+		static void Permute(ulong[] a)
+		{
+			ulong[] c = new ulong[5], b = new ulong[25];
+			for (int round = 0; round < 24; round++)
+			{
+				for (int x = 0; x < 5; x++) c[x] = a[x] ^ a[x + 5] ^ a[x + 10] ^ a[x + 15] ^ a[x + 20];
+				for (int x = 0; x < 5; x++)
+				{
+					ulong d = c[(x + 4) % 5] ^ RotL(c[(x + 1) % 5], 1);
+					for (int y = 0; y < 25; y += 5) a[y + x] ^= d;
+				}
+				for (int x = 0; x < 5; x++)
+					for (int y = 0; y < 5; y++)
+						b[y + 5 * ((2 * x + 3 * y) % 5)] = RotL(a[x + 5 * y], Rot[x + 5 * y]);
+				for (int x = 0; x < 5; x++)
+					for (int y = 0; y < 25; y += 5)
+						a[y + x] = b[y + x] ^ (~b[y + (x + 1) % 5] & b[y + (x + 2) % 5]);
+				a[0] ^= RC[round];
+			}
+		}
+
+		static ulong RotL(ulong v, int n) { return n == 0 ? v : (v << n) | (v >> (64 - n)); }
+	}
+	// --- HlWallet end ---
 }

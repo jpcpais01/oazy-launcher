@@ -449,7 +449,30 @@ func _logic_tests() -> void:
 	check(hacct.get("positions", []).size() == 1 and float(hacct["positions"][0]["szi"]) == -2.0 and not bool(hacct["positions"][0]["cross"]) and int(hacct["positions"][0]["lev"]) == 10, "hyperliquid: account and positions")
 	check(Hyperliquid.is_address("0x" + "a1".repeat(20)) and not Hyperliquid.is_address("0x" + "a1".repeat(32)) and not Hyperliquid.is_address("hello"), "hyperliquid: addresses, never keys")
 	check(Hyperliquid.fmt_px(111842.0) == "111,842" and Hyperliquid.fmt_px(3950.55) == "3,950.6" and Hyperliquid.fmt_px(0.012345) == "0.012345" and Hyperliquid.fmt_usd(-12.5, true) == "−$12.50", "hyperliquid: price formatting")
-	check(not HlExchange.can_trade() and not bool(HlExchange.place({}).get("ok", true)), "hyperliquid: trading stays off")
+	# Builder exchanges (HIP-3): prefixed names and their own asset numbers.
+	check(Hyperliquid.parse_dexes([null, {"name": "xyz", "fullName": "XYZ"}, {"name": "flx"}]) == ["", "xyz", "flx"], "hyperliquid: builder exchanges")
+	check(Hyperliquid.parse_meta_and_ctxs([{"universe": [{"name": "DRAM", "szDecimals": 2, "maxLeverage": 10, "onlyIsolated": true}, {"name": "xyz:XYZ100", "szDecimals": 3, "maxLeverage": 20}]},
+		[{"markPx": "1.0"}, {"markPx": "25000.0"}]], hm, hc, "xyz", 1) and int(hm["xyz:DRAM"]["asset"]) == 110000 and int(hm["xyz:XYZ100"]["asset"]) == 110001 and bool(hm["xyz:DRAM"]["isolated"]) and int(hm["BTC"]["asset"]) == 0, "hyperliquid: builder asset numbers")
+	check(Hyperliquid.display("xyz:XYZ100") == "XYZ100" and Hyperliquid.dex_of("xyz:XYZ100") == "xyz" and Hyperliquid.dex_of("BTC") == "", "hyperliquid: builder coin names")
+	var hlp := Hyperliquid.new()
+	hlp.meta = hm
+	check(Array(hlp.parse_coins("btc, xyz100 dram, kpepe")) == ["BTC", "xyz:XYZ100", "xyz:DRAM", "kPEPE"], "hyperliquid: typed names find builder markets")
+	hlp.free()
+	var hacct2 := Hyperliquid.merge_accounts(hacct, Hyperliquid.parse_account({"marginSummary": {"accountValue": "50.0", "totalNtlPos": "0", "totalMarginUsed": "5"}, "withdrawable": "10",
+		"assetPositions": [{"position": {"coin": "XYZ100", "szi": "1", "entryPx": "25000", "positionValue": "25000", "unrealizedPnl": "0", "leverage": {"type": "isolated", "value": 5}, "marginUsed": "5000"}}]}, "xyz"))
+	check(is_equal_approx(float(hacct2["value"]), 1050.0) and (hacct2["positions"] as Array).any(func(p: Dictionary) -> bool: return p["coin"] == "xyz:XYZ100"), "hyperliquid: accounts across exchanges add up")
+	# Orders: the exact bytes Hyperliquid's own SDK signs, and its number format.
+	var act := HlExchange.order_action({"asset": 110003, "buy": true, "px": 81250.0, "sz": 0.0123, "reduce": false, "tif": "Gtc"})
+	check(MsgPack.pack(act).hex_encode() == "83a474797065a56f72646572a66f72646572739186a161ce0001adb3a162c3a170a53831323530a173a6302e30313233a172c2a17481a56c696d697481a3746966a3477463a867726f7570696e67a26e61", "trading: order packs like the SDK")
+	check(MsgPack.pack({"type": "cancel", "cancels": [{"a": 5, "o": 123456789012}]}).hex_encode() == "82a474797065a663616e63656ca763616e63656c739182a16105a16fcf0000001cbe991a14", "trading: cancel packs like the SDK")
+	check(HlExchange.wire(81250.0) == "81250" and HlExchange.wire(0.0123) == "0.0123" and HlExchange.wire(100.0) == "100" and HlExchange.wire(-0.0) == "0", "trading: number format")
+	check(is_equal_approx(HlExchange.round_px(81253.7, 5), 81254.0) and is_equal_approx(HlExchange.round_px(3951.437, 4), 3951.4) and is_equal_approx(HlExchange.round_px(0.0123456, 0), 0.012346) and is_equal_approx(HlExchange.round_sz(0.01239, 4), 0.0123), "trading: prices and sizes round the exchange's way")
+	check(HlExchange.parse_response({"status": "ok", "response": {"type": "order", "data": {"statuses": [{"filled": {"totalSz": "0.02", "avgPx": "1891.4", "oid": 77}}]}}}).get("filled") == 0.02
+		and not HlExchange.parse_response({"status": "ok", "response": {"type": "order", "data": {"statuses": [{"error": "Insufficient margin"}]}}})["ok"]
+		and not HlExchange.parse_response({"status": "err", "response": "User or API Wallet does not exist."})["ok"], "trading: reads the exchange's answers")
+	var hx := HlExchange.new(null)
+	check(not bool((await hx.send(act)).get("ok", true)), "trading: nothing is sent while disarmed")
+	hx.free()
 
 func _mock_apps() -> Array:
 	return [
@@ -916,10 +939,39 @@ func _host_tests() -> void:
 	check(got.has("icon") and FileAccess.file_exists("user://smoke/explorer.png"), "host: renders icons (%s)" % str(got.get("icon", {}).get("error", "no reply")))
 	# CI machines have no Wi-Fi adapter, but the answer (and the cable list) must still come back.
 	check(got.has("wifi") and got["wifi"].get("ok", false) and got["wifi"].has("ethernet"), "host: network status (%s)" % str(got.get("wifi", {})))
+	await _wallet_test()
 	await _capture_test()
 	await _procs_test()
 	await _media_test()
 	check(Host.available, "host: still running after the checks")
+
+
+## The trading key's maths on real Windows: the companion signs a known order
+## exactly as Hyperliquid's own SDK does, and a key survives DPAPI.
+func _wallet_test() -> void:
+	var got := {}
+	var file := ProjectSettings.globalize_path("user://smoke/hl.key")
+	Host.request(["hl_selftest"], func(d: Dictionary) -> void: got["self"] = d)
+	Host.request(["hl_key_new", file], func(d: Dictionary) -> void: got["new"] = d)
+	var waited := 0.0
+	while got.size() < 2 and waited < 20.0:
+		await _wait(0.1)
+		waited += 0.1
+	var st: Dictionary = got.get("self", {})
+	check(st.get("r", "") == "0xacfedf1f197cb8b7bef9a6cb49d49d2036441087b76cd10b5ac1d75c48a4fbe4" and st.get("s", "") == "0x1bfb69547cf486b0ba3b1618edd95be99a57827b579df05c1253ba590179092"
+		and int(st.get("v", 0)) == 27 and st.get("address", "") == "0x2c7536e3605d9c16a7a3d7b1898e529396a65c23", "host: signs Hyperliquid orders like the SDK (%s)" % str(st))
+	var made := str(got.get("new", {}).get("address", ""))
+	check(Hyperliquid.is_address(made), "host: makes a trading key (%s)" % str(got.get("new", {})))
+	Host.request(["hl_key_address", file], func(d: Dictionary) -> void: got["addr"] = d)
+	Host.request(["hl_sign", file, "80", "1", "1"], func(d: Dictionary) -> void: got["sign"] = d)
+	Host.request(["hl_key_forget", file], func(d: Dictionary) -> void: got["forget"] = d)
+	Host.request(["hl_key_address", file], func(d: Dictionary) -> void: got["gone"] = d)
+	waited = 0.0
+	while got.size() < 6 and waited < 20.0:
+		await _wait(0.1)
+		waited += 0.1
+	check(str(got.get("addr", {}).get("address", "")) == made and str(got.get("sign", {}).get("address", "")) == made, "host: the key comes back from DPAPI and signs")
+	check(str(got.get("gone", {}).get("address", "x")) == "" and not FileAccess.file_exists("user://smoke/hl.key"), "host: the key can be removed")
 
 
 ## The now-playing library compiles against this Windows' WinRT metadata and

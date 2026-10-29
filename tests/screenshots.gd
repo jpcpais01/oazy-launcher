@@ -497,29 +497,58 @@ func _trade(main: Node) -> void:
 		await _wait(3.0)
 		print("  hyperliquid after 3 s: mids %d, BTC %s" % [hl.mids.size(), Hyperliquid.fmt_px(hl.price("BTC"))])
 		await shot("01t0-desktop-trade-live")
+	var builder := 0
+	for k in hl.meta:
+		if str(k).contains(":"):
+			builder += 1
+	print("  hyperliquid hip-3: dexes %s, builder markets %d, xyz:XYZ100 %s" % [str(hl.dexes), builder, Hyperliquid.fmt_px(hl.price("xyz:XYZ100"))])
+	if hl.meta.has("xyz:XYZ100"):
+		Settings.set_value("hl_coin", "xyz:XYZ100")
+		var w2 := 0.0
+		while w2 < 8.0 and (hl.candles.is_empty() or hl.book.is_empty()):
+			await _wait(0.25)
+			w2 += 0.25
+		print("  hyperliquid xyz:XYZ100 live: candles %d, book %d, trades %d" % [hl.candles.size(), (hl.book.get("bids", []) as Array).size(), hl.trades.size()])
+		await shot("01t3-desktop-trade-live-xyz")
+		Settings.set_value("hl_coin", "BTC")
 	hl.set_mock(_mock_hl())
 	Settings.set_value("hl_address", "")
 	await _wait(1.0)
 	await shot("01t1-desktop-trade-no-wallet")
+	Settings.set_value("hl_coins", ["BTC", "ETH", "xyz:XYZ100", "SOL", "HYPE"])
 	Settings.set_value("hl_address", "0x" + "5e9ee1089755c3435139848e47e6635505d5a13a".substr(0, 40))
 	hl.set_mock({"account": _mock_hl()["account"]})
 	await _wait(0.6)
+	await shot("01t4-desktop-trade-setup")
+	trade.ex.set_mock("0x2c7536e3605d9c16a7a3d7b1898e529396a65c23")
+	await _wait(0.4)
 	trade._chart._hover = Vector2(trade._chart.size.x * 0.62, trade._chart.size.y * 0.35)
 	trade._chart.queue_redraw()
 	await _wait(0.4)
 	await shot("01t-desktop-trade")
+	trade.ex.armed = true
+	trade.ex.changed.emit()
+	await _wait(0.5)
+	await shot("01t5-desktop-trade-armed")
+	trade.ex.armed = false
+	trade.ex.changed.emit()
+	Settings.set_value("hl_coin", "xyz:XYZ100")
+	hl.set_mock(_mock_hl("xyz:XYZ100"))
+	await _wait(0.6)
+	await shot("01t6-desktop-trade-xyz")
 	Settings.set_value("hl_coin", "ETH")
 	hl.set_mock(_mock_hl("ETH"))
 	await _wait(0.6)
 	await shot("01t2-desktop-trade-eth")
 	Settings.set_value("hl_coin", "BTC")
+	Settings.set_value("hl_coins", ["BTC", "ETH", "SOL", "HYPE"])
 	hl.set_mock(_mock_hl())
 
 
 static func _mock_hl(c: String = "BTC") -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11
-	var spec := {"BTC": [111842.0, -1.27, 5], "ETH": [3951.4, 2.31, 4], "SOL": [194.62, 4.08, 2], "HYPE": [46.214, 6.42, 2]}
+	var spec := {"BTC": [111842.0, -1.27, 5], "ETH": [3951.4, 2.31, 4], "xyz:XYZ100": [25184.0, 0.84, 4], "SOL": [194.62, 4.08, 2], "HYPE": [46.214, 6.42, 2]}
 	var ctxs := {}
 	var meta := {}
 	var mids := {}
@@ -527,7 +556,8 @@ static func _mock_hl(c: String = "BTC") -> Dictionary:
 	for k in spec:
 		var px: float = spec[k][0]
 		ctxs[k] = {"mark": px, "prev": px / (1.0 + spec[k][1] / 100.0), "vol": px * 21000.0, "oi": 300000000.0 / px * 8.0, "funding": 0.0000125, "oracle": px * 1.0002}
-		meta[k] = {"sz": spec[k][2], "lev": 40 if k == "BTC" else (25 if k == "ETH" else 10)}
+		meta[k] = {"sz": spec[k][2], "lev": 40 if k == "BTC" else (25 if k == "ETH" else (20 if k == "xyz:XYZ100" else 10)),
+			"asset": 110000 if k == "xyz:XYZ100" else spec.keys().find(k), "dex": "xyz" if k == "xyz:XYZ100" else "", "isolated": k == "xyz:XYZ100"}
 		mids[k] = str(px)
 		var line := []
 		var v: float = ctxs[k]["prev"]

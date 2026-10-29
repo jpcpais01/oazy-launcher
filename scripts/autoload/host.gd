@@ -154,7 +154,7 @@ static func build() -> Dictionary:
 		if not FileAccess.file_exists(csc):
 			continue
 		var out := []
-		var code := OS.execute(csc, ["/nologo", "/optimize+", "/target:winexe", "/r:System.Drawing.dll", "/r:System.Management.dll", "/out:" + exe.replace("/", "\\"), cs.replace("/", "\\")], out, true)
+		var code := OS.execute(csc, ["/nologo", "/optimize+", "/target:winexe", "/r:System.Drawing.dll", "/r:System.Management.dll", "/r:System.Numerics.dll", "/r:System.Security.dll", "/out:" + exe.replace("/", "\\"), cs.replace("/", "\\")], out, true)
 		if code == 0 and FileAccess.file_exists(exe):
 			for old in DirAccess.get_files_at(dir):
 				if old.begins_with("OazyHost-") and old.ends_with(".exe") and dir.path_join(old) != exe:

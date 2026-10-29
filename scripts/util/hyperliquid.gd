@@ -1,13 +1,14 @@
 class_name Hyperliquid
 extends Node
-## Crypto prices, charts, the order book, trades and your own positions from
-## Hyperliquid's public API: free, keyless and read-only. All it ever knows
-## about you is your wallet address, which is public anyway.
+## Prices, charts, the order book, trades and your own positions from
+## Hyperliquid's public API: crypto on the main exchange, plus the stocks,
+## indices and more on its builder-deployed exchanges (HIP-3, e.g. "xyz:XYZ100").
+## Reading needs nothing but your wallet address, which is public anyway.
 ##
 ## Prices (one WebSocket feed of every coin's mid) and your positions keep
 ## ticking in the background. The order book, trades and live candles for the
 ## coin on screen only stream while the trading page is in view (`set_focus`).
-## Placing orders would go through HlExchange, which is view-only for now.
+## Placing orders goes through HlExchange.
 
 signal prices_changed
 ## The focused coin's book, trades, candles or stats moved.
@@ -23,17 +24,23 @@ const MAX_TRADES := 80
 ## Seconds between REST polls: every coin's 24h stats, your account (in the
 ## background and while you look), and the ticker's day lines.
 const CTX_EVERY := 60.0
-const ACCOUNT_EVERY := 15.0
+const ACCOUNT_EVERY := 20.0
 const ACCOUNT_EVERY_FOCUS := 4.0
 const SPARK_EVERY := 600.0
+## The builder exchanges are looked up again this often.
+const DEXES_EVERY := 900
 const PING_EVERY := 30.0
 
 ## coin -> mid price, straight from the feed (strings; read with price()).
 var mids := {}
 ## coin -> {mark, prev, vol, oi, funding, oracle}
 var ctxs := {}
-## coin -> {sz: size decimals, lev: max leverage}
+## coin -> {sz: size decimals, lev: max leverage, asset: order id, dex, isolated}
 var meta := {}
+## The perp exchanges by index: "" is Hyperliquid's own, the rest are builders'.
+var dexes: Array = [""]
+## Your resting orders on every exchange (parse_orders), while the page is open.
+var orders: Array = []
 ## coin -> the last 24 hourly closes, for the ticker.
 var sparks := {}
 ## The focused coin's candles, oldest first: [t (s), open, high, low, close, volume].
@@ -65,6 +72,7 @@ var _spark_busy := false
 var _spark_at := 0
 var _candle_key := ""
 var _candle_at := 0
+var _dexes_at := 0
 
 
 func _ready() -> void:
@@ -82,6 +90,7 @@ func _ready() -> void:
 				_sync_subs()
 			"hl_address":
 				account = {}
+				orders = []
 				account_changed.emit()
 				_acct_in = 0.0
 			"hl_coins":
@@ -139,8 +148,14 @@ static func is_address(text: String) -> bool:
 ## when it knows the coin.
 func parse_coins(text: String) -> PackedStringArray:
 	var known := {}
+	# Full names ("xyz:XYZ100") and short ones; Hyperliquid's own coins (loaded
+	# first) win a short name over a builder's.
 	for c in meta.keys():
 		known[str(c).to_upper()] = c
+	for c in meta.keys():
+		var short := display(str(c)).to_upper()
+		if not known.has(short):
+			known[short] = c
 	var out := PackedStringArray()
 	for part in text.replace(";", ",").replace(" ", ",").split(",", false):
 		var t := part.strip_edges().trim_suffix("-USD").trim_suffix("/USD")
@@ -153,6 +168,15 @@ func parse_coins(text: String) -> PackedStringArray:
 
 
 # --- Reading -------------------------------------------------------------------------------------
+
+## "xyz:XYZ100" -> "XYZ100"
+static func display(c: String) -> String:
+	return c.get_slice(":", 1) if c.contains(":") else c
+
+
+## The builder exchange a coin trades on ("" for Hyperliquid's own).
+static func dex_of(c: String) -> String:
+	return c.get_slice(":", 0) if c.contains(":") else ""
 
 ## The latest price: the live mid, else the stats feed's mid, else its mark.
 func price(c: String) -> float:
@@ -402,6 +426,11 @@ func _merge_candle(d: Dictionary) -> void:
 			candles = candles.slice(candles.size() - CANDLES)
 
 
+## Looks at your account again as soon as it can (after an order).
+func poke_account() -> void:
+	_acct_in = 0.6
+
+
 # --- REST ----------------------------------------------------------------------------------------
 
 func _now() -> int:
@@ -428,10 +457,18 @@ func _fetch_ctxs() -> void:
 	if _ctx_busy or _mock:
 		return
 	_ctx_busy = true
-	var j: Variant = await _post({"type": "metaAndAssetCtxs"})
+	if _now() - _dexes_at > DEXES_EVERY:
+		var list := parse_dexes(await _post({"type": "perpDexs"}))
+		if not list.is_empty():
+			dexes = list
+			_dexes_at = _now()
+	for i in dexes.size():
+		var body := {"type": "metaAndAssetCtxs"}
+		if dexes[i] != "":
+			body["dex"] = dexes[i]
+		if parse_meta_and_ctxs(await _post(body), meta, ctxs, dexes[i], i):
+			prices_changed.emit()
 	_ctx_busy = false
-	if parse_meta_and_ctxs(j, meta, ctxs):
-		prices_changed.emit()
 
 
 func _fetch_account() -> void:
@@ -439,13 +476,26 @@ func _fetch_account() -> void:
 	if _acct_busy or _mock or addr == "":
 		return
 	_acct_busy = true
-	var j: Variant = await _post({"type": "clearinghouseState", "user": addr})
+	# Each exchange keeps its own margin: add them up.
+	var total := {}
+	var open := []
+	for d in dexes:
+		var body := {"type": "clearinghouseState", "user": addr}
+		if d != "":
+			body["dex"] = d
+		var a := parse_account(await _post(body), d)
+		if not a.is_empty():
+			total = a if total.is_empty() else merge_accounts(total, a)
+		if focused:
+			body["type"] = "frontendOpenOrders"
+			open.append_array(parse_orders(await _post(body), d))
 	_acct_busy = false
 	if addr != address():
 		return
-	var a := parse_account(j)
-	if not a.is_empty():
-		account = a
+	if focused:
+		orders = open
+	if not total.is_empty():
+		account = total
 		account_changed.emit()
 		_sync_subs()
 
@@ -488,7 +538,48 @@ func _fetch_sparks() -> void:
 # --- Parsing (static, so tests can feed it answers) --------------------------------------------------
 
 ## metaAndAssetCtxs -> fills `meta_out` and `ctx_out`. False if it wasn't one.
-static func parse_meta_and_ctxs(j: Variant, meta_out: Dictionary, ctx_out: Dictionary) -> bool:
+## perpDexs -> ["", "xyz", ...] (index = the exchange's number in asset ids).
+static func parse_dexes(j: Variant) -> Array:
+	if not (j is Array) or j.is_empty():
+		return []
+	var out := []
+	for d in j:
+		out.append(str(d.get("name", "")) if d is Dictionary else "")
+	out[0] = ""
+	return out
+
+
+## Two exchanges' accounts as one.
+static func merge_accounts(a: Dictionary, b: Dictionary) -> Dictionary:
+	var out := a.duplicate(true)
+	for k in ["value", "ntl", "margin", "withdrawable"]:
+		out[k] = float(a[k]) + float(b[k])
+	(out["positions"] as Array).append_array(b["positions"])
+	(out["positions"] as Array).sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return absf(float(x["value"])) > absf(float(y["value"])))
+	return out
+
+
+## frontendOpenOrders -> [{coin, buy, px, sz, orig, oid, reduce, kind, time}]
+static func parse_orders(j: Variant, dex: String = "") -> Array:
+	var out := []
+	if not (j is Array):
+		return out
+	for o in j:
+		if not (o is Dictionary):
+			continue
+		var c := str(o.get("coin", ""))
+		if dex != "" and not c.contains(":"):
+			c = dex + ":" + c
+		out.append({"coin": c, "buy": str(o.get("side", "B")) == "B", "px": _f(o.get("limitPx")), "sz": _f(o.get("sz")),
+			"orig": _f(o.get("origSz", o.get("sz"))), "oid": int(o.get("oid", 0)), "reduce": bool(o.get("reduceOnly", false)),
+			"kind": str(o.get("orderType", "Limit")), "time": int(o.get("timestamp", 0))})
+	return out
+
+
+## metaAndAssetCtxs -> fills `meta_out` and `ctx_out`. False if it wasn't one.
+## `dex_index` places the coins in Hyperliquid's asset numbering: plain
+## indices on its own exchange, 100000 + dex * 10000 + index on a builder's.
+static func parse_meta_and_ctxs(j: Variant, meta_out: Dictionary, ctx_out: Dictionary, dex: String = "", dex_index: int = 0) -> bool:
 	if not (j is Array) or j.size() < 2 or not (j[0] is Dictionary) or not (j[1] is Array):
 		return false
 	var uni: Variant = j[0].get("universe")
@@ -500,7 +591,12 @@ static func parse_meta_and_ctxs(j: Variant, meta_out: Dictionary, ctx_out: Dicti
 		if not (u is Dictionary) or not (x is Dictionary):
 			continue
 		var name := str(u.get("name", ""))
-		meta_out[name] = {"sz": int(u.get("szDecimals", 4)), "lev": int(u.get("maxLeverage", 1))}
+		if dex != "" and not name.contains(":"):
+			name = dex + ":" + name
+		meta_out[name] = {"sz": int(u.get("szDecimals", 4)), "lev": int(u.get("maxLeverage", 1)), "dex": dex,
+			"asset": i if dex_index == 0 else 100000 + dex_index * 10000 + i,
+			"isolated": bool(u.get("onlyIsolated", false)) or str(u.get("marginMode", "")) in ["strictIsolated", "noCross"],
+			"delisted": bool(u.get("isDelisted", false))}
 		ctx_out[name] = parse_ctx(x)
 	return true
 
@@ -545,7 +641,7 @@ static func parse_candles(j: Variant) -> Array:
 
 
 ## clearinghouseState -> {value, ntl, margin, withdrawable, positions: [...]}.
-static func parse_account(j: Variant) -> Dictionary:
+static func parse_account(j: Variant, dex: String = "") -> Dictionary:
 	if not (j is Dictionary) or not (j.get("marginSummary") is Dictionary):
 		return {}
 	var ms: Dictionary = j["marginSummary"]
@@ -560,8 +656,11 @@ static func parse_account(j: Variant) -> Dictionary:
 			if szi == 0.0:
 				continue
 			var lev: Variant = p.get("leverage", {})
+			var pc := str(p.get("coin", ""))
+			if dex != "" and not pc.contains(":"):
+				pc = dex + ":" + pc
 			positions.append({
-				"coin": str(p.get("coin", "")), "szi": szi, "entry": _f(p.get("entryPx")),
+				"coin": pc, "szi": szi, "entry": _f(p.get("entryPx")),
 				"value": _f(p.get("positionValue")), "upnl": _f(p.get("unrealizedPnl")),
 				"roe": _f(p.get("returnOnEquity")), "liq": _f(p.get("liquidationPx")),
 				"margin": _f(p.get("marginUsed")),
