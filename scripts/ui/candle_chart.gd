@@ -3,7 +3,7 @@ extends Control
 ## A candlestick chart, drawn in one pass: quiet price grid on the right, the
 ## times along the bottom, volume as a low tide under the candles and a dashed
 ## line at the latest price with its tag on the axis. Hovering shows a
-## crosshair and, while hovering, that candle's open, high, low and close. `marks` lay your own
+## crosshair with the price and time. `marks` lay your own
 ## prices over it: entry, liquidation, take profit, stop loss, open orders.
 
 const AXIS_W := 84.0
@@ -191,35 +191,6 @@ func _draw() -> void:
 		var tr := Rect2(clampf(cx - tw * 0.5, 0.0, plot.end.x - tw), size.y - TIME_H + 2.0, tw, 22.0)
 		draw_style_box(Kit.box(Color(0.85, 0.9, 0.95, 0.92), 6), tr)
 		draw_string(f12, Vector2(tr.position.x, tr.position.y + 15.0), tl, HORIZONTAL_ALIGNMENT_CENTER, tw, 12, Color(0.03, 0.05, 0.07))
-
-	# Open, high, low, close of the candle under the pointer, only while hovering.
-	if plot.has_point(_hover):
-		_readout(shown)
-
-
-func _readout(r: Array) -> void:
-	var o := float(r[1])
-	var c := float(r[4])
-	var tone := up if c >= o else down
-	var x := 14.0
-	var y := 30.0
-	var f := _font(500)
-	var fb := _font(600)
-	var pairs := [["O", o], ["H", float(r[2])], ["L", float(r[3])], ["C", c]]
-	var pct := (c - o) / o * 100.0 if o != 0.0 else 0.0
-	var pct_s := "%s%.2f%%" % ["+" if pct >= 0.0 else "−", absf(pct)]
-	var w := fb.get_string_size(pct_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	for pair in pairs:
-		w += f.get_string_size(pair[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 5.0 + fb.get_string_size(Hyperliquid.fmt_px(pair[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 14.0
-	# A quiet backing, so the numbers read over the candles.
-	draw_style_box(Kit.box(Color(0.04, 0.06, 0.09, 0.82), 8, Color(1, 1, 1, 0.08), 1), Rect2(4, 12, w + 20.0, 26))
-	for pair in pairs:
-		draw_string(f, Vector2(x, y), pair[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, App.TEXT_MUTE)
-		x += f.get_string_size(pair[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 5.0
-		var s := Hyperliquid.fmt_px(pair[1])
-		draw_string(fb, Vector2(x, y), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, App.TEXT_DIM)
-		x += fb.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 14.0
-	draw_string(fb, Vector2(x, y), pct_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, tone)
 
 
 ## A rounded tag on the price axis, centred on `at.y`.
