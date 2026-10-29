@@ -18,7 +18,7 @@ const STRIP_H := 86.0
 const TICKER_MAX_W := 300.0
 ## A position's row in the table.
 const ROW_H := 38.0
-const INTERVAL_LABELS := {"today": "Today", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D"}
+const INTERVAL_LABELS := {"today": "Today", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D", "ytd": "YTD"}
 ## Coins Hyperliquid people know by colour.
 const COIN_COLORS := {
 	"BTC": "f7931a", "ETH": "8a9cf0", "SOL": "a77bf3", "HYPE": "97fce4", "XRP": "b8c4cc",
@@ -641,6 +641,9 @@ func _update_market() -> void:
 	var step := int(Hyperliquid.INTERVALS[Hyperliquid.interval()])
 	_chart.session_slots = 0
 	_chart.ref_px = hl.prev_close if Hyperliquid.view() == Hyperliquid.TODAY else 0.0
+	if Hyperliquid.view() == Hyperliquid.YTD:
+		# The whole year so far, edge to edge.
+		_chart.session_slots = maxi(1, hl.candles.size())
 	if Hyperliquid.view() == Hyperliquid.TODAY:
 		# Room up to the 4pm close, or for everything since the open if longer.
 		var since := int(Time.get_unix_time_from_system()) - Hyperliquid.session_open(int(Time.get_unix_time_from_system()))
