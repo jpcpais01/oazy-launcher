@@ -25,6 +25,9 @@ var marks: Array = []
 ## When above 0, every row is shown from the left edge, with room kept for
 ## this many candles (the Today view fills toward the close).
 var session_slots := 0
+## A reference price drawn as a dotted grey line and kept in range (the last
+## trading day's close in the Today view); 0 for none.
+var ref_px := 0.0
 
 var _hover := Vector2(-1, -1)
 
@@ -85,6 +88,9 @@ func _draw() -> void:
 		lo = minf(lo, float(r[3]))
 		hi = maxf(hi, float(r[2]))
 		vmax = maxf(vmax, float(r[5]))
+	if ref_px > 0.0:
+		lo = minf(lo, ref_px)
+		hi = maxf(hi, ref_px)
 	var pad := maxf((hi - lo) * 0.08, absf(hi) * 0.0005)
 	lo -= pad
 	hi += pad
@@ -98,6 +104,8 @@ func _draw() -> void:
 	for m in marks:
 		if float(m["px"]) > lo and float(m["px"]) < hi:
 			tag_ys.append(y_of.call(float(m["px"])))
+	if ref_px > 0.0:
+		tag_ys.append(y_of.call(ref_px))
 	var tick := _nice_step((hi - lo) / 5.0)
 	var v := ceilf(lo / tick) * tick
 	while v < hi:
@@ -147,6 +155,13 @@ func _draw() -> void:
 		var top: float = y_of.call(maxf(o, c))
 		var bot: float = y_of.call(minf(o, c))
 		draw_rect(Rect2(roundf(cx - body_w * 0.5), roundf(top), body_w, maxf(1.0, roundf(bot - top))), Color(tone, 0.92))
+
+	# The reference price: a quiet dotted line with its tag on the axis.
+	if ref_px > 0.0:
+		var ry := roundf(y_of.call(ref_px)) + 0.5
+		draw_dashed_line(Vector2(0, ry), Vector2(plot.end.x, ry), Color(1, 1, 1, 0.32), 1.0, 2.0)
+		if absf(ry - float(tag_ys[0])) >= 22.0:
+			_tag(Vector2(plot.end.x + 4.0, ry), Hyperliquid.fmt_px(ref_px), Color(0.62, 0.66, 0.7, 0.85), Color(0.03, 0.05, 0.07))
 
 	# Your prices: a fine line, a label at the left, a tag on the axis.
 	for m in marks:

@@ -552,9 +552,18 @@ func _trade(main: Node) -> void:
 	trade.ex.armed = false
 	trade.ex.changed.emit()
 	Settings.set_value("hl_coin", "xyz:XYZ100")
-	hl.set_mock(_mock_hl("xyz:XYZ100"))
+	Settings.set_value("hl_interval", "today")
+	var xyz := _mock_hl("xyz:XYZ100")
+	var xc: Array = xyz["candles"]
+	# Today runs on 5m candles: space the mock ones the same way.
+	var t_end := int(Time.get_unix_time_from_system()) / 300 * 300
+	for i in xc.size():
+		xc[i][0] = t_end - (xc.size() - 1 - i) * 300
+	xyz["prev_close"] = float(xc[maxi(0, xc.size() - 90)][4])
+	hl.set_mock(xyz)
 	await _wait(0.6)
 	await shot("01t6-desktop-trade-xyz")
+	Settings.set_value("hl_interval", "1h")
 	Settings.set_value("hl_coin", "ETH")
 	hl.set_mock(_mock_hl("ETH"))
 	await _wait(0.6)

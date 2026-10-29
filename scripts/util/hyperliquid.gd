@@ -50,6 +50,9 @@ var orders: Array = []
 var sparks := {}
 ## The focused coin's candles, oldest first: [t (s), open, high, low, close, volume].
 var candles: Array = []
+## In the Today view: the last trading day's 4pm New York close (no
+## after-hours), 0 when unknown.
+var prev_close := 0.0
 ## {bids: [[px, sz]], asks: [[px, sz]], time}, best price first on both sides.
 var book := {}
 ## Newest first: {px, sz, side ("B" buy / "A" sell), time (ms), tid, seen (ticks ms)}.
@@ -94,6 +97,7 @@ func _ready() -> void:
 		match key:
 			"hl_coin", "hl_interval":
 				candles = []
+				prev_close = 0.0
 				book = {}
 				trades = []
 				_candle_key = ""
@@ -178,6 +182,11 @@ static func _nth_sunday(y: int, m: int, n: int) -> int:
 	var first := Time.get_unix_time_from_datetime_dict({"year": y, "month": m, "day": 1, "hour": 0, "minute": 0, "second": 0})
 	var wd := int(Time.get_datetime_dict_from_unix_time(first)["weekday"])
 	return first + (((7 - wd) % 7) + 7 * (n - 1)) * 86400
+
+
+## The 4pm New York close of the trading day before the one opening at `open`.
+static func session_close_before(open: int) -> int:
+	return session_open(open - 1) + SESSION_LEN_S
 
 
 ## When the latest US trading day opened (9:30 New York), as a UTC unix time:
@@ -586,8 +595,16 @@ func _fetch_candles() -> void:
 	if view() == TODAY:
 		start = session_open(_now()) * 1000
 	var j: Variant = await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": iv, "startTime": start, "endTime": end}})
+	var ref := 0.0
+	if view() == TODAY:
+		# The 5m candle that ends at the last trading day's 4pm bell.
+		var bell := (session_close_before(session_open(_now())) - 300) * 1000
+		var last := parse_candles(await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": "5m", "startTime": bell, "endTime": bell + 1000}}))
+		if not last.is_empty():
+			ref = float(last[last.size() - 1][4])
 	if key != coin() + "|" + view():
 		return
+	prev_close = ref
 	var rows := parse_candles(j)
 	if not rows.is_empty():
 		candles = rows
