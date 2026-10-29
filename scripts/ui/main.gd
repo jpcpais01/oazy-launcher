@@ -982,7 +982,8 @@ func _heal() -> void:
 
 
 func _on_files_dropped(files: PackedStringArray) -> void:
-	if files.is_empty() or modal_open():
+	# The Claude popup takes them for your message while it's open.
+	if files.is_empty() or modal_open() or assistant.is_open:
 		return
 	var path := files[0].replace("\\", "/")
 	if DirAccess.dir_exists_absolute(path):

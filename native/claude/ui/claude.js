@@ -70,7 +70,7 @@ $('win-min').innerHTML = icon('min', 15);
 $('win-max').innerHTML = icon('max', 13);
 $('win-close').innerHTML = icon('close', 15);
 $('new-chat').querySelector('.ic-slot').innerHTML = icon('plus', 15);
-$('img-btn').innerHTML = icon('image', 15);
+$('img-btn').innerHTML = icon('clip', 15);
 $('term-btn').innerHTML = icon('terminal', 14) + '<span>Terminal</span>';
 
 $('win-min').onclick = () => send('cmd', { cmd: 'minimize' });
@@ -83,7 +83,7 @@ $('home-folder').onclick = e => folderMenu(e.currentTarget);
 $('term-btn').onclick = () => openTerminal();
 $('mode-btn').onclick = e => modeMenu(e.currentTarget);
 $('model-btn').onclick = e => modelMenu(e.currentTarget);
-$('img-btn').onclick = () => $('file-in').click();
+$('img-btn').onclick = () => pickFiles();
 $('send').onclick = () => (S.running && !composerText() ? stop() : submit());
 $('file-in').onchange = () => { addFiles($('file-in').files); $('file-in').value = ''; };
 
@@ -402,20 +402,24 @@ async function submit(textArg) {
 	const text = (textArg != null ? textArg : $('input').value).trim();
 	if (!text && !S.attachments.length) return;
 	if (!S.claude) { drawSetup(); toast('Install Claude Code first'); return; }
-	const images = S.attachments.slice();
+	const atts = S.attachments.slice();
+	const images = atts.filter(a => a.kind !== 'file');
 	$('input').value = '';
 	S.attachments = [];
 	drawAttach();
 	autosize();
 	if (!S.title) setTitle(text.split('\n')[0].slice(0, 80) || 'Image');
-	userBubble(text, images);
+	userBubble(text, atts);
 	showHome();
 	scrollDown(true);
 	setRunning(true);
 	if (!await ensureProc()) return;
 	const content = images.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.type, data: a.data } }));
-	if (text) content.push({ type: 'text', text: text });
-	writeLine({ type: 'user', message: { role: 'user', content: content.length === 1 && !images.length ? text : content }, parent_tool_use_id: null, session_id: S.session || 'default' });
+	// Other files go by path, for Claude Code to read (as the Start orb does).
+	const files = atts.filter(a => a.kind === 'file').map(a => FILE_PREFIX + a.path + ']');
+	const said = [text, files.join('\n')].filter(Boolean).join('\n\n');
+	if (said) content.push({ type: 'text', text: said });
+	writeLine({ type: 'user', message: { role: 'user', content: !images.length ? said : content }, parent_tool_use_id: null, session_id: S.session || 'default' });
 }
 
 function stop() {
@@ -471,12 +475,19 @@ function el(tag, cls, html) {
 	return e;
 }
 
-function userBubble(text, images) {
+function userBubble(text, atts) {
 	const row = el('div', 'msg user');
 	const b = el('div', 'bubble');
-	if (images && images.length) {
+	const images = (atts || []).filter(a => a.kind !== 'file');
+	const files = (atts || []).filter(a => a.kind === 'file');
+	if (images.length) {
 		const strip = el('div', 'imgs');
 		for (const a of images) strip.appendChild(Object.assign(document.createElement('img'), { src: 'data:' + a.type + ';base64,' + a.data }));
+		b.appendChild(strip);
+	}
+	if (files.length) {
+		const strip = el('div', 'files');
+		for (const a of files) strip.appendChild(fileChip(a));
 		b.appendChild(strip);
 	}
 	if (text) b.appendChild(el('div', 'text', esc(text)));
@@ -1047,14 +1058,15 @@ function drawHistory(lines) {
 		if (m.type === 'user') {
 			if (typeof msg.content === 'string') {
 				const t = cleanUser(msg.content);
-				if (t) userBubble(t, []);
+				const files = sentFiles(msg.content);
+				if (t || files.length) userBubble(t, files);
 				continue;
 			}
 			if (!Array.isArray(msg.content)) continue;
 			const texts = [], imgs = [];
 			for (const c of msg.content) {
 				if (c.type === 'tool_result') toolDone(c.tool_use_id, c.content, c.is_error);
-				else if (c.type === 'text') { const t = cleanUser(c.text); if (t) texts.push(t); }
+				else if (c.type === 'text') { const t = cleanUser(c.text); if (t) texts.push(t); imgs.push(...sentFiles(c.text)); }
 				else if (c.type === 'image' && c.source && c.source.data) imgs.push({ type: c.source.media_type, data: c.source.data });
 			}
 			if (texts.length || imgs.length) userBubble(texts.join('\n'), imgs);
@@ -1074,7 +1086,7 @@ function cleanUser(t) {
 	// Context the orb sent along that the user never saw (an idea's notes).
 	const hidden = t.indexOf('<oazy-context>');
 	if (hidden > 0) t = t.slice(0, hidden);
-	t = t.trim();
+	t = splitFiles(t).text;
 	if (!t || t.startsWith('<') || t.startsWith('Caveat:')) {
 		const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t);
 		return cmd ? cmd[1].trim() : '';
@@ -1110,16 +1122,73 @@ document.addEventListener('drop', e => {
 	body.classList.remove('dropping');
 	if (!e.dataTransfer || !e.dataTransfer.files.length) return;
 	e.preventDefault();
-	addFiles(e.dataTransfer.files);
+	dropFiles(e.dataTransfer.files);
 });
+
+// Files are named at the end of a message, one line each.
+const FILE_PREFIX = '[Attached file: ';
+
+function splitFiles(t) {
+	const lines = String(t || '').split('\n');
+	const paths = [];
+	while (lines.length) {
+		const l = lines[lines.length - 1].trim();
+		if (l.startsWith(FILE_PREFIX) && l.endsWith(']')) { paths.unshift(l.slice(FILE_PREFIX.length, -1)); lines.pop(); }
+		else if (!l && paths.length) lines.pop();
+		else break;
+	}
+	return { text: lines.join('\n').trim(), paths: paths };
+}
+
+function sentFiles(t) {
+	const hidden = String(t || '').indexOf('<oazy-context>');
+	return splitFiles(hidden >= 0 ? t.slice(0, hidden) : t).paths.map(p => ({ kind: 'file', path: p, name: p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() }));
+}
+
+function fileChip(a) {
+	const c = el('div', 'file-chip', icon(a.folder ? 'folder' : 'doc', 14) + '<span>' + esc(a.name) + '</span>');
+	c.title = a.path || a.name;
+	return c;
+}
+
+// The paperclip: Windows' own picker, with real paths for any kind of file.
+async function pickFiles() {
+	if (!wv) { $('file-in').click(); return; }
+	const r = await ask('pickFiles', { from: S.cwd });
+	addReady(r.files);
+}
+
+function addReady(list) {
+	for (const a of list || []) {
+		if (S.attachments.length >= 10) { toast('That\'s as many as one message can take'); break; }
+		if (a.kind === 'file' && S.attachments.some(b => b.path === a.path)) continue;
+		S.attachments.push(a);
+	}
+	drawAttach();
+	$('input').focus();
+}
+
+// Dropped: the host reads them by path when WebView2 can say where they are;
+// otherwise only pictures can come, read here.
+function dropFiles(files) {
+	if (wv && wv.postMessageWithAdditionalObjects) {
+		const rid = nextRid++;
+		waiting.set(rid, r => {
+			if (r.files && r.files.length) addReady(r.files);
+			else addFiles(files);
+		});
+		try { wv.postMessageWithAdditionalObjects({ t: 'dropFiles', rid: rid }, files); return; } catch (e) { waiting.delete(rid); }
+	}
+	addFiles(files);
+}
 
 function addFiles(list) {
 	for (const f of Array.from(list || [])) {
-		if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast('Only images can be added for now'); continue; }
+		if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast('Use the paperclip to add ' + f.name); continue; }
 		if (f.size > 5 * 1024 * 1024) { toast(f.name + ' is over 5 MB'); continue; }
 		const r = new FileReader();
 		r.onload = () => {
-			S.attachments.push({ type: f.type, data: String(r.result).split(',')[1], name: f.name });
+			S.attachments.push({ kind: 'image', type: f.type, data: String(r.result).split(',')[1], name: f.name });
 			drawAttach();
 		};
 		r.readAsDataURL(f);
@@ -1131,7 +1200,8 @@ function drawAttach() {
 	box.innerHTML = '';
 	S.attachments.forEach((a, i) => {
 		const t = el('div', 'att');
-		t.appendChild(Object.assign(document.createElement('img'), { src: 'data:' + a.type + ';base64,' + a.data }));
+		if (a.kind === 'file') t.appendChild(fileChip(a));
+		else t.appendChild(Object.assign(document.createElement('img'), { src: 'data:' + a.type + ';base64,' + a.data }));
 		const x = el('button', 'att-x', icon('close', 11));
 		x.onclick = () => { S.attachments.splice(i, 1); drawAttach(); };
 		t.appendChild(x);

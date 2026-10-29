@@ -754,6 +754,23 @@ func _assistant(main: Node) -> void:
 	a.handle_message({"type": "assistant", "message": {"id": "m4", "content": [{"type": "text", "text": "Done. Both installers are in **Downloads/Old installers** now."}]}})
 	a.handle_message({"type": "result", "subtype": "success"})
 	await _wait(0.4)
+	# A picture (this screen, as a file) and a document come along.
+	var pic := ProjectSettings.globalize_path("user://shots_desktop.png")
+	get_viewport().get_texture().get_image().save_png(pic)
+	var doc := ProjectSettings.globalize_path("user://Trip budget.xlsx")
+	FileAccess.open(doc, FileAccess.WRITE).store_string("x")
+	a.attach_paths(PackedStringArray([pic, doc]))
+	var waited_att := 0.0
+	while a._loading > 0 and waited_att < 10.0:
+		await _wait(0.1)
+		waited_att += 0.1
+	await _wait(0.3)
+	await shot("02g2-assistant-attach")
+	a.submit()
+	a.handle_message({"type": "assistant", "message": {"id": "m5", "content": [{"type": "text", "text": "That's your Oazy desktop. The budget sheet has your Algarve costs: about **€1,240** so far."}]}})
+	a.handle_message({"type": "result", "subtype": "success"})
+	await _wait(0.5)
+	await shot("02g3-assistant-sent-attach")
 	a.close()
 	await _wait(0.4)
 	# Alt+Tab: the conversation waits there like a window.

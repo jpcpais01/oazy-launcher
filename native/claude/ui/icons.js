@@ -2,6 +2,8 @@
 const ICONS = {
 	plus: '<path d="M12 5v14M5 12h14"/>',
 	close: '<path d="M7 7l10 10M17 7L7 17"/>',
+	clip: '<path d="m16 6-8.41 8.59a2 2 0 0 0 2.83 2.83l8.41-8.59a4 4 0 1 0-5.66-5.66l-8.38 8.55a6 6 0 1 0 8.49 8.49l8.38-8.55"/>',
+	doc: '<path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5M9 13h6M9 16.5h6"/>',
 	min: '<path d="M6 12h12"/>',
 	max: '<rect x="6" y="6" width="12" height="12" rx="2.5"/>',
 	restore: '<rect x="5" y="8" width="11" height="11" rx="2.5"/><path d="M9 5h7.5A2.5 2.5 0 0 1 19 7.5V15"/>',

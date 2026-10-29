@@ -11,7 +11,8 @@ extends Control
 ## outside the glass, and now and then says an idea it had about one of your
 ## projects (ClaudeIdeas) from up there. Built once and kept in Start's layer, so opening it is only
 ## showing it; claude itself is started as it opens, so the first reply
-## doesn't wait for it.
+## doesn't wait for it. Pictures and files come along with a message: the
+## paperclip, dropping them on the popup, or pasting a picture (ClaudeAttach).
 
 signal visibility_changed_to(open: bool)
 ## Claude is working on a reply (the taskbar orb stirs).
@@ -24,6 +25,7 @@ const H := 600.0
 ## The strip above the glass Claude lives on (the blob's whole box), and how
 ## much of it ever shows: room kept free above the popup.
 const ROOF := 84.0
+const ROUNDED := preload("res://shaders/rounded_tex.gdshader")
 const ROOF_SHOWN := 82.0
 const PAD := 18.0
 ## Stops claude this long after the popup closed with nothing running; the
@@ -79,6 +81,16 @@ var _work_label: Label
 var _work_pulse: Tween
 var _composer: PanelContainer
 var _prompt: TextEdit
+var _attach: Button
+var _att_row: HFlowContainer
+## What goes with the next message (ClaudeAttach.from_path / from_image).
+var _atts: Array[Dictionary] = []
+## Pictures and files still being read.
+var _loading := 0
+## Enter was pressed while they were: sent once they're in.
+var _send_loaded := false
+## The file picker is up (Windows gives it focus; the popup stays open).
+var _picking := false
 var _send: Button
 var _expand: Button
 var _history_btn: Button
@@ -104,7 +116,7 @@ var _dirty: Array[Dictionary] = []
 var _since := 0
 ## What was last sent to claude, to send again on your API key if the plan's
 ## usage ran out on it.
-var _sent := ""
+var _sent: Variant = ""
 ## Unix time the plan's usage comes back once claude said it's out (0: not
 ## said when, -1: it isn't out).
 var _limit_at := -1.0
@@ -212,13 +224,19 @@ func _ready() -> void:
 	)
 	add_child(_idle)
 	App.accent_changed.connect(func(_c: Color) -> void: _sync_send())
+	# Files dropped on the popup (its own window in shell mode, Oazy's
+	# otherwise, where main leaves them to it while it's open).
+	get_window().files_dropped.connect(func(files: PackedStringArray) -> void:
+		if is_open:
+			attach_paths(files)
+	)
 
 	var surface := Shell.surface_of(self)
 	if surface:
 		# Start's layer in shell mode: clicking any other window closes it.
 		surface.focus_exited.connect(func() -> void:
 			await get_tree().create_timer(0.15).timeout
-			if is_open and not surface.has_focus() and not surface.just_shown(400):
+			if is_open and not _picking and not surface.has_focus() and not surface.just_shown(400):
 				close()
 		)
 
@@ -648,8 +666,22 @@ func _build_working() -> HBoxContainer:
 func _build_composer() -> Control:
 	_composer = PanelContainer.new()
 	_composer.add_theme_stylebox_override("panel", _composer_box(false))
-	var row := Kit.hbox(8)
-	_composer.add_child(row)
+	var col := Kit.vbox(8)
+	_composer.add_child(col)
+	_att_row = HFlowContainer.new()
+	_att_row.add_theme_constant_override("h_separation", 8)
+	_att_row.add_theme_constant_override("v_separation", 8)
+	_att_row.visible = false
+	col.add_child(_att_row)
+	var row := Kit.hbox(6)
+	col.add_child(row)
+	_attach = FxButton.icon_only("paperclip", "Add pictures or files", 18, 36)
+	_attach.focus_mode = Control.FOCUS_NONE
+	_attach.size_flags_vertical = Control.SIZE_SHRINK_END
+	_attach.add_theme_color_override("icon_normal_color", Color(1, 1, 1, 0.55))
+	_attach.add_theme_color_override("icon_hover_color", Color.WHITE)
+	_attach.pressed.connect(pick_files)
+	row.add_child(_attach)
 	_prompt = TextEdit.new()
 	_prompt.placeholder_text = "Ask Claude anything"
 	_prompt.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
@@ -741,7 +773,7 @@ func _wrapped_extra() -> int:
 func _sync_send() -> void:
 	if _send == null:
 		return
-	var has_text := _prompt.text.strip_edges() != ""
+	var has_text := _prompt.text.strip_edges() != "" or not _atts.is_empty()
 	var bg: Color
 	var fg: Color
 	if running:
@@ -972,8 +1004,14 @@ func _replay(id: String, ls: Array[Dictionary]) -> void:
 			_on_assistant(m)
 		elif not bool(m.get("isMeta", false)):
 			var text := ClaudeHistory.user_text(m)
-			if text != "":
-				_add(_user_bubble(text))
+			var sent := ClaudeHistory.user_attachments(m)
+			var atts: Array[Dictionary] = []
+			for img: Image in sent["images"]:
+				atts.append({"kind": "image", "name": "", "image": img})
+			for f: String in sent["files"]:
+				atts.append({"kind": "file", "name": f.replace("\\", "/").get_file(), "path": f})
+			if text != "" or not atts.is_empty():
+				_add(_user_bubble(text, atts))
 			else:
 				_on_user(m)
 	for t in _tools.values():
@@ -999,6 +1037,9 @@ func forward_key(k: InputEventKey) -> void:
 			submit()
 	elif k.keycode == KEY_BACKSPACE:
 		_prompt.text = _prompt.text.substr(0, maxi(0, _prompt.text.length() - 1))
+	elif k.keycode == KEY_V and k.is_command_or_control_pressed():
+		if not _paste():
+			_prompt.text += DisplayServer.clipboard_get()
 	elif k.unicode >= 32 and not k.ctrl_pressed and not k.alt_pressed:
 		_prompt.text += char(k.unicode)
 	else:
@@ -1013,7 +1054,9 @@ func _on_input_key(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed):
 		return
 	var k: InputEventKey = event
-	if k.keycode == KEY_ENTER or k.keycode == KEY_KP_ENTER:
+	if k.keycode == KEY_V and k.is_command_or_control_pressed() and not k.shift_pressed and _paste():
+		_prompt.accept_event()
+	elif k.keycode == KEY_ENTER or k.keycode == KEY_KP_ENTER:
 		if k.shift_pressed:
 			_prompt.insert_text_at_caret("\n")
 		else:
@@ -1125,20 +1168,30 @@ func _ask_about_idea() -> void:
 ## Sends `text` as you (typed, or a chip); `context` goes along to Claude
 ## without showing in the chat.
 func submit(text: String = "", context: String = "") -> void:
+	var atts: Array[Dictionary] = []
 	if text == "":
+		if running:
+			return
+		if _loading > 0:
+			_send_loaded = true
+			return
 		text = _prompt.text.strip_edges()
-		if text == "":
+		if text == "" and _atts.is_empty():
 			return
 		_prompt.text = ""
 		_fit_input()
+		atts = _atts.duplicate()
 	if running:
 		return
 	if not mock and ClaudeCli.find() == "":
 		_setup.visible = true
 		_chips.visible = false
 		return
+	if not atts.is_empty():
+		_atts.clear()
+		_sync_atts()
 	_show_thread(true)
-	_add(_user_bubble(text))
+	_add(_user_bubble(text, atts))
 	_blob.heard(text)
 	_follow = true
 	_set_running(true)
@@ -1147,7 +1200,8 @@ func submit(text: String = "", context: String = "") -> void:
 			if not _start_cli():
 				_set_running(false)
 				return
-		_sent = text if context == "" else "%s\n\n%s%s</oazy-context>" % [text, ClaudeHistory.CONTEXT_TAG, context]
+		var said := text if context == "" else "%s\n\n%s%s</oazy-context>" % [text, ClaudeHistory.CONTEXT_TAG, context]
+		_sent = ClaudeAttach.content(said, atts)
 		_limit_at = -1.0
 		_cli.send_text(_sent)
 	_sync_send()
@@ -1193,6 +1247,8 @@ func _reset() -> void:
 	_dirty.clear()
 	_writing = false
 	_prompt.text = ""
+	_atts.clear()
+	_sync_atts()
 	_fit_input()
 	_sync_send()
 	_blob.reset()
@@ -1416,7 +1472,7 @@ func _on_result(m: Dictionary) -> void:
 	var text := str(m.get("result", ""))
 	if text == "" and m.get("errors") is Array:
 		text = "\n".join(PackedStringArray(m["errors"]))
-	if failed and _sent != "" and (_limit_at >= 0.0 or _is_limit(text)) and _cli.can_use_key():
+	if failed and str(_sent) != "" and (_limit_at >= 0.0 or _is_limit(text)) and _cli.can_use_key():
 		_use_key()
 		return
 	_blob.done(_last_reply())
@@ -1534,7 +1590,27 @@ func _scroll_down() -> void:
 	_scroll.scroll_vertical = int(bar.max_value)
 
 
-func _user_bubble(text: String) -> Control:
+func _user_bubble(text: String, atts: Array[Dictionary] = []) -> Control:
+	if not atts.is_empty():
+		var col := Kit.vbox(6)
+		col.set_meta("user_text", text if text != "" else str(atts[0]["name"]))
+		var pics := atts.filter(func(a: Dictionary) -> bool: return a["kind"] == "image")
+		var flow := _sent_flow()
+		for a: Dictionary in pics:
+			# One picture shows whole; more sit as a row of squares.
+			var big := pics.size() == 1
+			flow.add_child(_thumb(a["image"], Vector2i(220, 150) if big else Vector2i(84, 84), big, 12.0))
+		if flow.get_child_count() > 0:
+			col.add_child(flow)
+		flow = _sent_flow()
+		for a: Dictionary in atts:
+			if a["kind"] == "file":
+				flow.add_child(_file_chip(a, false))
+		if flow.get_child_count() > 0:
+			col.add_child(flow)
+		if text != "":
+			col.add_child(_user_bubble(text))
+		return col
 	var row := Kit.hbox(0)
 	row.set_meta("user_text", text)
 	row.add_child(Kit.spacer(0, 0, true))
@@ -1548,6 +1624,201 @@ func _user_bubble(text: String) -> Control:
 	l.custom_minimum_size.x = minf(need, most)
 	bubble.add_child(l)
 	return row
+
+
+func _sent_flow() -> HFlowContainer:
+	var f := HFlowContainer.new()
+	f.alignment = FlowContainer.ALIGNMENT_END
+	f.add_theme_constant_override("h_separation", 6)
+	f.add_theme_constant_override("v_separation", 6)
+	f.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return f
+
+
+# --- Pictures and files ----------------------------------------------------------------------
+
+## The paperclip: Windows' own picker, any number of files.
+func pick_files() -> void:
+	if running or _picking:
+		return
+	var fd := FileDialog.new()
+	fd.file_mode = FileDialog.FILE_MODE_OPEN_FILES
+	fd.access = FileDialog.ACCESS_FILESYSTEM
+	fd.use_native_dialog = true
+	fd.title = "Add pictures or files"
+	fd.current_dir = ClaudeCli.home()
+	fd.filters = PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp, *.gif, *.bmp ; Pictures", "* ; All files"])
+	var done := func() -> void:
+		fd.queue_free()
+		# Focus comes back to the popup a moment after Windows' dialog goes.
+		await get_tree().create_timer(0.3).timeout
+		_picking = false
+		if is_open:
+			_prompt.grab_focus()
+	fd.files_selected.connect(func(paths: PackedStringArray) -> void:
+		attach_paths(paths)
+		done.call()
+	)
+	fd.canceled.connect(done)
+	_picking = true
+	add_child(fd)
+	fd.popup_centered_ratio(0.6)
+	Sfx.play(&"select")
+
+
+## Adds these files to the next message, read off the main thread.
+func attach_paths(paths: PackedStringArray) -> void:
+	for raw in paths:
+		var p := raw.replace("\\", "/")
+		if DirAccess.dir_exists_absolute(p):
+			# A folder: Claude can look inside it by its path.
+			_add_att({"kind": "file", "name": p.get_file() + "/", "path": p})
+			continue
+		if _atts.size() + _loading >= ClaudeAttach.MOST:
+			App.toast("That's as many as one message can take", &"error")
+			break
+		_loading += 1
+		WorkerThreadPool.add_task(func() -> void:
+			var a := ClaudeAttach.from_path(p)
+			if a.is_empty():
+				a = {"failed": p.get_file()}
+			_loaded.call_deferred(a)
+		, false, "Claude attachment")
+
+
+## Ctrl+V with a picture on the clipboard (a screenshot, a copied image).
+## False when there's none, so text pastes as usual.
+func _paste() -> bool:
+	if not DisplayServer.clipboard_has_image():
+		return false
+	var img := DisplayServer.clipboard_get_image()
+	if img == null or img.is_empty():
+		return false
+	if _atts.size() + _loading >= ClaudeAttach.MOST:
+		App.toast("That's as many as one message can take", &"error")
+		return true
+	_loading += 1
+	WorkerThreadPool.add_task(func() -> void: _loaded.call_deferred(ClaudeAttach.from_image(img)), false, "Claude picture")
+	return true
+
+
+func _loaded(a: Dictionary) -> void:
+	_loading = maxi(0, _loading - 1)
+	if a.has("failed"):
+		App.toast("Couldn't read %s" % a["failed"], &"error")
+	else:
+		_add_att(a)
+	if _loading == 0 and _send_loaded:
+		_send_loaded = false
+		submit()
+
+
+func _add_att(a: Dictionary) -> void:
+	for have in _atts:
+		if a["kind"] == "file" and have.get("path", "") == a["path"]:
+			return
+	_atts.append(a)
+	_sync_atts()
+	_blob.typing()
+	if is_open:
+		_prompt.grab_focus()
+
+
+func _remove_att(a: Dictionary) -> void:
+	_atts.erase(a)
+	_sync_atts()
+
+
+## The row of pictures and files above the box.
+func _sync_atts() -> void:
+	for c in _att_row.get_children():
+		_att_row.remove_child(c)
+		c.queue_free()
+	for a in _atts:
+		if a["kind"] == "image":
+			var t := _thumb(a["image"], Vector2i(56, 56), false, 10.0)
+			t.add_child(_remove_button(a))
+			_att_row.add_child(t)
+		else:
+			_att_row.add_child(_file_chip(a, true))
+	_att_row.visible = not _atts.is_empty()
+	_sync_send()
+
+
+## A picture with rounded corners, `px` exactly (or at most, with `fit`).
+func _thumb(img: Image, px: Vector2i, fit: bool, radius: float) -> Control:
+	var tex := ClaudeAttach.thumb(img, px.x, px.y, fit)
+	var shown := Vector2(tex.get_width(), tex.get_height()) / 2.0
+	var box := Control.new()
+	box.custom_minimum_size = shown
+	box.mouse_filter = Control.MOUSE_FILTER_PASS
+	var r := TextureRect.new()
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = ROUNDED
+	mat.set_shader_parameter("size", shown)
+	mat.set_shader_parameter("radius", radius)
+	r.material = mat
+	box.add_child(r)
+	# A hairline round it, so light pictures keep their edge on the glass.
+	var line := Panel.new()
+	line.add_theme_stylebox_override("panel", Kit.box(Color(0, 0, 0, 0), int(radius), Color(1, 1, 1, 0.12), 1))
+	line.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(line)
+	return box
+
+
+## A file as a small pill: its icon and name (and an x while it's in the box).
+func _file_chip(a: Dictionary, removable: bool) -> Control:
+	var chip := PanelContainer.new()
+	chip.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.07), 12, Color(1, 1, 1, 0.08), 1, 10, 7))
+	chip.tooltip_text = str(a.get("path", "")).replace("/", "\\") if App.is_windows() else str(a.get("path", ""))
+	chip.mouse_filter = Control.MOUSE_FILTER_PASS
+	chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var row := Kit.hbox(7)
+	chip.add_child(row)
+	var name := str(a["name"])
+	var folder := name.ends_with("/")
+	var icon := Kit.icon_rect("folder" if folder else ("image" if a["kind"] == "image" else "document"), 15, Color(1, 1, 1, 0.6))
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(icon)
+	var l := Kit.label(name.trim_suffix("/"), 13, 500, App.TEXT)
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.custom_minimum_size.x = minf(Kit.font(500).get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 2.0, 170.0)
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(l)
+	if removable:
+		var x := FxButton.icon_only("close", "Remove", 11, 18)
+		x.focus_mode = Control.FOCUS_NONE
+		x.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		x.add_theme_color_override("icon_normal_color", Color(1, 1, 1, 0.5))
+		x.add_theme_color_override("icon_hover_color", Color.WHITE)
+		x.pressed.connect(_remove_att.bind(a))
+		row.add_child(x)
+	return chip
+
+
+## The little x on a picture's corner.
+func _remove_button(a: Dictionary) -> Button:
+	var x := Button.new()
+	x.icon = Icons.tex("close", 10, Color.WHITE)
+	x.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	x.tooltip_text = "Remove"
+	x.focus_mode = Control.FOCUS_NONE
+	x.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	x.custom_minimum_size = Vector2(20, 20)
+	x.size = Vector2(20, 20)
+	x.position = Vector2(56 - 20 - 3, 3)
+	for st in ["normal", "hover", "pressed", "hover_pressed"]:
+		x.add_theme_stylebox_override(st, Kit.box(Color(0.07, 0.08, 0.1, 0.78 if st == "normal" else 0.92), 999, Color(1, 1, 1, 0.14), 1))
+	x.add_theme_stylebox_override("focus", Kit.empty())
+	x.pressed.connect(_remove_att.bind(a))
+	return x
 
 
 ## Where a reply's text goes: Markdown drawn as text runs and code blocks.

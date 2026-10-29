@@ -493,6 +493,17 @@ func _logic_tests() -> void:
 	var hx := HlExchange.new(null)
 	check(not bool((await hx.send(act)).get("ok", true)), "trading: nothing is sent while disarmed")
 	hx.free()
+	# Claude attachments: pictures inline (shrunk), files by path at the end.
+	var big := Image.create(3200, 1800, false, Image.FORMAT_RGB8)
+	big.fill(Color(0.2, 0.5, 0.7))
+	var pic := ClaudeAttach.from_image(big)
+	check(pic["kind"] == "image" and maxi(pic["image"].get_width(), pic["image"].get_height()) == ClaudeAttach.MAX_SIDE and Marshalls.base64_to_raw(pic["data"]).size() <= ClaudeAttach.MAX_RAW, "claude attach: big pictures shrink for the API")
+	var sent: Variant = ClaudeAttach.content("what's this?", [pic, {"kind": "file", "name": "a b.pdf", "path": "/home/x/a b.pdf"}])
+	check(sent is Array and sent[0]["type"] == "image" and sent[1]["type"] == "text" and str(sent[1]["text"]).ends_with(ClaudeAttach.FILE_PREFIX + ClaudeAttach._native("/home/x/a b.pdf") + "]"), "claude attach: picture blocks, then text naming the files")
+	check(ClaudeAttach.content("hi", []) == "hi" and ClaudeAttach.images_in(sent).size() == 1, "claude attach: plain text stays a string; pictures read back")
+	var split := ClaudeAttach.split("look\n\n[Attached file: C:\\a\\b.pdf]\n[Attached file: C:\\c d.txt]")
+	check(split[0] == "look" and split[1].size() == 2 and split[1][1] == "C:\\c d.txt", "claude attach: file lines split back off")
+	check(ClaudeHistory.user_text({"message": {"content": [{"type": "text", "text": "hey\n\n[Attached file: /x/y.txt]"}]}}) == "hey", "claude attach: past chats show the words, not the file lines")
 
 func _mock_apps() -> Array:
 	return [
