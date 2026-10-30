@@ -6,7 +6,7 @@ extends RefCounted
 ## ticker, then Hyperliquid's file. Kept on disk as round PNGs; a coin with no
 ## logo anywhere is retried after a week.
 
-const DIR := "user://coin_icons2"
+const DIR := "user://coin_icons3"
 const SIZE := 96
 const MISS_TTL := 7 * 86400
 
@@ -158,8 +158,8 @@ static func _fetch(c: String) -> void:
 
 
 ## An SVG or PNG logo as a SIZE × SIZE round image, or null when it isn't one
-## (a web page served in its place, say). Square logos sit on a white disc;
-## a `fill` image (a flag) is cropped to cover the whole disc instead.
+## (a web page served in its place, say). Square logos sit on a disc of their
+## own most used colour; a `fill` image (a flag) is cropped to cover it.
 static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 	if bytes.is_empty():
 		return null
@@ -185,7 +185,7 @@ static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 	img.resize(maxi(1, roundi(w * k)), maxi(1, roundi(h * k)), Image.INTERPOLATE_LANCZOS)
 	var out := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
 	if not svg and not fill:
-		out.fill(Color.WHITE)
+		out.fill(dominant(img))
 	var off := (Vector2i(SIZE, SIZE) - img.get_size()) / 2
 	out.blend_rect(img, Rect2i(-off.min(Vector2i.ZERO), img.get_size()), off.max(Vector2i.ZERO))
 	# Round it, with a soft one-pixel edge.
@@ -198,3 +198,28 @@ static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 				px.a *= clampf(r - d, 0.0, 1.0)
 				out.set_pixel(x, y, px)
 	return out
+
+
+## The colour most of an image's solid pixels share (not their average), so a
+## logo's backdrop matches its own field. Close shades count as one; white
+## when the image has no solid pixels.
+static func dominant(img: Image) -> Color:
+	var counts := {}
+	var sums := {}
+	var step := maxi(1, maxi(img.get_width(), img.get_height()) / 64)
+	for y in range(0, img.get_height(), step):
+		for x in range(0, img.get_width(), step):
+			var c := img.get_pixel(x, y)
+			if c.a < 0.6:
+				continue
+			var k := (int(c.r * 15.99) << 8) | (int(c.g * 15.99) << 4) | int(c.b * 15.99)
+			counts[k] = int(counts.get(k, 0)) + 1
+			sums[k] = (sums.get(k, Color(0, 0, 0, 0)) as Color) + Color(c.r, c.g, c.b, 1.0)
+	var best := -1
+	for k: int in counts:
+		if best < 0 or int(counts[k]) > int(counts[best]):
+			best = k
+	if best < 0:
+		return Color.WHITE
+	var sum: Color = sums[best]
+	return Color(sum.r / sum.a, sum.g / sum.a, sum.b / sum.a)

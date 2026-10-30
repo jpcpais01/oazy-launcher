@@ -392,6 +392,8 @@ func _fill_tickers() -> void:
 
 func _ticker(c: String) -> Control:
 	var on := c == Hyperliquid.coin()
+	# A full strip (7+ coins) packs each card a little tighter so names and prices fit.
+	var tight := Hyperliquid.coins().size() >= 7
 	var card := GlassPanel.new(false, 18.0, GlassPanel.TINT_WIDGET)
 	card.set_shadow_strength(0.16, 20, 8.0)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -406,24 +408,27 @@ func _ticker(c: String) -> Control:
 	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right"]:
-		m.add_theme_constant_override("margin_" + side, 16)
+		m.add_theme_constant_override("margin_" + side, 11 if tight else 16)
 	m.add_theme_constant_override("margin_top", 14)
 	m.add_theme_constant_override("margin_bottom", 12)
 	card.add_child(m)
 	var col := Kit.vbox(6)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	m.add_child(col)
-	var top := Kit.hbox(9)
+	var top := Kit.hbox(7 if tight else 9)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(top)
-	top.add_child(coin_badge(c, 24))
-	var name := Kit.label(Hyperliquid.display(c), 15, 700, App.TEXT if on else App.TEXT_DIM)
+	top.add_child(coin_badge(c, 20 if tight else 24))
+	var fs := 13 if tight else 15
+	var name := Kit.label(Hyperliquid.display(c), fs, 700, App.TEXT if on else App.TEXT_DIM)
 	name.clip_text = true
 	name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# Short tickers always show whole; only long names trim on a crowded strip.
+	name.custom_minimum_size.x = minf(Kit.font(700).get_string_size(name.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 2.0, 46.0 if tight else 64.0)
 	top.add_child(name)
-	var price := DesktopBelow._num("—", 16, 600, App.TEXT)
+	var price := DesktopBelow._num("—", 14 if tight else 16, 600, App.TEXT)
 	price.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(price)
 	var bottom := Kit.hbox(10)
@@ -438,10 +443,10 @@ func _ticker(c: String) -> Control:
 	spark.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	spark.custom_minimum_size = Vector2(40, 22)
 	bottom.add_child(spark)
-	var change := DesktopBelow._num("", 13, 600, App.TEXT_MUTE)
+	var change := DesktopBelow._num("", 12 if tight else 13, 600, App.TEXT_MUTE)
 	change.size_flags_vertical = Control.SIZE_SHRINK_END
 	change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	change.custom_minimum_size.x = 64
+	change.custom_minimum_size.x = 54 if tight else 64
 	bottom.add_child(change)
 	card.gui_input.connect(func(ev: InputEvent) -> void:
 		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -1374,12 +1379,13 @@ func _layout() -> void:
 	_strip_side.position = Vector2(w - left - side_w, top)
 	var n := _strip.get_child_count()
 	var room := inner - side_w - GAP
-	var cw := minf(TICKER_MAX_W, floorf((room - 14.0 * (n - 1)) / maxf(n, 1)))
+	var sp := 10.0 if n >= 7 else 14.0
+	var cw := minf(TICKER_MAX_W, floorf((room - sp * (n - 1)) / maxf(n, 1)))
 	_strip.position = Vector2(left, top)
 	_strip.size = Vector2(room, STRIP_H)
 	for i in n:
 		var c := _strip.get_child(i) as Control
-		c.position = Vector2(i * (cw + 14.0), 0)
+		c.position = Vector2(i * (cw + sp), 0)
 		c.size = Vector2(cw, STRIP_H)
 	_coins_box.position = Vector2(left, top + (STRIP_H - 42.0) * 0.5)
 	_coins_box.size = Vector2(inner, 42.0)
