@@ -20,8 +20,9 @@ const TICKER_MAX_W := 300.0
 const TICKER_MIN_W := 232.0
 ## Room around the scrolling strip so card shadows aren't clipped.
 const STRIP_PAD := 26.0
-## The status row under the trade ticket.
-const SIDE_H := 30.0
+## The two quiet rows under the trade ticket: market switch, coins and feed;
+## then the API wallet (or "View only").
+const SIDE_H := 52.0
 ## A position's row in the table.
 const ROW_H := 38.0
 const INTERVAL_LABELS := {"today": "Today", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D", "ytd": "YTD"}
@@ -53,7 +54,8 @@ var _strip_max := 0.0
 var _strip_step := 0.0
 var _strip_tween: Tween
 var _tickers := {}
-var _strip_side: HBoxContainer
+var _strip_side: VBoxContainer
+var _side_foot: HBoxContainer
 var _status_dot: Panel
 var _market_perps: Button
 var _market_spot: Button
@@ -291,14 +293,22 @@ func _build_strip() -> void:
 	_strip_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_strip.add_child(_strip_row)
 	# Market switch, feed status and the coins editor sit quietly under the ticket.
-	_strip_side = Kit.hbox(8)
+	# Every label here clips, so the rows fit any column width.
+	_strip_side = Kit.vbox(6)
 	_strip_side.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_strip_side)
+	var top_row := Kit.hbox(6)
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_strip_side.add_child(top_row)
+	_side_foot = Kit.hbox(6)
+	_side_foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_side_foot.custom_minimum_size.y = 18
+	_strip_side.add_child(_side_foot)
 	# Perps or spot: a small two-way switch; each keeps its own coins.
 	var market := PanelContainer.new()
 	market.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	market.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.05), 999, Color(1, 1, 1, 0.07), 1, 3, 3))
-	_strip_side.add_child(market)
+	top_row.add_child(market)
 	var pair := Kit.hbox(2)
 	market.add_child(pair)
 	_market_perps = _tab("Perps")
@@ -311,29 +321,35 @@ func _build_strip() -> void:
 	_market_perps.pressed.connect(func() -> void: _set_market(false))
 	_market_spot.pressed.connect(func() -> void: _set_market(true))
 	_sync_market_toggle()
-	var push := Control.new()
-	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_strip_side.add_child(push)
-	_status_dot = Panel.new()
-	_status_dot.custom_minimum_size = Vector2(6, 6)
-	_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_status_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_status_dot.add_theme_stylebox_override("panel", Kit.box(Color.WHITE, 4))
-	_strip_side.add_child(_status_dot)
-	_status = Kit.label("", 12, 600, App.TEXT_DIM)
-	_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_strip_side.add_child(_status)
-	_mode = _quiet("", 12)
-	_mode.mouse_filter = Control.MOUSE_FILTER_PASS
-	_strip_side.add_child(_mode)
-	_sync_mode()
 	_coins_btn = FxButton.icon_only("edit", "Choose your coins", 13, 26)
 	_coins_btn.variant = FxButton.Style.PLAIN
 	_coins_btn._apply_style()
 	_coins_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_coins_btn.pressed.connect(_open_coins_edit)
-	_strip_side.add_child(_coins_btn)
+	top_row.add_child(_coins_btn)
+	var push := Control.new()
+	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_row.add_child(push)
+	_status_dot = Panel.new()
+	_status_dot.custom_minimum_size = Vector2(6, 6)
+	_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_status_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status_dot.add_theme_stylebox_override("panel", Kit.box(Color.WHITE, 4))
+	top_row.add_child(_status_dot)
+	_status = Kit.label("", 12, 600, App.TEXT_DIM)
+	_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top_row.add_child(_status)
+	# Second row: "View only" until a trading key is set up, then the ticket's
+	# API wallet line (moved here in _build_ticket). Armed or off is the
+	# Trade panel's own switch, so it isn't repeated here.
+	_mode = _quiet("", 11)
+	_mode.mouse_filter = Control.MOUSE_FILTER_PASS
+	_mode.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mode.clip_text = true
+	_mode.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_side_foot.add_child(_mode)
+	_sync_mode()
 
 	_coins_box = Kit.hbox(10)
 	_coins_box.visible = false
@@ -716,6 +732,7 @@ func _build_ticket() -> void:
 	_ticket.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(_ticket)
 	_ticket.minimum_size_changed.connect(_layout.call_deferred)
+	_ticket.foot.reparent(_side_foot, false)
 
 
 static func _panel_title(text: String) -> Label:
@@ -1426,7 +1443,8 @@ func _layout() -> void:
 	var pos_h := clampf(roundf(h * 0.2), 214.0, 250.0)
 	var main_h := full_h - GAP - pos_h
 	var book_w := clampf(roundf(inner * 0.135), 240.0, 300.0)
-	var col_w := clampf(roundf(inner * 0.17), 300.0, 350.0)
+	# Never narrower than the ticket's own content, so nothing in it spills.
+	var col_w := maxf(clampf(roundf(inner * 0.17), 300.0, 350.0), ceilf(_ticket_need().x))
 	var chart_w := inner - book_w - col_w - GAP * 2.0
 	_chart_panel.position = Vector2(left, y)
 	_chart_panel.size = Vector2(chart_w, main_h)
@@ -1435,11 +1453,23 @@ func _layout() -> void:
 	_pos_panel.position = Vector2(left, y + main_h + GAP)
 	_pos_panel.size = Vector2(chart_w + GAP + book_w, pos_h)
 	_ticket_panel.position = Vector2(left + chart_w + book_w + GAP * 2.0, y)
-	_ticket_panel.size = Vector2(col_w, full_h - SIDE_H - 10.0)
-	_strip_side.position = Vector2(_ticket_panel.position.x + 6.0, y + full_h - SIDE_H)
-	_strip_side.size = Vector2(col_w - 12.0, SIDE_H)
+	# The ticket never gets less than it needs; the rows under it follow it
+	# down rather than being overlapped.
+	var ticket_h := maxf(full_h - SIDE_H - 12.0, _ticket_need().y)
+	_ticket_panel.size = Vector2(col_w, ticket_h)
+	_strip_side.position = Vector2(_ticket_panel.position.x + 8.0, y + ticket_h + 12.0)
+	_strip_side.size = Vector2(col_w - 16.0, SIDE_H)
 	_fit_rows()
-	wanted_height = y + full_h + 34.0
+	wanted_height = maxf(y + full_h, _strip_side.position.y + SIDE_H) + 34.0
+
+
+## What the ticket's contents need. The glass panel isn't a container, so ask
+## its margin box (see DesktopBelow.glass_panel).
+func _ticket_need() -> Vector2:
+	for c in _ticket_panel.get_children():
+		if c is MarginContainer:
+			return (c as Control).get_combined_minimum_size()
+	return Vector2.ZERO
 
 
 func _set_strip_x(x: float) -> void:
@@ -1477,14 +1507,9 @@ func strip_wheel(dir: float) -> bool:
 func _sync_mode() -> void:
 	if _mode == null:
 		return
-	if ex.armed:
-		_mode.text = "·  Trading armed"
-		_mode.add_theme_color_override("font_color", TradeTicket.ARMED)
-		_mode.tooltip_text = "Orders go to Hyperliquid with real money. Switch off in the Trade panel."
-	else:
-		_mode.text = "·  " + ("Trading off" if ex.ready_to_trade() else "View only")
-		_mode.add_theme_color_override("font_color", App.TEXT_MUTE)
-		_mode.tooltip_text = "Arm trading in the Trade panel when you want to place orders." if ex.ready_to_trade() else "Prices and your positions, straight from Hyperliquid."
+	_mode.text = "View only"
+	_mode.tooltip_text = "Prices and your positions, straight from Hyperliquid."
+	_mode.visible = not ex.ready_to_trade()
 	_layout.call_deferred()
 
 

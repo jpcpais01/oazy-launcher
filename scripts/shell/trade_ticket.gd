@@ -50,7 +50,8 @@ var _sum_box: PanelContainer
 var _sum := {}
 var _note: Label
 var _go: Button
-var _foot: HBoxContainer
+## The API wallet line. The desk shows it under the ticket.
+var foot: HBoxContainer
 var _foot_label: Label
 var _buy := true
 var _market := true
@@ -335,18 +336,19 @@ func _build_form() -> void:
 	_note = _text("", 12, DOWN)
 	_form.add_child(_note)
 
-	_foot = Kit.hbox(6)
-	_foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_form.add_child(_foot)
+	foot = Kit.hbox(6)
+	foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	foot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_form.add_child(foot)
 	_foot_label = Kit.label("", 11, 500, App.TEXT_MUTE)
 	_foot_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_foot_label.clip_text = true
 	_foot_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_foot.add_child(_foot_label)
+	foot.add_child(_foot_label)
 	var forget := _link("Remove key")
 	forget.add_theme_font_size_override("font_size", 11)
 	forget.pressed.connect(_confirm_forget)
-	_foot.add_child(forget)
+	foot.add_child(forget)
 	_paint_choices()
 
 
@@ -760,6 +762,7 @@ func _sync() -> void:
 	_arm_label.text = "Armed" if ex.armed else "Off"
 	_arm_label.add_theme_color_override("font_color", ARMED if ex.armed else App.TEXT_MUTE)
 	_form.visible = state == "form"
+	foot.visible = _form.visible
 	_setup.visible = state != "form"
 	var sig := state + ":" + ex.agent + ":" + str(ex.checked)
 	if sig != _setup_sig:
