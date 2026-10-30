@@ -107,6 +107,12 @@ func _ready() -> void:
 			{"id": "4d454f", "ssid": "MEO-Office", "signal": 22, "secure": true, "auth": "enterprise", "known": false, "connected": false, "connectable": true},
 		]})
 	await _wait(2.5)
+	if OS.get_environment("OAZY_SHOTS_ONLY") == "avatar":
+		# Dev runs: Claude's avatar on the popup roof, each act and face.
+		await _wait(1.0)
+		await _avatar(main)
+		get_tree().quit()
+		return
 	if OS.get_environment("OAZY_SHOTS_ONLY") == "tasks":
 		await _tasks_shots(main)
 		get_tree().quit()
@@ -977,6 +983,76 @@ func _switcher_shots(main: Node) -> void:
 		main.preview.show_for(chrome)
 	await _wait(0.8)
 	await shot("07c-preview")
+
+
+func _avatar(main: Node) -> void:
+	var a: AssistantPanel = main.assistant
+	a.mock = true
+	a.open()
+	await _wait(1.2)
+	var blob: ClaudeBlob = a._blob
+	var only := OS.get_environment("OAZY_AVATAR")
+	for about: String in ClaudeScene.TOPICS:
+		if only != "" and not only.split(",").has(about):
+			continue
+		blob.reset()
+		await _wait(0.6)
+		blob.thinking()
+		blob.topic(about)
+		await _wait(3.2)
+		await _roof("av-%s-a" % about, blob)
+		await _wait(2.2)
+		await _roof("av-%s-b" % about, blob)
+		blob.done("")
+		await _wait(1.6)
+		await _roof("av-%s-c" % about, blob)
+	if only != "" and not only.split(",").has("faces"):
+		return
+	blob.reset()
+	await _wait(1.0)
+	for mood: String in ClaudeMood.MOODS + ["dizzy", "sleepy", "giggle"]:
+		blob._react = ""
+		blob._mood = mood
+		blob._mood_until = blob._t + 30.0
+		if not ClaudeMood.MOODS.has(mood):
+			blob._reaction(mood, 30.0)
+		blob._show_sign(ClaudeBlob.SIGNS.get(mood, ""), 30.0)
+		blob._act = ""
+		blob._next_idle = blob._t + 999.0
+		await _wait(0.8)
+		await _roof("av-face-%s" % mood, blob)
+	blob._react = ""
+	blob._mood = "calm"
+	for act: Array in [["wave", 1.6], ["stretch", 2.4], ["bubble", 4.2], ["butterfly", 5.5], ["sneeze", 2.2], ["dance", 3.6]]:
+		blob._next_idle = blob._t + 999.0
+		blob._start_act(act[0], act[1])
+		blob._act_spot = Vector2(blob._x + 60.0, 20.0)
+		await _wait(float(act[1]) * 0.4)
+		await _roof("av-act-%s" % act[0], blob)
+		await _wait(float(act[1]) * 0.7)
+	for work: String in ["read", "run", "make"]:
+		blob.working({"read": "Read", "run": "Bash", "make": "Edit"}[work])
+		await _wait(1.2)
+		await _roof("av-tool-%s" % work, blob)
+	blob.thinking()
+	await _wait(2.4)
+	await _roof("av-think", blob)
+
+
+## Just the roof strip, three times bigger.
+func _roof(name: String, blob: Control) -> void:
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var xf := get_viewport().get_final_transform() * blob.get_global_transform_with_canvas()
+	var r := Rect2(xf * Vector2.ZERO, xf.get_scale() * blob.size).grow(4).intersection(Rect2(Vector2.ZERO, img.get_size()))
+	if name.begins_with("av-face") or name.begins_with("av-act") or name.begins_with("av-tool") or name == "av-think":
+		# Just around the jelly.
+		var bx: float = xf.get_scale().x * float(blob.get("_x"))
+		r = Rect2(r.position.x + bx - 110.0 * xf.get_scale().x, r.position.y, 220.0 * xf.get_scale().x, r.size.y).intersection(Rect2(Vector2.ZERO, img.get_size()))
+	var part := img.get_region(Rect2i(r))
+	part.resize(part.get_width() * 3, part.get_height() * 3, Image.INTERPOLATE_NEAREST)
+	part.save_png(dir.path_join(name + ".png"))
+	print("  saved ", name)
 
 
 func shot(name: String) -> void:

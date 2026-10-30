@@ -35,6 +35,18 @@ uniform float smile = 0.3;
 uniform float mouth_open = 0.0;
 uniform float mouth_w = 1.0;
 uniform float blush = 0.0;
+// Other eyes, 0..1 each, morphed into from the usual ones: hearts (in love),
+// stars (amazed), >< (laughing) and spirals (dizzy).
+uniform float hearts = 0.0;
+uniform float stars = 0.0;
+uniform float squint = 0.0;
+uniform float swirl = 0.0;
+// One soft arm of jelly that grows out of the side towards the hand point
+// (pixels from the ground point, y up), for holding and pointing at things.
+uniform float arm = 0.0;
+uniform vec2 hand = vec2(30.0, 30.0);
+// A whole-body turn about its middle, in radians (flips).
+uniform float spin = 0.0;
 uniform vec4 color_a : source_color = vec4(0.22, 0.84, 0.77, 1.0);
 uniform vec4 color_b : source_color = vec4(0.25, 0.55, 1.0, 1.0);
 // Errors tint the water warm, like the orb's.
@@ -53,8 +65,48 @@ vec2 rot(vec2 p, float a) {
 	return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
 }
 
+float dot2(vec2 v) {
+	return dot(v, v);
+}
+
+float smin(float a, float b, float k) {
+	float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+	return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// Distance to a segment, and how far along it the nearest point is.
+vec2 segment(vec2 p, vec2 a, vec2 b) {
+	vec2 pa = p - a;
+	vec2 ba = b - a;
+	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
+	return vec2(length(pa - ba * h), h);
+}
+
+// Inigo Quilez's heart and five-point star.
+float heart(vec2 p) {
+	p.x = abs(p.x);
+	if (p.y + p.x > 1.0) {
+		return sqrt(dot2(p - vec2(0.25, 0.75))) - sqrt(2.0) / 4.0;
+	}
+	return sqrt(min(dot2(p - vec2(0.0, 1.0)), dot2(p - 0.5 * max(p.x + p.y, 0.0)))) * sign(p.x - p.y);
+}
+
+float star5(vec2 p, float r, float rf) {
+	const vec2 k1 = vec2(0.809016994375, -0.587785252292);
+	const vec2 k2 = vec2(-0.809016994375, -0.587785252292);
+	p.x = abs(p.x);
+	p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+	p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+	p.x = abs(p.x);
+	p.y -= r;
+	vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
+	float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+	return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+}
+
 // One eye in its own space: < 0 inside.
 float eye(vec2 e, vec2 r, float open, float side) {
+	vec2 e0 = e;
 	e = rot(e, -worry * 0.38 * side);
 	vec2 rr = vec2(r.x, r.y * max(open, 0.12));
 	float d = ellipse(e, rr);
@@ -63,6 +115,31 @@ float eye(vec2 e, vec2 r, float open, float side) {
 	d = max(d, -cut);
 	// Heavy lid: flat across the top.
 	d = max(d, e.y - rr.y * (1.0 - lid * 1.1));
+	if (hearts > 0.001) {
+		float hs = r.y * 2.0;
+		vec2 q = vec2(e0.x, e0.y / max(open, 0.15)) / hs + vec2(0.0, 0.52);
+		d = mix(d, heart(q) * hs, hearts);
+	}
+	if (stars > 0.001) {
+		vec2 q = rot(e0, sin(TIME * 2.2 + side) * 0.25);
+		q.y /= max(open, 0.15);
+		d = mix(d, star5(q, r.y * 1.45, 0.48) - r.y * 0.12, stars);
+	}
+	if (squint > 0.001) {
+		// > on the left, < on the right.
+		vec2 q = vec2(e0.x * -side, e0.y);
+		vec2 w = vec2(r.x * 1.1, r.y * 0.8);
+		float c = min(segment(q, vec2(-w.x, w.y), vec2(w.x, 0.0)).x, segment(q, vec2(-w.x, -w.y), vec2(w.x, 0.0)).x) - r.x * 0.34;
+		d = mix(d, c, squint);
+	}
+	if (swirl > 0.001) {
+		float a = atan(e0.y, e0.x) * side + TIME * 7.0;
+		float pitch = r.y * 0.62;
+		float rad = length(e0);
+		float s = fract(rad / pitch - a / 6.2832);
+		float sp = max((abs(s - 0.5) * pitch) - pitch * 0.17, rad - r.y * 1.25);
+		d = mix(d, sp, swirl);
+	}
 	return d;
 }
 
@@ -81,7 +158,10 @@ void fragment() {
 	// --- Body ---------------------------------------------------------------------
 	float sx = 1.0 + squash;
 	float sy = 1.0 / sx;
-	vec2 b = p - vec2(0.0, lift);
+	// Turned about its middle for a flip.
+	vec2 pc = vec2(0.0, lift + R * sy);
+	vec2 pb = spin == 0.0 ? p : rot(p - pc, -spin) + pc;
+	vec2 b = pb - vec2(0.0, lift);
 	b.x -= lean * b.y;
 	b = b / vec2(sx, sy) - vec2(0.0, R);
 	// A gumdrop: settled at the bottom, a touch narrower up top.
@@ -92,11 +172,22 @@ void fragment() {
 	float th = atan(b.y, b.x);
 	float rr = R * (1.0 + wobble * (0.03 * sin(2.0 * th + wob_phase) + 0.022 * sin(3.0 * th - wob_phase * 1.37) + 0.012 * sin(5.0 * th + wob_phase * 0.7)));
 	float d = length(b) - rr;
+	float za = 0.0;
+	if (arm > 0.01) {
+		// From inside the side, so it melts out of the body.
+		vec2 sh = vec2(sign(hand.x) * R * 0.42 * sx, lift + R * 0.72 * sy);
+		vec2 tip = mix(sh, hand, smoothstep(0.0, 1.0, arm));
+		vec2 sg = segment(pb, sh, tip);
+		float ar = mix(5.4, 3.5, sg.y) * smoothstep(0.0, 0.25, arm);
+		float da = sg.x - ar;
+		za = sqrt(max(1.0 - sg.x * sg.x / (ar * ar + 0.001), 0.0)) * step(0.0, d);
+		d = smin(d, da, 6.0);
+	}
 	float body = 1.0 - smoothstep(-aa, aa, d);
 
 	vec2 n = b / rr;
 	float nr = min(length(n), 1.0);
-	float z = sqrt(max(1.0 - nr * nr, 0.0));
+	float z = max(sqrt(max(1.0 - nr * nr, 0.0)), za * 0.85);
 	float fres = pow(1.0 - z, 2.2);
 	// Water seen through jelly: lighter up top, deeper below, a slow caustic.
 	vec3 col = mix(wa * 1.02, wb * 0.62, clamp(0.5 - n.y * 0.55, 0.0, 1.0));
@@ -130,7 +221,7 @@ void fragment() {
 	float dr = eye(erp, er, open_r, 1.0);
 	float eyes = 1.0 - smoothstep(-aa, aa, min(dl, dr));
 	// A small glint while the eyes are round and open.
-	float gl = (1.0 - joy) * min(open_l, open_r) * (1.0 - lid);
+	float gl = (1.0 - joy) * min(open_l, open_r) * (1.0 - lid) * (1.0 - max(max(squint, swirl), max(hearts, stars)));
 	vec2 go = vec2(-er.x * 0.32, er.y * 0.38);
 	float glint = max(1.0 - smoothstep(er.x * 0.3 - aa, er.x * 0.3 + aa, length(el - go)), 1.0 - smoothstep(er.x * 0.3 - aa, er.x * 0.3 + aa, length(erp - go))) * gl;
 
@@ -150,7 +241,10 @@ void fragment() {
 	vec3 ink = vec3(0.035, 0.06, 0.11);
 	col = mix(col, vec3(1.0, 0.62, 0.6), cheeks * body);
 	float features = max(eyes, mouth) * body;
-	col = mix(col, ink, features * 0.94);
+	vec3 eye_ink = mix(ink, vec3(0.98, 0.32, 0.46), hearts);
+	eye_ink = mix(eye_ink, vec3(1.0, 0.8, 0.3), stars);
+	col = mix(col, ink, mouth * body * 0.94);
+	col = mix(col, eye_ink, eyes * body * mix(0.94, 1.0, max(hearts, stars)));
 	alpha = max(alpha, features * 0.95);
 	col = mix(col, vec3(1.0), glint * body * 0.9);
 
