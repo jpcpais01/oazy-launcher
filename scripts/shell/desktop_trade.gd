@@ -43,10 +43,13 @@ var _strip: Control
 var _tickers := {}
 var _strip_side: HBoxContainer
 var _status_dot: Panel
+var _market_perps: Button
+var _market_spot: Button
 var _status: Label
 var _coins_btn: FxButton
 var _coins_box: HBoxContainer
 var _coins_edit: LineEdit
+var _coins_hint: Label
 
 var _chart_panel: GlassPanel
 var _badge: Control
@@ -76,6 +79,7 @@ var _pos_panel: GlassPanel
 var _pos_count: Label
 var _summary: HBoxContainer
 var _sum_labels := {}
+var _sum_keys := {}
 var _addr_btn: Button
 var _pos_body: VBoxContainer
 var _pos_rows: VBoxContainer
@@ -111,6 +115,12 @@ func _ready() -> void:
 	hl.market_changed.connect(func() -> void: _dirty["market"] = true)
 	hl.account_changed.connect(func() -> void: _dirty["account"] = true)
 	hl.status_changed.connect(func() -> void: _dirty["prices"] = true)
+	hl.spot_loaded.connect(func() -> void:
+		if Hyperliquid.spot_mode():
+			_dirty["coins"] = true
+			_dirty["market"] = true
+			_dirty["account"] = true
+	)
 	ex.changed.connect(func() -> void:
 		_sync_mode()
 		_pos_sig = "-"
@@ -120,9 +130,18 @@ func _ready() -> void:
 	)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		match key:
-			"hl_coins", "hl_coin":
+			"hl_coins", "hl_coin", "hl_spot_coins", "hl_spot_coin":
 				_dirty["coins"] = true
 				_dirty["market"] = true
+			"hl_market":
+				_pos_tab = "balances" if Hyperliquid.spot_mode() else "positions"
+				if _coins_box.visible:
+					_close_coins_edit()
+				_sync_market_toggle()
+				_pos_sig = "-"
+				_dirty["coins"] = true
+				_dirty["market"] = true
+				_dirty["account"] = true
 			"hl_interval":
 				_dirty["market"] = true
 			"hl_address":
@@ -256,6 +275,24 @@ func _build_strip() -> void:
 	_strip_side = Kit.hbox(10)
 	_strip_side.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_strip_side)
+	# Perps or spot: a small two-way switch; each keeps its own coins.
+	var market := PanelContainer.new()
+	market.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	market.add_theme_stylebox_override("panel", Kit.box(Color(1, 1, 1, 0.05), 999, Color(1, 1, 1, 0.07), 1, 3, 3))
+	_strip_side.add_child(market)
+	var pair := Kit.hbox(2)
+	market.add_child(pair)
+	_market_perps = _tab("Perps")
+	_market_spot = _tab("Spot")
+	for b in [_market_perps, _market_spot]:
+		b.add_theme_font_size_override("font_size", 12)
+		pair.add_child(b)
+	_market_perps.tooltip_text = "Perpetual futures, with leverage"
+	_market_spot.tooltip_text = "Spot: buy and sell the tokens themselves"
+	_market_perps.pressed.connect(func() -> void: _set_market(false))
+	_market_spot.pressed.connect(func() -> void: _set_market(true))
+	_sync_market_toggle()
+	_strip_side.add_child(Kit.spacer(4, 0))
 	_status_dot = Panel.new()
 	_status_dot.custom_minimum_size = Vector2(7, 7)
 	_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -299,12 +336,28 @@ func _build_strip() -> void:
 	cancel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	cancel.pressed.connect(_close_coins_edit)
 	_coins_box.add_child(cancel)
-	var hint := _quiet("Up to eight Hyperliquid perps, separated by commas.", 12)
-	_coins_box.add_child(hint)
+	_coins_hint = _quiet("", 12)
+	_coins_box.add_child(_coins_hint)
+
+
+func _set_market(spot: bool) -> void:
+	if spot == Hyperliquid.spot_mode():
+		return
+	Sfx.play(&"move", 1.1)
+	ex.touch()
+	Settings.set_value("hl_market", "spot" if spot else "perps")
+
+
+func _sync_market_toggle() -> void:
+	_tab_style(_market_perps, not Hyperliquid.spot_mode())
+	_tab_style(_market_spot, Hyperliquid.spot_mode())
 
 
 func _open_coins_edit() -> void:
-	_coins_edit.text = ", ".join(Hyperliquid.coins())
+	var spot := Hyperliquid.spot_mode()
+	_coins_edit.text = ", ".join(Array(Hyperliquid.coins()).map(func(c: String) -> String: return Hyperliquid.display(c)))
+	_coins_edit.placeholder_text = "HYPE, PURR, UBTC" if spot else "BTC, ETH, SOL, HYPE"
+	_coins_hint.text = "Up to eight spot tokens, separated by commas." if spot else "Up to eight Hyperliquid perps, separated by commas."
 	_strip.visible = false
 	_strip_side.visible = false
 	_coins_box.visible = true
@@ -317,9 +370,10 @@ func _save_coins_edit() -> void:
 	_close_coins_edit()
 	if list.is_empty():
 		return
-	Settings.set_value("hl_coins", Array(list))
+	var spot := Hyperliquid.spot_mode()
+	Settings.set_value("hl_spot_coins" if spot else "hl_coins", Array(list))
 	if not list.has(Hyperliquid.coin()):
-		Settings.set_value("hl_coin", list[0])
+		Settings.set_value("hl_spot_coin" if spot else "hl_coin", list[0])
 
 
 func _close_coins_edit() -> void:
@@ -342,7 +396,7 @@ func _ticker(c: String) -> Control:
 	card.set_shadow_strength(0.16, 20, 8.0)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	card.tooltip_text = "%s perpetual" % Hyperliquid.display(c) + (" on %s" % Hyperliquid.dex_of(c) if Hyperliquid.dex_of(c) != "" else "")
+	card.tooltip_text = ("%s spot" % Hyperliquid.pair_label(c)) if Hyperliquid.is_spot(c) else "%s perpetual" % Hyperliquid.display(c) + (" on %s" % Hyperliquid.dex_of(c) if Hyperliquid.dex_of(c) != "" else "")
 	var wash := Panel.new()
 	wash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -393,7 +447,7 @@ func _ticker(c: String) -> Control:
 		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
 			if c != Hyperliquid.coin():
 				Sfx.play(&"move", 1.1)
-				Settings.set_value("hl_coin", c)
+				Settings.set_value("hl_spot_coin" if Hyperliquid.is_spot(c) else "hl_coin", c)
 	)
 	card.mouse_entered.connect(func() -> void:
 		if c != Hyperliquid.coin():
@@ -543,7 +597,10 @@ func _update_header() -> void:
 		_badge.add_child(coin_badge(c, 36))
 	var lev := int((hl.meta.get(c, {}) as Dictionary).get("lev", 0))
 	var dex := Hyperliquid.dex_of(c)
-	_coin_sub.text = ("%s-USD perpetual" % c if dex == "" else "Perpetual on %s" % dex) + ("  ·  up to %d×" % lev if lev > 0 else "")
+	if Hyperliquid.is_spot(c):
+		_coin_sub.text = "%s spot" % Hyperliquid.pair_label(c) if c != "" else "Loading spot markets…"
+	else:
+		_coin_sub.text = ("%s-USD perpetual" % c if dex == "" else "Perpetual on %s" % dex) + ("  ·  up to %d×" % lev if lev > 0 else "")
 	var p := hl.price(c)
 	_big_price.text = Hyperliquid.fmt_px(p) if p > 0.0 else "—"
 	var ch := hl.change_pct(c)
@@ -563,6 +620,8 @@ func _update_header() -> void:
 		_stat("funding", "—")
 	var tip := []
 	for s_ in _stats.get_children():
+		if (s_.get_meta("value") as Label).text == "—":
+			continue
 		tip.append("%s  %s" % [(s_.get_child(0) as Label).text, (s_.get_meta("value") as Label).text])
 	_big_price.tooltip_text = "\n".join(tip)
 	_big_price.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -692,6 +751,7 @@ func _build_positions() -> void:
 		var k := Kit.label(spec[1], 11, 600, App.TEXT_MUTE)
 		k.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		s.add_child(k)
+		_sum_keys[spec[0]] = k
 		var v := DesktopBelow._num("—", 16, 600, App.TEXT)
 		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		v.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -811,14 +871,19 @@ func _fill_positions() -> void:
 	_summary.visible = not asking and not acct.is_empty()
 	_addr_btn.visible = not asking
 	_addr_btn.text = Hyperliquid.short_address(addr)
+	var spot := Hyperliquid.spot_mode()
+	# Spot has no positions: its balances are what you hold.
+	if spot and _pos_tab == "positions":
+		_pos_tab = "balances"
 	var positions: Array = acct.get("positions", [])
-	var orders := hl.orders
+	var orders := hl.orders.filter(func(o: Dictionary) -> bool: return Hyperliquid.is_spot(str(o["coin"])) == spot)
 	_tab_pos.text = "Positions" + ("  %d" % positions.size() if not asking and positions.size() > 0 else "")
 	_tab_orders.text = "Orders" + ("  %d" % orders.size() if not asking and orders.size() > 0 else "")
 	var balances: Array = acct.get("balances", [])
 	_tab_bal.text = "Balances"
 	_tab_orders.visible = not asking
 	_tab_bal.visible = not asking
+	_tab_pos.visible = not spot or asking
 	_tab_style(_tab_pos, _pos_tab == "positions" or asking)
 	_tab_style(_tab_orders, _pos_tab == "orders" and not asking)
 	_tab_style(_tab_bal, _pos_tab == "balances" and not asking)
@@ -1244,6 +1309,12 @@ func _update_live_pnl() -> void:
 		var pl: Label = r["pnl"]
 		pl.text = Hyperliquid.fmt_usd(pnl, true) + ("  (%s)" % _pct(pnl / margin * 100.0) if margin > 0.0 else "")
 		pl.add_theme_color_override("font_color", _tone(pnl))
+	if Hyperliquid.spot_mode():
+		_spot_summary(acct)
+		return
+	for id in ["value", "upnl", "margin", "free"]:
+		(_sum_keys[id] as Label).text = {"value": "Total value", "upnl": "Unrealised P&L", "margin": "Margin used", "free": "Free to trade"}[id]
+	(_sum_labels["margin"] as Label).get_parent().visible = true
 	var value := hl.live_value()
 	(_sum_labels["value"] as Label).text = Hyperliquid.fmt_usd(value)
 	(_sum_labels["value"] as Label).tooltip_text = ("Unified account: your spot balances %s plus open P&L" % Hyperliquid.fmt_usd(float(acct.get("spot", 0.0)))) if acct.get("unified", false) \
@@ -1255,6 +1326,27 @@ func _update_live_pnl() -> void:
 	var used := float(acct["margin"])
 	(_sum_labels["margin"] as Label).text = Hyperliquid.fmt_usd(used) + ("  ·  %d%%" % roundi(used / value * 100.0) if value > 0.0 else "")
 	(_sum_labels["free"] as Label).text = Hyperliquid.fmt_usd(float(acct["withdrawable"]))
+
+
+## The summary in spot: what your tokens are worth, how much of that is in
+## tokens other than USDC, and the USDC free to buy with.
+func _spot_summary(acct: Dictionary) -> void:
+	var usdc := 0.0
+	for b in acct.get("balances", []):
+		if str(b["coin"]) == "USDC":
+			usdc = float(b["total"])
+	var spot := float(acct.get("spot", 0.0))
+	(_sum_keys["value"] as Label).text = "Spot value"
+	(_sum_keys["upnl"] as Label).text = "In tokens"
+	(_sum_keys["free"] as Label).text = "USDC free"
+	(_sum_labels["margin"] as Label).get_parent().visible = false
+	(_sum_labels["value"] as Label).text = Hyperliquid.fmt_usd(spot)
+	(_sum_labels["value"] as Label).tooltip_text = "Everything in your spot balances, at today's prices"
+	var up_l: Label = _sum_labels["upnl"]
+	up_l.text = Hyperliquid.fmt_usd(maxf(0.0, spot - usdc))
+	up_l.add_theme_color_override("font_color", App.TEXT)
+	(_sum_labels["free"] as Label).text = Hyperliquid.fmt_usd(float(acct.get("usdc_free", 0.0)))
+	(_sum_labels["free"] as Label).tooltip_text = "USDC not held by open orders: what you can buy with"
 
 
 # --- Layout ----------------------------------------------------------------------------------------

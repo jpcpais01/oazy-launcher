@@ -26,6 +26,9 @@ var _usd: LineEdit
 var _px: LineEdit
 var _px_box: VBoxContainer
 var _lev: HSlider
+var _lev_box: VBoxContainer
+var _opts: HBoxContainer
+var _spot := false
 var _lev_label: Label
 var _reduce: CheckBox
 var _tpsl: CheckBox
@@ -37,6 +40,7 @@ var _quick: HBoxContainer
 var _est: Label
 var _acct_card: PanelContainer
 var _acct_total: Label
+var _acct_k: Label
 var _bar: MarginBar
 var _leg_used: Label
 var _leg_order: Label
@@ -99,7 +103,7 @@ func _ready() -> void:
 			_on_coin()
 	)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
-		if key == "hl_coin":
+		if key in ["hl_coin", "hl_spot_coin", "hl_market"]:
 			_on_coin()
 		elif key == "hl_address":
 			_sync()
@@ -258,6 +262,7 @@ func _build_form() -> void:
 	_px_box.add_child(_px)
 
 	var lev_box := Kit.vbox(4)
+	_lev_box = lev_box
 	_form.add_child(lev_box)
 	var lev_head := Kit.hbox(6)
 	lev_box.add_child(lev_head)
@@ -280,6 +285,7 @@ func _build_form() -> void:
 	lev_box.add_child(_lev)
 
 	var opts := Kit.hbox(6)
+	_opts = opts
 	_form.add_child(opts)
 	_tpsl = _check("TP / SL", "Add a take profit and a stop loss: market orders that close this position when the price gets there.")
 	opts.add_child(_tpsl)
@@ -365,6 +371,7 @@ func _build_account_card() -> void:
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(top)
 	var k := Kit.label("Your account", 12, 600, App.TEXT_MUTE)
+	_acct_k = k
 	k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	k.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(k)
@@ -459,13 +466,19 @@ func _sync_account(q: Dictionary) -> void:
 	var used := float(acct.get("margin", 0.0))
 	var order := float(q.get("margin", 0.0)) if not q.is_empty() and not q.has("error") and not bool(q.get("reduce", false)) else 0.0
 	var free := _free()
+	# Spot: your tokens, what this buy would spend, and the USDC left.
+	if _spot:
+		total = float(acct.get("spot", 0.0))
+		free = float(acct.get("usdc_free", 0.0))
+		used = maxf(0.0, total - free)
+	_acct_k.text = "Your spot" if _spot else "Your account"
 	_acct_total.text = Hyperliquid.fmt_usd(total)
 	_bar.set_values(maxf(total, used + free), used, order)
-	_leg_used.text = "Used %s" % _compact(used)
+	_leg_used.text = ("In use %s" if _spot else "Used %s") % _compact(used)
 	_leg_order_dot.visible = order > 0.0
 	_leg_order.text = "Order %s" % _compact(order)
 	var left := free - order
-	_leg_free.text = ("Free %s" if order <= 0.0 else "Left %s") % _compact(maxf(0.0, left))
+	_leg_free.text = (("USDC %s" if _spot else "Free %s") if order <= 0.0 else "Left %s") % _compact(maxf(0.0, left))
 	_leg_free.add_theme_color_override("font_color", DOWN if left < 0.0 else App.TEXT_DIM)
 	(_leg_order_dot.get_child(0) as Panel).add_theme_stylebox_override("panel", Kit.box(DOWN if left < 0.0 else UP, 4))
 
@@ -504,14 +517,24 @@ func _chip(text: String) -> Button:
 	return b
 
 
-## What you're free to trade with: the account's available money.
+## What you're free to trade with: the account's available money. In spot, a
+## buy spends free USDC and a sell what you hold of the token (in dollars).
 func _free() -> float:
+	if _spot:
+		if _buy:
+			return float(hl.account.get("usdc_free", 0.0))
+		return hl.spot_free(_base()) * hl.price(_coin)
 	return float(hl.account.get("withdrawable", 0.0))
 
 
-## The most you can open at the leverage picked.
+## The most you can open at the leverage picked (spot: what you can spend).
 func _buying_power() -> float:
-	return _free() * int(_lev.value)
+	return _free() if _spot else _free() * int(_lev.value)
+
+
+## The spot token this pair trades ("HYPE" for HYPE/USDC).
+func _base() -> String:
+	return str((Hyperliquid.spot_pairs.get(_coin, {}) as Dictionary).get("base", Hyperliquid.display(_coin)))
 
 
 ## A starting point when TP / SL is ticked: 2 % and 1 % of price either way.
@@ -540,7 +563,7 @@ func use_price(px: float) -> void:
 
 
 func _px_text(v: float) -> String:
-	return HlExchange.wire(HlExchange.round_px(v, hl.sz_decimals(_coin))) if v > 0.0 else ""
+	return HlExchange.wire(HlExchange.round_px(v, hl.sz_decimals(_coin), _spot)) if v > 0.0 else ""
 
 
 func _paint_choices() -> void:
@@ -551,8 +574,22 @@ func _paint_choices() -> void:
 	_px_box.visible = not _market
 
 
+## Spot has no leverage, reduce-only or TP / SL, and buys and sells tokens.
+func _apply_mode() -> void:
+	_spot = Hyperliquid.is_spot(_coin) or Hyperliquid.spot_mode()
+	_lev_box.visible = not _spot
+	_opts.visible = not _spot
+	if _spot:
+		_tpsl.button_pressed = false
+		_reduce.button_pressed = false
+	_tpsl_box.visible = not _spot and _tpsl.button_pressed and not _reduce.button_pressed
+	(_side[0] as Button).text = "Buy" if _spot else "Buy / Long"
+	(_side[1] as Button).text = "Sell" if _spot else "Sell / Short"
+
+
 func _on_coin() -> void:
 	_coin = Hyperliquid.coin()
+	_apply_mode()
 	var m: Dictionary = hl.meta.get(_coin, {})
 	var top := maxi(1, int(m.get("lev", 10)))
 	_lev.max_value = top
@@ -580,6 +617,9 @@ func _ticket() -> Dictionary:
 func refresh_quote() -> void:
 	if _go == null:
 		return
+	if _coin != Hyperliquid.coin():
+		_on_coin()
+		return
 	var name := Hyperliquid.display(_coin)
 	var tone := UP if _buy else DOWN
 	var q := ex.quote(_ticket()) if _usd.text.strip_edges() != "" else {}
@@ -587,8 +627,26 @@ func refresh_quote() -> void:
 	_est.text = ""
 	_note.text = str(q["error"]) if q.has("error") else ""
 	if q.is_empty():
-		_est.text = "Type an amount, or pick a quick size. Up to %d× on %s." % [int(_lev.max_value), name]
-	if ok:
+		_est.text = ("Type an amount in dollars, or pick a quick size." if _spot else "Type an amount, or pick a quick size. Up to %d× on %s." % [int(_lev.max_value), name])
+	if ok and _spot:
+		var base := str(q["base"])
+		var sz_s := "%s %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), base]
+		if bool(q["buy"]):
+			_set_sum("get", sz_s)
+			_set_sum("margin", "%s  +  fee %s" % [Hyperliquid.fmt_usd(float(q["notional"])), Hyperliquid.fmt_usd(float(q["fee"]))])
+			(_sum["margin"] as Label).tooltip_text = "The %s this buy spends" % str(q["quote"])
+		else:
+			_set_sum("get", "≈ %s %s" % [Hyperliquid.fmt_usd(float(q["notional"]) - float(q["fee"])), str(q["quote"])])
+			_set_sum("margin", "%s  +  fee %s" % [sz_s, Hyperliquid.fmt_usd(float(q["fee"]))])
+			(_sum["margin"] as Label).tooltip_text = "The %s this sell spends" % base
+		(_sum["margin"] as Label).mouse_filter = Control.MOUSE_FILTER_PASS
+		_set_sum("tpsl", "")
+		if not hl.account.is_empty():
+			if bool(q["buy"]) and float(q["notional"]) > _free():
+				_note.text = "That costs %s, but only %s USDC is free." % [Hyperliquid.fmt_usd(float(q["notional"])), Hyperliquid.fmt_usd(_free())]
+			elif not bool(q["buy"]) and float(q["sz"]) > hl.spot_free(base) + 0.0000001:
+				_note.text = "You have %s %s free to sell." % [Hyperliquid.fmt_sz(hl.spot_free(base), int(q["decimals"])), base]
+	elif ok:
 		_set_sum("get", "%s %s  ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name, Hyperliquid.fmt_usd(float(q["notional"]))])
 		_set_sum("margin", ("%s  +  fee %s" % [Hyperliquid.fmt_usd(float(q["margin"])), Hyperliquid.fmt_usd(float(q["fee"]))]) if not bool(q["reduce"]) else "Fee %s" % Hyperliquid.fmt_usd(float(q["fee"])))
 		(_sum["margin"] as Label).tooltip_text = "Margin is the part of your money this position holds (its size ÷ %d× leverage)." % int(q["lev"])
@@ -604,7 +662,7 @@ func refresh_quote() -> void:
 	_sum_box.visible = ok
 	_sync_account(q)
 	_avail.text = ("Up to %s" % _compact(_buying_power())) if not hl.account.is_empty() and _buying_power() > 0.0 else ""
-	_go.text = ("Review buy" if _buy else "Review sell") + " " + name
+	_go.text = ("Review buy" if _buy else "Review sell") + " " + (name if name != "" else "…")
 	if _sending:
 		_go.text = "Sending…"
 	var live := ex.armed and not q.is_empty() and not q.has("error") and not _sending
@@ -637,14 +695,24 @@ func _review() -> void:
 	d.title = "%s %s %s?" % ["Buy" if q["buy"] else "Sell", Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name]
 	d.message = "This is a real order on Hyperliquid, with real money."
 	d.tone = tone
-	d.rows = [
-		["Side", ("Buy / Long" if q["buy"] else "Sell / Short") + ("  ·  reduce only" if q["reduce"] else ""), tone],
-		["Order", "Market (fills now, up to %d%% from the price)" % roundi(HlExchange.SLIPPAGE * 100.0) if q["market"] else "Limit at " + Hyperliquid.fmt_px(float(q["px"]))],
-		["Size", "%s %s  ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name, Hyperliquid.fmt_usd(float(q["notional"]))]],
-		["Leverage", "%d×  %s" % [int(q["lev"]), "cross" if q["cross"] else "isolated"]],
-		["Margin used", Hyperliquid.fmt_usd(float(q["margin"]))],
-		["Fee (estimate)", Hyperliquid.fmt_usd(float(q["fee"]))],
-	]
+	if bool(q.get("spot", false)):
+		d.message = "This is a real spot order on Hyperliquid, with real money."
+		d.rows = [
+			["Side", "Buy" if q["buy"] else "Sell", tone],
+			["Order", "Market (fills now, up to %d%% from the price)" % roundi(HlExchange.SLIPPAGE * 100.0) if q["market"] else "Limit at " + Hyperliquid.fmt_px(float(q["px"]))],
+			["Size", "%s %s  ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name, Hyperliquid.fmt_usd(float(q["notional"]))]],
+			["Pair", Hyperliquid.pair_label(str(q["coin"])) + " spot"],
+			["Fee (estimate)", Hyperliquid.fmt_usd(float(q["fee"]))],
+		]
+	else:
+		d.rows = [
+			["Side", ("Buy / Long" if q["buy"] else "Sell / Short") + ("  ·  reduce only" if q["reduce"] else ""), tone],
+			["Order", "Market (fills now, up to %d%% from the price)" % roundi(HlExchange.SLIPPAGE * 100.0) if q["market"] else "Limit at " + Hyperliquid.fmt_px(float(q["px"]))],
+			["Size", "%s %s  ≈ %s" % [Hyperliquid.fmt_sz(float(q["sz"]), int(q["decimals"])), name, Hyperliquid.fmt_usd(float(q["notional"]))]],
+			["Leverage", "%d×  %s" % [int(q["lev"]), "cross" if q["cross"] else "isolated"]],
+			["Margin used", Hyperliquid.fmt_usd(float(q["margin"]))],
+			["Fee (estimate)", Hyperliquid.fmt_usd(float(q["fee"]))],
+		]
 	if float(q["tp"]) > 0.0:
 		d.rows.append(["Take profit", "%s  (%s)" % [Hyperliquid.fmt_px(float(q["tp"])), Hyperliquid.fmt_usd(float(q["tp_pnl"]), true)], UP])
 	if float(q["sl"]) > 0.0:
