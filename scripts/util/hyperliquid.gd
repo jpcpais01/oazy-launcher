@@ -15,6 +15,8 @@ signal prices_changed
 signal market_changed
 signal account_changed
 signal status_changed
+## The spot market list arrived (or changed): spot names can be read now.
+signal spot_loaded
 
 const INFO := "https://api.hyperliquid.xyz/info"
 const WS_URL := "wss://api.hyperliquid.xyz/ws"
@@ -26,6 +28,8 @@ const YTD := "ytd"
 ## The regular session: 9:30 to 16:00 New York time.
 const SESSION_OPEN_S := 34200
 const SESSION_LEN_S := 23400
+## Spot pairs trade as asset 10000 + the pair's index.
+const SPOT_ASSET := 10000
 const CANDLES := 160
 const MAX_TRADES := 80
 ## Seconds between REST polls: every coin's 24h stats, your account (in the
@@ -71,6 +75,11 @@ var spot_px := {}
 var live := false
 var focused := false
 var last_error := ""
+## Spot pairs by their API coin ("@107", "PURR/USDC") -> {base, quote, index}.
+## Static so names read the same everywhere (display() is static).
+static var spot_pairs := {}
+## A spot token's name ("HYPE") -> its pair against USDC (else its first pair).
+static var spot_names := {}
 
 var _ws: WebSocketPeer
 var _was_open := false
@@ -97,7 +106,11 @@ func _ready() -> void:
 	set_process(false)
 	Settings.changed.connect(func(key: String, _v: Variant) -> void:
 		match key:
-			"hl_coin", "hl_interval":
+			"hl_coin", "hl_interval", "hl_spot_coin", "hl_market":
+				if key == "hl_market":
+					_spark_at = 0
+					if focused:
+						_fetch_sparks()
 				candles = []
 				prev_close = 0.0
 				book = {}
@@ -114,7 +127,7 @@ func _ready() -> void:
 				_mode_addr = ""
 				account_changed.emit()
 				_acct_in = 0.0
-			"hl_coins":
+			"hl_coins", "hl_spot_coins":
 				_sync_subs()
 				_spark_at = 0
 				if focused:
@@ -133,18 +146,51 @@ func start(force: bool = false) -> void:
 
 # --- Settings ----------------------------------------------------------------------------
 
+## The desk shows spot markets instead of perps.
+static func spot_mode() -> bool:
+	return str(Settings.get_value("hl_market")) == "spot"
+
+
+## The coins along the top, for the mode the desk is in (each keeps its own).
+## Spot ones are kept by name ("HYPE") or pair and read as their API coin; a
+## name not known yet (before the spot list loads) is left out for now.
 static func coins() -> PackedStringArray:
+	var spot := spot_mode()
 	var out := PackedStringArray()
-	for c in Settings.get_value("hl_coins"):
+	for c in Settings.get_value("hl_spot_coins" if spot else "hl_coins"):
 		var t := str(c).strip_edges()
+		if spot:
+			t = spot_coin(t)
 		if t != "" and not out.has(t):
 			out.append(t)
 	return out
 
 
 static func coin() -> String:
+	if spot_mode():
+		return spot_coin(str(Settings.get_value("hl_spot_coin")))
 	var c := str(Settings.get_value("hl_coin"))
 	return c if c != "" else "BTC"
+
+
+## A spot token name, pair label or API coin -> the API coin ("" if unknown).
+## API coins pass straight through, even before the spot list has loaded.
+static func spot_coin(t: String) -> String:
+	t = t.strip_edges()
+	if spot_pairs.has(t):
+		return t
+	if t.begins_with("@") or t.contains("/"):
+		var label := t.to_upper()
+		for c in spot_pairs:
+			if label == str(spot_pairs[c]["label"]).to_upper():
+				return c
+		return t if t.begins_with("@") and spot_pairs.is_empty() else ""
+	return str(spot_names.get(t.to_upper(), ""))
+
+
+## A spot market ("@107", "PURR/USDC"), not a perp.
+static func is_spot(c: String) -> bool:
+	return spot_pairs.has(c) or c.begins_with("@") or c.contains("/")
 
 
 ## The chart view picked: an interval, or TODAY on a stock / ETF market.
@@ -230,12 +276,22 @@ static func is_address(text: String) -> bool:
 ## "btc, eth  kpepe" -> ["BTC", "ETH", "kPEPE"], spelt the way Hyperliquid does
 ## when it knows the coin.
 func parse_coins(text: String) -> PackedStringArray:
+	if spot_mode():
+		var list := PackedStringArray()
+		for part in text.replace(";", ",").replace(" ", ",").split(",", false):
+			var c := spot_coin(part)
+			if c != "" and not list.has(c) and list.size() < 8:
+				list.append(c)
+		return list
 	var known := {}
 	# Full names ("xyz:XYZ100") and short ones; Hyperliquid's own coins (loaded
 	# first) win a short name over a builder's.
 	for c in meta.keys():
-		known[str(c).to_upper()] = c
+		if not is_spot(str(c)):
+			known[str(c).to_upper()] = c
 	for c in meta.keys():
+		if is_spot(str(c)):
+			continue
 		var short := display(str(c)).to_upper()
 		if not known.has(short):
 			known[short] = c
@@ -253,8 +309,17 @@ func parse_coins(text: String) -> PackedStringArray:
 # --- Reading -------------------------------------------------------------------------------------
 
 ## "xyz:XYZ100" -> "XYZ100"
+## "@107" -> "HYPE" (a spot token against USDC), "@1" -> "HFUN/USDT0" otherwise.
 static func display(c: String) -> String:
+	if spot_pairs.has(c):
+		var sp: Dictionary = spot_pairs[c]
+		return str(sp["base"]) if str(sp["quote"]) == "USDC" else str(sp["label"])
 	return c.get_slice(":", 1) if c.contains(":") else c
+
+
+## "HYPE/USDC" for a spot market, else display().
+static func pair_label(c: String) -> String:
+	return str((spot_pairs.get(c, {}) as Dictionary).get("label", display(c)))
 
 
 ## The builder exchange a coin trades on ("" for Hyperliquid's own).
@@ -281,6 +346,14 @@ func change_pct(c: String) -> float:
 
 func sz_decimals(c: String) -> int:
 	return int((meta.get(c, {}) as Dictionary).get("sz", 4))
+
+
+## How much of a spot token you hold and can use (not held by orders).
+func spot_free(token: String) -> float:
+	for b in account.get("balances", []):
+		if str(b["coin"]) == token:
+			return maxf(0.0, float(b["total"]) - float(b["hold"]))
+	return 0.0
 
 
 ## Unrealised P&L of a position at the live price.
@@ -339,7 +412,7 @@ func _wanted() -> Dictionary:
 		held.append(str(p["coin"]))
 	for c in Array(coins()) + held:
 		out["ctx:" + c] = {"type": "activeAssetCtx", "coin": c}
-	if focused:
+	if focused and coin() != "":
 		var c := coin()
 		out["book:" + c] = {"type": "l2Book", "coin": c}
 		out["trades:" + c] = {"type": "trades", "coin": c}
@@ -551,6 +624,23 @@ func _fetch_ctxs() -> void:
 			body["dex"] = dexes[i]
 		if parse_meta_and_ctxs(await _post(body), meta, ctxs, dexes[i], i):
 			prices_changed.emit()
+	# Spot: the pairs (names, sizes, prices) and every token's dollar price.
+	var sj: Variant = await _post({"type": "spotMetaAndAssetCtxs"})
+	var pairs := {}
+	if parse_spot_meta(sj, meta, ctxs, pairs):
+		var first := spot_pairs.is_empty()
+		use_spot_pairs(pairs)
+		var px := parse_spot_prices(sj)
+		if not px.is_empty():
+			spot_px = px
+			_spot_px_at = _now()
+		if first:
+			spot_loaded.emit()
+			_sync_subs()
+			if focused and spot_mode():
+				_fetch_sparks()
+				_fetch_candles()
+		prices_changed.emit()
 	_ctx_busy = false
 
 
@@ -597,7 +687,7 @@ func _fetch_account() -> void:
 
 
 func _fetch_candles() -> void:
-	if _mock:
+	if _mock or coin() == "":
 		return
 	var c := coin()
 	var iv := interval()
@@ -716,6 +806,55 @@ static func parse_spot_prices(j: Variant) -> Dictionary:
 	return out
 
 
+## spotMetaAndAssetCtxs -> every spot pair into `meta_out` / `ctx_out` (by its
+## API coin) and `pairs_out` ({base, quote, label, index}). False if it wasn't one.
+static func parse_spot_meta(j: Variant, meta_out: Dictionary, ctx_out: Dictionary, pairs_out: Dictionary) -> bool:
+	if not (j is Array) or j.size() < 2 or not (j[0] is Dictionary) or not (j[1] is Array):
+		return false
+	var tokens := {}
+	for t in j[0].get("tokens", []):
+		if t is Dictionary:
+			tokens[int(t.get("index", -1))] = t
+	var ctx_by_coin := {}
+	for x in j[1]:
+		if x is Dictionary:
+			ctx_by_coin[str(x.get("coin", ""))] = x
+	for u in j[0].get("universe", []):
+		if not (u is Dictionary) or not (u.get("tokens") is Array) or (u["tokens"] as Array).size() < 2:
+			continue
+		var base: Variant = tokens.get(int(u["tokens"][0]))
+		var quote: Variant = tokens.get(int(u["tokens"][1]))
+		if not (base is Dictionary) or not (quote is Dictionary):
+			continue
+		var c := str(u.get("name", ""))
+		var idx := int(u.get("index", -1))
+		if c == "" or idx < 0:
+			continue
+		var bn := str(base.get("name", ""))
+		var qn := str(quote.get("name", ""))
+		pairs_out[c] = {"base": bn, "quote": qn, "label": "%s/%s" % [bn, qn], "index": idx}
+		meta_out[c] = {"sz": int(base.get("szDecimals", 2)), "lev": 0, "dex": "", "asset": SPOT_ASSET + idx, "spot": true,
+			"isolated": false, "delisted": false}
+		if ctx_by_coin.has(c):
+			ctx_out[c] = parse_ctx(ctx_by_coin[c])
+	return not pairs_out.is_empty()
+
+
+## Makes `pairs` the spot list everything reads names from.
+static func use_spot_pairs(pairs: Dictionary) -> void:
+	spot_pairs = pairs
+	var names := {}
+	for c in pairs:
+		var sp: Dictionary = pairs[c]
+		var key := str(sp["base"]).to_upper()
+		# Against USDC wins; otherwise the first pair (lowest index) does.
+		var now: Variant = names.get(key)
+		if now == null or (str(sp["quote"]) == "USDC" and str(pairs[now]["quote"]) != "USDC") \
+				or (str(sp["quote"]) == str(pairs[now]["quote"]) and int(sp["index"]) < int(pairs[now]["index"])):
+			names[key] = c
+	spot_names = names
+
+
 ## Perps (merged parse_account) + spot balances -> the account the desk shows:
 ## {value, perps, spot, margin, withdrawable, ntl, upnl, positions, balances,
 ## unified}. In a unified account the spot balances are the money and the
@@ -744,7 +883,7 @@ static func compose_account(perp: Dictionary, balances: Array, prices: Dictionar
 	var perps := float(perp.get("value", 0.0))
 	var out := {
 		"positions": positions, "balances": rows, "unified": is_unified, "upnl": upnl,
-		"ntl": float(perp.get("ntl", 0.0)), "spot": spot_usd,
+		"ntl": float(perp.get("ntl", 0.0)), "spot": spot_usd, "usdc_free": usdc_free,
 		"margin": maxf(float(perp.get("margin", 0.0)), pos_margin),
 		"at": int(Time.get_unix_time_from_system()),
 	}

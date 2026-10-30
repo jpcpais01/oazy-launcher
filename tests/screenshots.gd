@@ -575,6 +575,35 @@ func _trade(main: Node) -> void:
 	await _wait(0.6)
 	await shot("01t10-desktop-trade-ytd")
 	Settings.set_value("hl_interval", "1h")
+	# Spot: its own coins, balances instead of positions, a plain buy ticket.
+	Hyperliquid.use_spot_pairs({"@107": {"base": "HYPE", "quote": "USDC", "label": "HYPE/USDC", "index": 107},
+		"PURR/USDC": {"base": "PURR", "quote": "USDC", "label": "PURR/USDC", "index": 0},
+		"@142": {"base": "UBTC", "quote": "USDC", "label": "UBTC/USDC", "index": 142},
+		"@151": {"base": "UETH", "quote": "USDC", "label": "UETH/USDC", "index": 151}})
+	var sp := _mock_hl("HYPE")
+	for pair in [["@107", "HYPE", 2, 46.214], ["PURR/USDC", "", 0, 0.1912], ["@142", "BTC", 5, 111842.0], ["@151", "ETH", 4, 3951.4]]:
+		var src: String = pair[1]
+		var px: float = pair[3]
+		sp["meta"][pair[0]] = {"sz": pair[2], "lev": 0, "dex": "", "asset": 10000 + int(Hyperliquid.spot_pairs[pair[0]]["index"]), "spot": true}
+		sp["ctxs"][pair[0]] = {"mark": px, "prev": px / 1.031, "vol": 8200000.0, "mid": px} if src == "" else sp["ctxs"][src]
+		sp["mids"][pair[0]] = str(px)
+		sp["sparks"][pair[0]] = (sp["sparks"][src] if src != "" else (sp["sparks"]["SOL"] as Array).map(func(v: float) -> float: return v / 194.62 * px))
+	sp["account"]["usdc_free"] = 32119.72
+	sp["orders"] = [{"coin": "@107", "buy": true, "px": 44.5, "sz": 20.0, "orig": 20.0, "oid": 9, "reduce": false, "kind": "Limit", "time": int(Time.get_unix_time_from_system()) * 1000, "trigger": 0.0, "tpsl": "", "position": false}]
+	Settings.set_value("hl_market", "spot")
+	Settings.set_value("hl_spot_coin", "HYPE")
+	hl.set_mock(sp)
+	trade.ex.armed = true
+	trade.ex.changed.emit()
+	trade._ticket._usd.text = "500"
+	trade._ticket.refresh_quote()
+	await _wait(0.6)
+	await shot("01t11-desktop-trade-spot")
+	trade._ticket._usd.text = ""
+	trade.ex.armed = false
+	trade.ex.changed.emit()
+	Settings.set_value("hl_market", "perps")
+	Hyperliquid.use_spot_pairs({})
 	Settings.set_value("hl_coin", "ETH")
 	hl.set_mock(_mock_hl("ETH"))
 	await _wait(0.6)

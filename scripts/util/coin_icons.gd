@@ -16,6 +16,11 @@ static var _waiting := {}
 ## Where to look for a coin's logo, best first.
 static func urls(c: String) -> PackedStringArray:
 	var short := Hyperliquid.display(c)
+	if Hyperliquid.is_spot(c):
+		# Spot tokens by name: Hyperliquid's spot art, then its perp art.
+		short = str((Hyperliquid.spot_pairs.get(c, {}) as Dictionary).get("base", short))
+		return PackedStringArray(["https://app.hyperliquid.xyz/coins/%s_spot.svg" % short, "https://app.hyperliquid.xyz/coins/%s.svg" % short,
+			"https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/%s.svg" % short.trim_prefix("U").to_lower()])
 	var out := PackedStringArray(["https://app.hyperliquid.xyz/coins/%s.svg" % c])
 	if Hyperliquid.dex_of(c) != "":
 		out.append("https://financialmodelingprep.com/image-stock/%s.png" % short.to_upper())

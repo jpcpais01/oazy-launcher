@@ -484,6 +484,29 @@ func _logic_tests() -> void:
 	check(Hyperliquid.session_close_before(ut.call(2026, 10, 29, 13, 30)) == ut.call(2026, 10, 28, 20)
 		and Hyperliquid.session_close_before(ut.call(2026, 11, 2, 14, 30)) == ut.call(2026, 10, 30, 20), "hyperliquid: last trading day's 4pm close")
 	check(Hyperliquid.year_start(ut.call(2026, 10, 29, 14)) == ut.call(2026, 1, 1, 0) and Hyperliquid.year_start(ut.call(2027, 1, 1, 0)) == ut.call(2027, 1, 1, 0), "hyperliquid: YTD starts on January 1st")
+	var smeta := {}
+	var sctx := {}
+	var spairs := {}
+	var sj := [{"tokens": [{"name": "USDC", "index": 0, "szDecimals": 8}, {"name": "PURR", "index": 1, "szDecimals": 0}, {"name": "HYPE", "index": 150, "szDecimals": 2}, {"name": "USDT0", "index": 268, "szDecimals": 2}],
+		"universe": [{"name": "PURR/USDC", "tokens": [1, 0], "index": 0}, {"name": "@107", "tokens": [150, 0], "index": 107}, {"name": "@207", "tokens": [150, 268], "index": 207}]},
+		[{"coin": "PURR/USDC", "midPx": "0.19", "markPx": "0.19", "prevDayPx": "0.18"}, {"coin": "@107", "midPx": "46.2", "markPx": "46.2", "prevDayPx": "44"}, {"coin": "@207", "midPx": "46.1"}]]
+	check(Hyperliquid.parse_spot_meta(sj, smeta, sctx, spairs) and int(smeta["@107"]["asset"]) == 10107 and int(smeta["@107"]["sz"]) == 2 and bool(smeta["@107"]["spot"])
+		and float(sctx["@107"]["mid"]) == 46.2 and str(spairs["@207"]["label"]) == "HYPE/USDT0", "hyperliquid: spot pairs parse")
+	var old_pairs := Hyperliquid.spot_pairs
+	Hyperliquid.use_spot_pairs(spairs)
+	check(Hyperliquid.spot_coin("HYPE") == "@107" and Hyperliquid.spot_coin("hype/usdc") == "@107" and Hyperliquid.spot_coin("PURR") == "PURR/USDC"
+		and Hyperliquid.display("@107") == "HYPE" and Hyperliquid.display("@207") == "HYPE/USDT0" and Hyperliquid.is_spot("@107") and not Hyperliquid.is_spot("BTC")
+		and Hyperliquid.spot_coin("NOPE") == "", "hyperliquid: spot names resolve to their USDC pair")
+	var sx := HlExchange.new(Hyperliquid.new())
+	sx.hl.meta = smeta
+	sx.hl.mids = {"@107": "46.2"}
+	var sq := sx.quote({"coin": "@107", "buy": true, "market": true, "usd": 100.0, "lev": 5, "reduce": true, "tp": 50.0})
+	check(bool(sq.get("spot", false)) and int(sq["asset"]) == 10107 and int(sq["lev"]) == 0 and float(sq["tp"]) == 0.0 and not bool(sq["reduce"])
+		and is_equal_approx(float(sq["sz"]), 2.16) and is_equal_approx(float(sq["px"]), 47.586), "trading: spot quotes have no leverage, TP / SL or reduce-only")
+	check(absf(HlExchange.round_px(0.123456789, 0, true) - 0.12346) < 1e-12 and absf(HlExchange.round_px(0.000123456, 0, true) - 0.00012346) < 1e-14 and absf(HlExchange.round_px(0.000123456, 0) - 0.000123) < 1e-14, "trading: spot prices get 8 decimals")
+	sx.hl.free()
+	sx.free()
+	Hyperliquid.use_spot_pairs(old_pairs)
 	check(Hyperliquid.has_session("xyz:TSLA") and not Hyperliquid.has_session("BTC"), "hyperliquid: Today only for stocks and ETFs")
 	var ico := CoinIcons.decode('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#f7931a"/></svg>'.to_utf8_buffer(), true)
 	check(ico != null and ico.get_width() == CoinIcons.SIZE and ico.get_pixel(CoinIcons.SIZE / 2, CoinIcons.SIZE / 2).a > 0.9 and ico.get_pixel(1, 1).a < 0.05

@@ -60,6 +60,11 @@ const DEFAULTS := {
 	"hl_coin": "BTC",
 	"hl_interval": "1h",
 	"hl_address": "",
+	## "perps" or "spot": which markets the desk shows. Spot keeps its own
+	## coins along the top (token names) and its own coin on the chart.
+	"hl_market": "perps",
+	"hl_spot_coins": ["HYPE", "PURR", "UBTC", "UETH"],
+	"hl_spot_coin": "HYPE",
 	"browser_links": true,
 	"browser_pinned": false,
 	"terminal_oazy": true,

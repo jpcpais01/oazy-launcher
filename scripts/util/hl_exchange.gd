@@ -26,6 +26,8 @@ const SLIPPAGE := 0.03
 const TPSL_SLIPPAGE := 0.1
 ## Hyperliquid's base taker fee, for the estimate in the confirm step.
 const TAKER_FEE := 0.00045
+## The same for spot.
+const SPOT_TAKER_FEE := 0.0007
 const ARM_IDLE := 300.0
 
 var hl: Hyperliquid
@@ -185,12 +187,13 @@ func _process(delta: float) -> void:
 # --- Orders ---------------------------------------------------------------------------------
 
 ## A limit price the exchange accepts: five significant figures, and no more
-## decimals than 6 minus the coin's size decimals (integers always pass).
-static func round_px(px: float, sz_decimals: int) -> float:
+## decimals than 6 (perps) or 8 (spot) minus the coin's size decimals
+## (integers always pass).
+static func round_px(px: float, sz_decimals: int, spot: bool = false) -> float:
 	if px <= 0.0:
 		return 0.0
 	var mag := floori(log(px) / log(10.0))
-	var digits := mini(4 - mag, 6 - sz_decimals)
+	var digits := mini(4 - mag, (8 if spot else 6) - sz_decimals)
 	if digits <= 0:
 		return roundf(px)
 	return snappedf(px, pow(10.0, -digits))
@@ -270,6 +273,8 @@ func quote(t: Dictionary) -> Dictionary:
 	var ref_px: float = mid if market else float(t.get("px", 0.0))
 	if ref_px <= 0.0:
 		return {"error": "Enter a limit price."}
+	if bool(m.get("spot", false)):
+		return _quote_spot(t, c, dec, buy, market, ref_px)
 	var sz := float(t.get("sz", 0.0))
 	if sz <= 0.0:
 		sz = float(t.get("usd", 0.0)) / ref_px
@@ -301,8 +306,34 @@ func quote(t: Dictionary) -> Dictionary:
 	}
 
 
+## A spot order: no leverage, no TP / SL; a buy spends USDC, a sell spends the
+## token. Same answer shape as quote(), with "spot" set and "margin" = what it
+## spends in dollars.
+func _quote_spot(t: Dictionary, c: String, dec: int, buy: bool, market: bool, ref_px: float) -> Dictionary:
+	var sz := float(t.get("sz", 0.0))
+	if sz <= 0.0:
+		sz = float(t.get("usd", 0.0)) / ref_px
+	sz = round_sz(sz, dec)
+	if sz <= 0.0:
+		return {"error": "That's smaller than the smallest size for %s." % Hyperliquid.display(c)}
+	var notional := sz * ref_px
+	if notional < 10.0:
+		return {"error": "Hyperliquid's smallest order is $10."}
+	var px := round_px(ref_px * (1.0 + SLIPPAGE if buy else 1.0 - SLIPPAGE) if market else ref_px, dec, true)
+	var sp: Dictionary = Hyperliquid.spot_pairs.get(c, {})
+	return {
+		"spot": true, "base": str(sp.get("base", Hyperliquid.display(c))), "quote": str(sp.get("quote", "USDC")),
+		"tp": 0.0, "sl": 0.0, "tp_pnl": 0.0, "sl_pnl": 0.0,
+		"coin": c, "asset": asset_of(c), "buy": buy, "market": market, "sz": sz, "px": px, "ref_px": ref_px,
+		"notional": notional, "lev": 0, "margin": notional if buy else 0.0, "fee": notional * SPOT_TAKER_FEE,
+		"reduce": false, "tif": "Ioc" if market else "Gtc", "cross": true, "decimals": dec,
+	}
+
+
 ## Sends a quoted order (setting its leverage first when it changed).
 func place(q: Dictionary) -> Dictionary:
+	if bool(q.get("spot", false)):
+		return await send(order_action(q))
 	if not q.get("reduce", false) and int(q.get("lev", 0)) > 0 and int(q["lev"]) != current_leverage(str(q["coin"])):
 		var lv := await send({"type": "updateLeverage", "asset": int(q["asset"]), "isCross": bool(q["cross"]), "leverage": int(q["lev"])})
 		if not lv.get("ok", false):
