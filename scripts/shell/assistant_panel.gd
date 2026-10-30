@@ -1558,7 +1558,7 @@ func _process(_delta: float) -> void:
 	_dirty.clear()
 
 
-## A mood tag that just arrived in a reply goes to the avatar.
+## A mood or topic tag that just arrived in a reply goes to the avatar.
 func _feel_from(b: Dictionary) -> void:
 	var src := str(b["src"])
 	if not src.contains("[["):
@@ -1567,6 +1567,10 @@ func _feel_from(b: Dictionary) -> void:
 	if moods.size() > int(b.get("moods", 0)):
 		b["moods"] = moods.size()
 		_blob.feel(moods[moods.size() - 1])
+	var topics := ClaudeMood.topics(src)
+	if topics.size() > int(b.get("topics", 0)):
+		b["topics"] = topics.size()
+		_blob.topic(topics[topics.size() - 1])
 
 
 ## What the latest reply said, for a mood when it didn't tag one.

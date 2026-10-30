@@ -50,6 +50,13 @@ func _logic_tests() -> void:
 	check(ClaudeMood.strip("[[mood:happy]] Hi there") == "Hi there" and ClaudeMood.strip("[[mo") == "" and ClaudeMood.strip("Hi [[mood:ca") == "Hi ", "claude mood: tags hidden, even half arrived")
 	check(ChatMarkdown.blocks("[[mood:calm]]\nHello").size() == 1 and not str(ChatMarkdown.blocks("[[mood:calm]]\nHello")[0]["bb"]).contains("mood"), "claude mood: never drawn")
 	check(ClaudeMood.hearing("thanks so much!") == "happy" and ClaudeMood.hearing("why is it slow?") == "curious", "claude mood: reacts to what you write")
+	check(ClaudeMood.topics("[[mood:happy]] [[topic:finance]] Hi [[topic:nope]]") == PackedStringArray(["finance"]) and ClaudeMood.strip("[[mood:calm]][[topic:code]]\nHi") == "Hi" and ClaudeMood.strip("Hi [[top") == "Hi ", "claude topic: tags read and hidden")
+	check(ClaudeMood.topic("should I invest in stocks or crypto?") == "finance" and ClaudeMood.topic("explain quantum gravity") == "physics" and ClaudeMood.topic("receita de bacalhau") == "food" and ClaudeMood.topic("what's up") == "", "claude topic: guessed from your words")
+	check(ClaudeMood.hearing("haha nice one") == "laughing" and ClaudeMood.greeting("hey there!") and not ClaudeMood.greeting("they said hi"), "claude mood: laughs and hellos")
+	for about: String in ClaudeScene.TOPICS:
+		var sc := ClaudeScene.make(about, 100.0, 51.0, 417.0, 83.0, 468.0)
+		sc.step(0.5, true)
+		check(sc.stand() >= 51.0 and sc.stand() <= 417.0, "claude act %s: stands on the roof" % about)
 	check(ClaudeCli._quote("C:/Program Files/x") == "\"C:/Program Files/x\"" and ClaudeCli._quote("-p") == "-p", "claude cli: argument quoting")
 
 	# Epic manifest.
