@@ -515,6 +515,13 @@ func _logic_tests() -> void:
 		and CoinIcons.urls("BTC")[0].ends_with("/coins/BTC.svg") and CoinIcons.urls("kPEPE")[1].ends_with("/color/pepe.svg"), "coin icons: where logos come from")
 	check(CoinIcons.urls("xyz:XYZ100")[0].ends_with("/NDAQ.png") and CoinIcons.urls("xyz:EWJ")[0].ends_with("/jp.png")
 		and CoinIcons.urls("xyz:SKHX")[0].ends_with("/000660.KS.png"), "coin icons: hand-picked logos for indices, funds and foreign stocks")
+	var logo := Image.create_empty(100, 100, false, Image.FORMAT_RGBA8)
+	logo.fill(Color(0, 0, 0, 0))
+	logo.fill_rect(Rect2i(10, 10, 80, 80), Color(0.4, 0.3, 0.9))
+	logo.fill_rect(Rect2i(40, 40, 20, 20), Color.WHITE)
+	var lico := CoinIcons.decode(logo.save_png_to_buffer(), false)
+	check(lico != null and Vector3(lico.get_pixel(6, CoinIcons.SIZE / 2).r, lico.get_pixel(6, CoinIcons.SIZE / 2).g, lico.get_pixel(6, CoinIcons.SIZE / 2).b).distance_to(Vector3(0.4, 0.3, 0.9)) < 0.02 and lico.get_pixel(CoinIcons.SIZE / 2, CoinIcons.SIZE / 2).r > 0.97,
+		"coin icons: logos sit on their own most used colour")
 	var flag := Image.create_empty(160, 80, false, Image.FORMAT_RGBA8)
 	flag.fill(Color.RED)
 	var fico := CoinIcons.decode(flag.save_png_to_buffer(), false, true)
