@@ -16,6 +16,12 @@ const DOWN := DesktopBelow.DOWN
 const GAP := 22.0
 const STRIP_H := 86.0
 const TICKER_MAX_W := 300.0
+## Cards never squeeze below this; when they'd have to, the strip scrolls.
+const TICKER_MIN_W := 232.0
+## Room around the scrolling strip so card shadows aren't clipped.
+const STRIP_PAD := 26.0
+## The status row under the trade ticket.
+const SIDE_H := 30.0
 ## A position's row in the table.
 const ROW_H := 38.0
 const INTERVAL_LABELS := {"today": "Today", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D", "ytd": "YTD"}
@@ -40,6 +46,12 @@ var _dirty := {"prices": true, "market": true, "account": true, "coins": true}
 var _timer: Timer
 
 var _strip: Control
+var _strip_row: Control
+var _strip_x := 0.0
+var _strip_goal := 0.0
+var _strip_max := 0.0
+var _strip_step := 0.0
+var _strip_tween: Tween
 var _tickers := {}
 var _strip_side: HBoxContainer
 var _status_dot: Panel
@@ -269,10 +281,17 @@ func _tab(text: String) -> Button:
 # --- The coins you follow -------------------------------------------------------------------------
 
 func _build_strip() -> void:
+	# The coins ride a row inside a clipped window, so a long list slides
+	# sideways under the wheel instead of squeezing every card.
 	_strip = Control.new()
 	_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_strip.clip_contents = true
 	add_child(_strip)
-	_strip_side = Kit.hbox(10)
+	_strip_row = Control.new()
+	_strip_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_strip.add_child(_strip_row)
+	# Market switch, feed status and the coins editor sit quietly under the ticket.
+	_strip_side = Kit.hbox(8)
 	_strip_side.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_strip_side)
 	# Perps or spot: a small two-way switch; each keeps its own coins.
@@ -285,28 +304,31 @@ func _build_strip() -> void:
 	_market_perps = _tab("Perps")
 	_market_spot = _tab("Spot")
 	for b in [_market_perps, _market_spot]:
-		b.add_theme_font_size_override("font_size", 12)
+		b.add_theme_font_size_override("font_size", 11)
 		pair.add_child(b)
 	_market_perps.tooltip_text = "Perpetual futures, with leverage"
 	_market_spot.tooltip_text = "Spot: buy and sell the tokens themselves"
 	_market_perps.pressed.connect(func() -> void: _set_market(false))
 	_market_spot.pressed.connect(func() -> void: _set_market(true))
 	_sync_market_toggle()
-	_strip_side.add_child(Kit.spacer(4, 0))
+	var push := Control.new()
+	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_strip_side.add_child(push)
 	_status_dot = Panel.new()
-	_status_dot.custom_minimum_size = Vector2(7, 7)
+	_status_dot.custom_minimum_size = Vector2(6, 6)
 	_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_status_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_status_dot.add_theme_stylebox_override("panel", Kit.box(Color.WHITE, 4))
 	_strip_side.add_child(_status_dot)
-	_status = Kit.label("", 13, 600, App.TEXT_DIM)
+	_status = Kit.label("", 12, 600, App.TEXT_DIM)
 	_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_strip_side.add_child(_status)
-	_mode = _quiet("", 13)
+	_mode = _quiet("", 12)
 	_mode.mouse_filter = Control.MOUSE_FILTER_PASS
 	_strip_side.add_child(_mode)
 	_sync_mode()
-	_coins_btn = FxButton.icon_only("edit", "Choose your coins", 14, 30)
+	_coins_btn = FxButton.icon_only("edit", "Choose your coins", 13, 26)
 	_coins_btn.variant = FxButton.Style.PLAIN
 	_coins_btn._apply_style()
 	_coins_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -359,7 +381,6 @@ func _open_coins_edit() -> void:
 	_coins_edit.placeholder_text = "HYPE, PURR, UBTC" if spot else "BTC, ETH, SOL, HYPE"
 	_coins_hint.text = "Up to eight spot tokens, separated by commas." if spot else "Up to eight Hyperliquid perps, separated by commas."
 	_strip.visible = false
-	_strip_side.visible = false
 	_coins_box.visible = true
 	_coins_edit.grab_focus()
 	_coins_edit.caret_column = _coins_edit.text.length()
@@ -380,20 +401,25 @@ func _close_coins_edit() -> void:
 	_coins_edit.release_focus()
 	_coins_box.visible = false
 	_strip.visible = true
-	_strip_side.visible = true
 
 
 func _fill_tickers() -> void:
-	DesktopBelow._clear(_strip)
+	DesktopBelow._clear(_strip_row)
 	_tickers.clear()
 	for c in Hyperliquid.coins():
-		_strip.add_child(_ticker(c))
+		# Each card sits in a holder the strip fades at its edges, leaving the
+		# card's own modulate to the page's fades.
+		var holder := Control.new()
+		holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var card := _ticker(c)
+		card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		holder.add_child(card)
+		_strip_row.add_child(holder)
+	_layout()
 
 
 func _ticker(c: String) -> Control:
 	var on := c == Hyperliquid.coin()
-	# A full strip (7+ coins) packs each card a little tighter so names and prices fit.
-	var tight := Hyperliquid.coins().size() >= 7
 	var card := GlassPanel.new(false, 18.0, GlassPanel.TINT_WIDGET)
 	card.set_shadow_strength(0.16, 20, 8.0)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -408,27 +434,26 @@ func _ticker(c: String) -> Control:
 	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right"]:
-		m.add_theme_constant_override("margin_" + side, 11 if tight else 16)
+		m.add_theme_constant_override("margin_" + side, 16)
 	m.add_theme_constant_override("margin_top", 14)
 	m.add_theme_constant_override("margin_bottom", 12)
 	card.add_child(m)
 	var col := Kit.vbox(6)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	m.add_child(col)
-	var top := Kit.hbox(7 if tight else 9)
+	var top := Kit.hbox(9)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(top)
-	top.add_child(coin_badge(c, 20 if tight else 24))
-	var fs := 13 if tight else 15
-	var name := Kit.label(Hyperliquid.display(c), fs, 700, App.TEXT if on else App.TEXT_DIM)
+	top.add_child(coin_badge(c, 24))
+	var name := Kit.label(Hyperliquid.display(c), 15, 700, App.TEXT if on else App.TEXT_DIM)
 	name.clip_text = true
 	name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# Short tickers always show whole; only long names trim on a crowded strip.
-	name.custom_minimum_size.x = minf(Kit.font(700).get_string_size(name.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 2.0, 46.0 if tight else 64.0)
+	# Short tickers always show whole; only long names trim.
+	name.custom_minimum_size.x = minf(Kit.font(700).get_string_size(name.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 2.0, 64.0)
 	top.add_child(name)
-	var price := DesktopBelow._num("—", 14 if tight else 16, 600, App.TEXT)
+	var price := DesktopBelow._num("—", 16, 600, App.TEXT)
 	price.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(price)
 	var bottom := Kit.hbox(10)
@@ -443,10 +468,10 @@ func _ticker(c: String) -> Control:
 	spark.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	spark.custom_minimum_size = Vector2(40, 22)
 	bottom.add_child(spark)
-	var change := DesktopBelow._num("", 12 if tight else 13, 600, App.TEXT_MUTE)
+	var change := DesktopBelow._num("", 13, 600, App.TEXT_MUTE)
 	change.size_flags_vertical = Control.SIZE_SHRINK_END
 	change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	change.custom_minimum_size.x = 54 if tight else 64
+	change.custom_minimum_size.x = 64
 	bottom.add_child(change)
 	card.gui_input.connect(func(ev: InputEvent) -> void:
 		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -1373,20 +1398,23 @@ func _layout() -> void:
 	var top := 56.0
 	var inner := w - left * 2.0
 
-	# The coins, left to right, with the feed's status at the end.
-	var side_w := _strip_side.get_combined_minimum_size().x
-	_strip_side.size = Vector2(side_w, STRIP_H)
-	_strip_side.position = Vector2(w - left - side_w, top)
-	var n := _strip.get_child_count()
-	var room := inner - side_w - GAP
-	var sp := 10.0 if n >= 7 else 14.0
-	var cw := minf(TICKER_MAX_W, floorf((room - sp * (n - 1)) / maxf(n, 1)))
-	_strip.position = Vector2(left, top)
-	_strip.size = Vector2(room, STRIP_H)
+	# The coins, left to right across the page. Cards share the width down
+	# to TICKER_MIN_W; past that the row runs on and the wheel slides it.
+	var n := _strip_row.get_child_count()
+	var sp := 14.0
+	var cw := clampf(floorf((inner - sp * (n - 1)) / maxf(n, 1)), TICKER_MIN_W, TICKER_MAX_W)
+	var row_w := n * cw + maxf(n - 1, 0) * sp
+	_strip.position = Vector2(left - STRIP_PAD, top - STRIP_PAD)
+	_strip.size = Vector2(inner + STRIP_PAD * 2.0, STRIP_H + STRIP_PAD * 2.0)
+	_strip_row.size = Vector2(row_w, STRIP_H)
 	for i in n:
-		var c := _strip.get_child(i) as Control
+		var c := _strip_row.get_child(i) as Control
 		c.position = Vector2(i * (cw + sp), 0)
 		c.size = Vector2(cw, STRIP_H)
+	_strip_step = cw + sp
+	_strip_max = maxf(0.0, row_w - inner)
+	_strip_goal = clampf(_strip_goal, 0.0, _strip_max)
+	_set_strip_x(clampf(_strip_x, 0.0, _strip_max))
 	_coins_box.position = Vector2(left, top + (STRIP_H - 42.0) * 0.5)
 	_coins_box.size = Vector2(inner, 42.0)
 
@@ -1407,9 +1435,42 @@ func _layout() -> void:
 	_pos_panel.position = Vector2(left, y + main_h + GAP)
 	_pos_panel.size = Vector2(chart_w + GAP + book_w, pos_h)
 	_ticket_panel.position = Vector2(left + chart_w + book_w + GAP * 2.0, y)
-	_ticket_panel.size = Vector2(col_w, full_h)
+	_ticket_panel.size = Vector2(col_w, full_h - SIDE_H - 10.0)
+	_strip_side.position = Vector2(_ticket_panel.position.x + 6.0, y + full_h - SIDE_H)
+	_strip_side.size = Vector2(col_w - 12.0, SIDE_H)
 	_fit_rows()
 	wanted_height = y + full_h + 34.0
+
+
+func _set_strip_x(x: float) -> void:
+	_strip_x = x
+	_strip_row.position = Vector2(STRIP_PAD - roundf(x), STRIP_PAD)
+	# Cards sliding past either end of the page's width fade out as they go.
+	var inner := _strip.size.x - STRIP_PAD * 2.0
+	for h: Control in _strip_row.get_children():
+		var l := h.position.x - x
+		var over := maxf(-l, l + h.size.x - inner)
+		h.modulate.a = clampf(1.0 - over / (h.size.x * 0.5), 0.0, 1.0) if over > 0.5 else 1.0
+
+
+## A wheel notch or touchpad swipe over the coins slides them sideways. True
+## when the strip took it (it only does when there's more than fits).
+func strip_scroll(delta: float) -> bool:
+	if _strip_max <= 0.0 or not _strip.is_visible_in_tree():
+		return false
+	if not _strip.get_global_rect().has_point(get_global_mouse_position()):
+		return false
+	_strip_goal = clampf(_strip_goal + delta, 0.0, _strip_max)
+	if _strip_tween != null:
+		_strip_tween.kill()
+	_strip_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_strip_tween.tween_method(_set_strip_x, _strip_x, _strip_goal, 0.32)
+	return true
+
+
+## A wheel notch moves the coins by one card.
+func strip_wheel(dir: float) -> bool:
+	return strip_scroll(dir * _strip_step)
 
 
 ## View only, ready, or armed: always in sight beside the feed's status.
@@ -1430,6 +1491,6 @@ func _sync_mode() -> void:
 ## The panels and cards that make up this screen, for fades.
 func parts() -> Array[Control]:
 	var out: Array[Control] = [_chart_panel, _book_panel, _ticket_panel, _pos_panel]
-	for c in _strip.get_children():
-		out.append(c as Control)
+	for c in _strip_row.get_children():
+		out.append(c.get_child(0) as Control)
 	return out

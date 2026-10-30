@@ -890,16 +890,27 @@ func _wheel_here() -> bool:
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		var mb := event as InputEventMouseButton
-		if mb.button_index != MOUSE_BUTTON_WHEEL_UP and mb.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+		var sideways := mb.button_index == MOUSE_BUTTON_WHEEL_LEFT or mb.button_index == MOUSE_BUTTON_WHEEL_RIGHT
+		if mb.button_index != MOUSE_BUTTON_WHEEL_UP and mb.button_index != MOUSE_BUTTON_WHEEL_DOWN and not sideways:
 			return
 		if not _wheel_here():
+			return
+		# Over the trading desk's coin strip, the wheel slides the coins instead.
+		if trade.visible and trade.strip_wheel(-1.0 if mb.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_LEFT] else 1.0):
+			get_viewport().set_input_as_handled()
+			return
+		if sideways:
 			return
 		_wheel(1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1.0, mb.factor if mb.factor > 0.0 else 1.0)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventPanGesture:
 		if not _wheel_here():
 			return
-		var d := (event as InputEventPanGesture).delta.y * 18.0
+		var pan := (event as InputEventPanGesture).delta
+		if trade.visible and trade.strip_scroll((pan.x if absf(pan.x) > absf(pan.y) else pan.y) * 18.0):
+			get_viewport().set_input_as_handled()
+			return
+		var d := pan.y * 18.0
 		if absf(d) < 0.01:
 			return
 		_pan_dir = signf(d)
