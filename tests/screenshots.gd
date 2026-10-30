@@ -608,6 +608,13 @@ func _trade(main: Node) -> void:
 	hl.set_mock(_mock_hl("ETH"))
 	await _wait(0.6)
 	await shot("01t2-desktop-trade-eth")
+	# A long coin list: cards keep their width and the strip slides.
+	Settings.set_value("hl_coins", ["BTC", "ETH", "xyz:XYZ100", "SOL", "HYPE", "xyz:DRAM", "xyz:SPCX", "xyz:TSLA"])
+	await _wait(0.3)
+	trade._set_strip_x(trade._strip_max * 0.5)
+	await _wait(0.2)
+	await shot("01t12-desktop-trade-carousel")
+	trade._set_strip_x(0.0)
 	Settings.set_value("hl_coin", "BTC")
 	Settings.set_value("hl_coins", ["BTC", "ETH", "SOL", "HYPE"])
 	hl.set_mock(_mock_hl())
