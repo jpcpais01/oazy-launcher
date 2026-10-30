@@ -511,7 +511,14 @@ func _logic_tests() -> void:
 	var ico := CoinIcons.decode('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="#f7931a"/></svg>'.to_utf8_buffer(), true)
 	check(ico != null and ico.get_width() == CoinIcons.SIZE and ico.get_pixel(CoinIcons.SIZE / 2, CoinIcons.SIZE / 2).a > 0.9 and ico.get_pixel(1, 1).a < 0.05
 		and CoinIcons.decode("<!doctype html><html></html>".to_utf8_buffer(), true) == null, "coin icons: logos decode round, web pages don't")
-	check(CoinIcons.urls("xyz:TSLA")[0].ends_with("/coins/xyz:TSLA.svg") and CoinIcons.urls("kPEPE")[1].ends_with("/color/pepe.svg"), "coin icons: where logos come from")
+	check(CoinIcons.urls("xyz:TSLA")[0].ends_with("/image-stock/TSLA.png") and CoinIcons.urls("xyz:TSLA")[-1].ends_with("/coins/xyz:TSLA.svg")
+		and CoinIcons.urls("BTC")[0].ends_with("/coins/BTC.svg") and CoinIcons.urls("kPEPE")[1].ends_with("/color/pepe.svg"), "coin icons: where logos come from")
+	check(CoinIcons.urls("xyz:XYZ100")[0].ends_with("/NDAQ.png") and CoinIcons.urls("xyz:EWJ")[0].ends_with("/jp.png")
+		and CoinIcons.urls("xyz:SKHX")[0].ends_with("/000660.KS.png"), "coin icons: hand-picked logos for indices, funds and foreign stocks")
+	var flag := Image.create_empty(160, 80, false, Image.FORMAT_RGBA8)
+	flag.fill(Color.RED)
+	var fico := CoinIcons.decode(flag.save_png_to_buffer(), false, true)
+	check(fico != null and fico.get_pixel(CoinIcons.SIZE / 2, 4).is_equal_approx(Color.RED) and fico.get_pixel(1, 1).a < 0.05, "coin icons: flags fill the whole disc")
 	var tord := Hyperliquid.parse_orders([{"coin": "BTC", "side": "A", "limitPx": "99000", "sz": "0.1", "oid": 9, "timestamp": 1, "orderType": "Stop Market", "isTrigger": true, "triggerPx": "100000", "reduceOnly": true, "isPositionTpsl": true}])
 	check(tord.size() == 1 and str(tord[0]["tpsl"]) == "sl" and is_equal_approx(float(tord[0]["trigger"]), 100000.0) and bool(tord[0]["position"]), "hyperliquid: trigger orders keep their trigger price")
 	# Your money: spot balances valued in dollars; unified accounts count them as the account.
