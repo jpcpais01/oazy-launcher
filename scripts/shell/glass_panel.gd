@@ -162,5 +162,5 @@ func sync_wall() -> void:
 
 static func refresh_all(tree: SceneTree) -> void:
 	for g in tree.get_nodes_in_group("glass"):
-		if g is GlassPanel:
+		if g.has_method("apply_effects"):
 			g.apply_effects()
