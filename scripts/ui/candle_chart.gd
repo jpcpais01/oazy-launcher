@@ -20,7 +20,8 @@ var rows: Array = []
 ## Seconds per candle (for the time labels).
 var step_s := 3600
 var empty_text := "Loading chart…"
-## [{px, text, color}] drawn as quiet lines with a label, when in view.
+## [{px, text, color, fit?}] drawn as quiet lines with a label, when in view.
+## A mark with fit = true (take profit, stop loss) is always kept in view.
 var marks: Array = []
 ## When above 0, every row is shown from the left edge, with room kept for
 ## this many candles (the Today view fills toward the close).
@@ -91,6 +92,10 @@ func _draw() -> void:
 	if ref_px > 0.0:
 		lo = minf(lo, ref_px)
 		hi = maxf(hi, ref_px)
+	for m in marks:
+		if m.get("fit", false) and float(m["px"]) > 0.0:
+			lo = minf(lo, float(m["px"]))
+			hi = maxf(hi, float(m["px"]))
 	var pad := maxf((hi - lo) * 0.08, absf(hi) * 0.0005)
 	lo -= pad
 	hi += pad
