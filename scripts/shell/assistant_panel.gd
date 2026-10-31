@@ -256,6 +256,15 @@ func _roof_rect() -> Rect2:
 ## Claude's roof: a strip over the top edge of the glass, outside it, that
 ## the jelly walks along, with the bubble it says its ideas in.
 func _build_roof() -> void:
+	# Behind Claude, so it reads over any desktop. Added right after the glass
+	# so it reuses the glass's copy of the screen.
+	var veil := RoofVeil.new()
+	veil.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	veil.offset_top = -ROOF_SHOWN
+	veil.offset_bottom = 0.0
+	add_child(veil)
+	move_child(veil, _glass.get_index() + 1)
+
 	_blob = ClaudeBlob.new()
 	_blob.area = self
 	_blob.inset = 20.0
