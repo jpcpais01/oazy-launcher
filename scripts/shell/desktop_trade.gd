@@ -616,9 +616,9 @@ func _sync_chart_marks() -> void:
 		if str(o["coin"]) != c:
 			continue
 		if str(o["tpsl"]) == "tp":
-			marks.append({"px": float(o["trigger"]), "text": "Take profit", "color": UP})
+			marks.append({"px": float(o["trigger"]), "text": "Take profit", "color": UP, "fit": true})
 		elif str(o["tpsl"]) == "sl":
-			marks.append({"px": float(o["trigger"]), "text": "Stop loss", "color": DOWN})
+			marks.append({"px": float(o["trigger"]), "text": "Stop loss", "color": DOWN, "fit": true})
 		else:
 			marks.append({"px": float(o["px"]), "text": "%s %s" % ["Buy" if o["buy"] else "Sell", Hyperliquid.fmt_sz(float(o["sz"]), hl.sz_decimals(c))], "color": UP if o["buy"] else DOWN})
 	if str(marks) != str(_chart.marks):
