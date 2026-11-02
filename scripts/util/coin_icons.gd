@@ -200,11 +200,12 @@ static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 	return out
 
 
-## The disc behind a square logo. A logo with its own solid field (opaque
-## edges) gets that field's colour, so the field simply carries on round. A
-## logo drawn on transparency never takes its own ink colour (that hid it):
-## it sits on a quiet neutral that contrasts with the ink, near-white for
-## dark or coloured marks and deep slate for light ones.
+## The disc behind a square logo. A logo with its own field (opaque edges,
+## or one colour filling much of the image, like a tile with a mark on it)
+## gets that field's colour, so the field simply carries on round. A bare
+## mark on transparency never takes its own ink colour (that hid it): it sits
+## on a quiet neutral that contrasts with the ink, near-white for dark or
+## coloured marks and deep slate for light ones.
 static func backing(img: Image) -> Color:
 	var w := img.get_width()
 	var h := img.get_height()
@@ -222,16 +223,24 @@ static func backing(img: Image) -> Color:
 			solid += 1
 	if not edge.is_empty() and solid >= edge.size() * 0.6:
 		return dominant(img, edge)
-	# Ink brightness: mean luminance of the logo's solid pixels.
+	# One colour covering much of the image is a field (a tile, a round badge).
+	var field := dominant(img)
 	var lum := 0.0
 	var n := 0
+	var same := 0
+	var all := 0
 	step = maxi(1, maxi(w, h) / 48)
 	for y in range(0, h, step):
 		for x in range(0, w, step):
 			var c := img.get_pixel(x, y)
+			all += 1
 			if c.a >= 0.6:
 				lum += c.get_luminance()
 				n += 1
+				if Vector3(c.r - field.r, c.g - field.g, c.b - field.b).length() < 0.08:
+					same += 1
+	if all > 0 and same >= all * 0.45:
+		return field
 	if n > 0 and lum / n > 0.62:
 		return Color(0.13, 0.15, 0.18)
 	return Color(0.95, 0.96, 0.97)
