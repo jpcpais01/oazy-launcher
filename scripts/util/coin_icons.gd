@@ -6,7 +6,7 @@ extends RefCounted
 ## ticker, then Hyperliquid's file. Kept on disk as round PNGs; a coin with no
 ## logo anywhere is retried after a week.
 
-const DIR := "user://coin_icons3"
+const DIR := "user://coin_icons4"
 const SIZE := 96
 const MISS_TTL := 7 * 86400
 
@@ -158,8 +158,8 @@ static func _fetch(c: String) -> void:
 
 
 ## An SVG or PNG logo as a SIZE × SIZE round image, or null when it isn't one
-## (a web page served in its place, say). Square logos sit on a disc of their
-## own most used colour; a `fill` image (a flag) is cropped to cover it.
+## (a web page served in its place, say). Square logos sit on a disc (see
+## `backing`); a `fill` image (a flag) is cropped to cover it.
 static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 	if bytes.is_empty():
 		return null
@@ -185,7 +185,7 @@ static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 	img.resize(maxi(1, roundi(w * k)), maxi(1, roundi(h * k)), Image.INTERPOLATE_LANCZOS)
 	var out := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
 	if not svg and not fill:
-		out.fill(dominant(img))
+		out.fill(backing(img))
 	var off := (Vector2i(SIZE, SIZE) - img.get_size()) / 2
 	out.blend_rect(img, Rect2i(-off.min(Vector2i.ZERO), img.get_size()), off.max(Vector2i.ZERO))
 	# Round it, with a soft one-pixel edge.
@@ -200,21 +200,72 @@ static func decode(bytes: PackedByteArray, svg: bool, fill := false) -> Image:
 	return out
 
 
-## The colour most of an image's solid pixels share (not their average), so a
-## logo's backdrop matches its own field. Close shades count as one; white
-## when the image has no solid pixels.
-static func dominant(img: Image) -> Color:
+## The disc behind a square logo. A logo with its own field (opaque edges,
+## or one colour filling much of the image, like a tile with a mark on it)
+## gets that field's colour, so the field simply carries on round. A bare
+## mark on transparency never takes its own ink colour (that hid it): it sits
+## on a quiet neutral that contrasts with the ink, near-white for dark or
+## coloured marks and deep slate for light ones.
+static func backing(img: Image) -> Color:
+	var w := img.get_width()
+	var h := img.get_height()
+	var edge: Array[Vector2i] = []
+	var step := maxi(1, maxi(w, h) / 32)
+	for x in range(0, w, step):
+		edge.append(Vector2i(x, 0))
+		edge.append(Vector2i(x, h - 1))
+	for y in range(0, h, step):
+		edge.append(Vector2i(0, y))
+		edge.append(Vector2i(w - 1, y))
+	var solid := 0
+	for p in edge:
+		if img.get_pixelv(p).a >= 0.6:
+			solid += 1
+	if not edge.is_empty() and solid >= edge.size() * 0.6:
+		return dominant(img, edge)
+	# One colour covering much of the image is a field (a tile, a round badge).
+	var field := dominant(img)
+	var lum := 0.0
+	var n := 0
+	var same := 0
+	var all := 0
+	step = maxi(1, maxi(w, h) / 48)
+	for y in range(0, h, step):
+		for x in range(0, w, step):
+			var c := img.get_pixel(x, y)
+			all += 1
+			if c.a >= 0.6:
+				lum += c.get_luminance()
+				n += 1
+				if Vector3(c.r - field.r, c.g - field.g, c.b - field.b).length() < 0.08:
+					same += 1
+	if all > 0 and same >= all * 0.45:
+		return field
+	if n > 0 and lum / n > 0.62:
+		return Color(0.13, 0.15, 0.18)
+	return Color(0.95, 0.96, 0.97)
+
+
+## The colour most of an image's solid pixels share (not their average); only
+## the `only` pixels when given. Close shades count as one; white when there
+## are no solid pixels.
+static func dominant(img: Image, only: Array[Vector2i] = []) -> Color:
+	var px: Array[Vector2i] = []
+	px.assign(only)
+	if px.is_empty():
+		var step := maxi(1, maxi(img.get_width(), img.get_height()) / 64)
+		for y in range(0, img.get_height(), step):
+			for x in range(0, img.get_width(), step):
+				px.append(Vector2i(x, y))
 	var counts := {}
 	var sums := {}
-	var step := maxi(1, maxi(img.get_width(), img.get_height()) / 64)
-	for y in range(0, img.get_height(), step):
-		for x in range(0, img.get_width(), step):
-			var c := img.get_pixel(x, y)
-			if c.a < 0.6:
-				continue
-			var k := (int(c.r * 15.99) << 8) | (int(c.g * 15.99) << 4) | int(c.b * 15.99)
-			counts[k] = int(counts.get(k, 0)) + 1
-			sums[k] = (sums.get(k, Color(0, 0, 0, 0)) as Color) + Color(c.r, c.g, c.b, 1.0)
+	for p in px:
+		var c := img.get_pixelv(p)
+		if c.a < 0.6:
+			continue
+		var k := (int(c.r * 15.99) << 8) | (int(c.g * 15.99) << 4) | int(c.b * 15.99)
+		counts[k] = int(counts.get(k, 0)) + 1
+		sums[k] = (sums.get(k, Color(0, 0, 0, 0)) as Color) + Color(c.r, c.g, c.b, 1.0)
 	var best := -1
 	for k: int in counts:
 		if best < 0 or int(counts[k]) > int(counts[best]):
