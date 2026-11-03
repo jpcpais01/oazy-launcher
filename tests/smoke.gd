@@ -490,6 +490,8 @@ func _logic_tests() -> void:
 		and Hyperliquid.session_open(ut.call(2026, 11, 2, 15)) == ut.call(2026, 11, 2, 14, 30), "hyperliquid: today starts at the 9:30 New York open")
 	check(Hyperliquid.session_close_before(ut.call(2026, 10, 29, 13, 30)) == ut.call(2026, 10, 28, 20)
 		and Hyperliquid.session_close_before(ut.call(2026, 11, 2, 14, 30)) == ut.call(2026, 10, 30, 20), "hyperliquid: last trading day's 4pm close")
+	check(Hyperliquid.day_ref_time("xyz:SMH", ut.call(2026, 11, 3, 15, 56)) == ut.call(2026, 11, 2, 21)
+		and Hyperliquid.day_ref_time("BTC", ut.call(2026, 11, 3, 15, 56)) == ut.call(2026, 11, 3, 0), "hyperliquid: day change counts from the last close")
 	check(Hyperliquid.year_start(ut.call(2026, 10, 29, 14)) == ut.call(2026, 1, 1, 0) and Hyperliquid.year_start(ut.call(2027, 1, 1, 0)) == ut.call(2027, 1, 1, 0), "hyperliquid: YTD starts on January 1st")
 	var smeta := {}
 	var sctx := {}
