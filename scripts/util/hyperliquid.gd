@@ -54,6 +54,9 @@ var dexes: Array = [""]
 var orders: Array = []
 ## coin -> the last 24 hourly closes, for the ticker.
 var sparks := {}
+## coin -> {px, at}: the close the day's change counts from (day_ref_time()),
+## at = that close's unix time so a new trading day fetches a new one.
+var day_refs := {}
 ## The focused coin's candles, oldest first: [t (s), open, high, low, close, volume].
 var candles: Array = []
 ## In the Today view: the last trading day's 4pm New York close (no
@@ -113,6 +116,8 @@ func _ready() -> void:
 						_fetch_sparks()
 				candles = []
 				prev_close = 0.0
+				if focused:
+					_fetch_day_ref(coin())
 				book = {}
 				trades = []
 				_candle_key = ""
@@ -334,9 +339,22 @@ func price(c: String) -> float:
 	return float(x.get("mid", 0.0)) if float(x.get("mid", 0.0)) > 0.0 else float(x.get("mark", 0.0))
 
 
-## Yesterday's price at this time (for the 24h change), 0 when unknown.
+## What the day's change counts from: the last trading day's close (the 4pm
+## New York bell for stocks, the same line the Today chart draws; midnight UTC
+## for crypto). Until that's loaded, yesterday's price at this time. 0 when unknown.
 func prev(c: String) -> float:
+	var r: Dictionary = day_refs.get(c, {})
+	if float(r.get("px", 0.0)) > 0.0 and int(r.get("at", 0)) == day_ref_time(c, _now()):
+		return float(r["px"])
 	return float((ctxs.get(c, {}) as Dictionary).get("prev", 0.0))
+
+
+## When the close the day's change counts from was: the last trading day's
+## 4pm New York bell for stocks and ETFs, else today's midnight UTC (the daily candle).
+static func day_ref_time(c: String, now: int) -> int:
+	if has_session(c):
+		return session_close_before(session_open(now))
+	return now - posmod(now, 86400)
 
 
 func change_pct(c: String) -> float:
@@ -642,6 +660,17 @@ func _fetch_ctxs() -> void:
 				_fetch_candles()
 		prices_changed.emit()
 	_ctx_busy = false
+	# Keep the day lines fresh while you look, and roll the change over at a new day.
+	if focused and (_now() - _spark_at > SPARK_EVERY or _day_refs_stale()):
+		_fetch_sparks()
+
+
+func _day_refs_stale() -> bool:
+	var now := _now()
+	for c in coins():
+		if int((day_refs.get(c, {}) as Dictionary).get("at", 0)) != day_ref_time(c, now):
+			return true
+	return false
 
 
 func _fetch_account() -> void:
@@ -709,6 +738,8 @@ func _fetch_candles() -> void:
 	if key != coin() + "|" + view():
 		return
 	prev_close = ref
+	if ref > 0.0:
+		day_refs[c] = {"px": ref, "at": day_ref_time(c, _now())}
 	var rows := parse_candles(j)
 	if not rows.is_empty():
 		candles = rows
@@ -731,7 +762,26 @@ func _fetch_sparks() -> void:
 				closes.append(r[4])
 			sparks[c] = closes
 			prices_changed.emit()
+	var want := coins()
+	if not want.has(coin()):
+		want.append(coin())
+	for c in want:
+		await _fetch_day_ref(c)
 	_spark_busy = false
+
+
+## The close at day_ref_time(): the last 5m candle before it. Skipped while the
+## one we have is still the right day's.
+func _fetch_day_ref(c: String) -> void:
+	if _mock or c == "":
+		return
+	var at := day_ref_time(c, _now())
+	if int((day_refs.get(c, {}) as Dictionary).get("at", 0)) == at:
+		return
+	var rows := parse_candles(await _post({"type": "candleSnapshot", "req": {"coin": c, "interval": "5m", "startTime": (at - 300) * 1000, "endTime": at * 1000 - 1}}))
+	if not rows.is_empty():
+		day_refs[c] = {"px": float(rows[rows.size() - 1][4]), "at": at}
+		prices_changed.emit()
 
 
 # --- Parsing (static, so tests can feed it answers) --------------------------------------------------
